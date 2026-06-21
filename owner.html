@@ -74,7 +74,7 @@
       <div class="card card-pad mt-4">
         <div class="section-title">Security &amp; password</div>
         <ul class="text-soft owner-tips">
-          <li>Change the default password: open dev-tools console and run <code>await Security.hashFor('your-new-password')</code>, then paste the printed hash into <code>OWNER_HASH</code> in <code>assets/js/security.js</code> and redeploy.</li>
+          <li>Change your credentials: open dev-tools console and run <code>await Security.hashFor('your-email@example.com', 'your-new-password')</code>, then paste the two printed hashes into <code>OWNER_EMAIL_HASH</code> and <code>OWNER_HASH</code> in <code>assets/js/security.js</code> and redeploy.</li>
           <li>Your session expires automatically after <b id="ttlHours"></b> hours of inactivity; use <b>Log out</b> on shared devices.</li>
           <li>This client-side gate is best-effort. For server-enforced security, follow the Firebase upgrade in the README.</li>
         </ul>

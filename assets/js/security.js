@@ -47,26 +47,35 @@ const Security = {
      1. CONFIGURATION  —  ⚙️  CHANGE THESE FOR YOUR DEPLOYMENT
      ========================================================== */
 
-  /* A fixed string mixed into the password before hashing.
+  /* A fixed string mixed into the credentials before hashing.
      It is NOT a secret (it ships in the source); it only makes
-     the stored hash unique to this app so a generic rainbow
-     table is useless. You may change it, but if you do you MUST
-     regenerate OWNER_HASH below with the same salt. */
-  SALT: 'OppTrack::pomls::owner::v1::',
+     the stored hashes unique to this app so a generic rainbow
+     table is useless. If you change it you MUST regenerate BOTH
+     OWNER_EMAIL_HASH and OWNER_HASH below with the same salt. */
+  SALT: 'OppTrack::pomls::owner::v2::',
 
-  /* SHA-256 of (SALT + your password). The plain password is
-     NEVER stored anywhere — only this hash.
+  /* Owner login now requires EMAIL + PASSWORD (two factors). Neither
+     the email nor the password is stored in plain text anywhere —
+     only the SHA-256 hashes below. The real credential is the
+     combined hash of (SALT + email + "|" + password), so an attacker
+     must know BOTH the exact email and the password; learning one is
+     useless on its own.
 
-     Default password shipped with the project:  Owner@2026
-     👉 CHANGE IT before going live. Two ways:
+     OWNER_EMAIL_HASH = SHA-256(SALT + lowercased-email)
+     OWNER_HASH       = SHA-256(SALT + lowercased-email + "|" + password)
 
-     OPTION A (recommended): open the site, press F12 → Console,
-       run:   await Security.hashFor('your-new-password')
-       copy the printed hash, and paste it as OWNER_HASH here.
+     👉 To change these, open the site, press F12 → Console, run:
+          await Security.hashFor('owner@example.com', 'your-new-pass')
+        then paste the two printed values here. */
+  OWNER_EMAIL_HASH: 'cf1514695c326a35f6229aa7ac79086d2dc6d5343384bbb76538c3e3320243f3',
+  OWNER_HASH: '4bf98225f9db89ffe9c861cd909d3e6db4d2adfbfdb447619f0b72512dde518c',
 
-     OPTION B: keep the salt, hash "(SALT + password)" with any
-       SHA-256 tool and paste the result here. */
-  OWNER_HASH: '0a044f181889053145b8be654256096b0f12740562f1e750a0fbe836b6ab90b0',
+  /* Brute-force throttle: after this many wrong attempts the login
+     locks for LOCKOUT_MINUTES (tracked per-browser in localStorage).
+     Client-side only — it deters casual guessing, it is not a wall. */
+  MAX_ATTEMPTS: 5,
+  LOCKOUT_MINUTES: 15,
+  ATTEMPTS_KEY: 'pomls_owner_attempts_v1',
 
   /* Where the login page lives (used by redirects). */
   LOGIN_PAGE: 'login.html',
@@ -102,13 +111,17 @@ const Security = {
     return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
   },
 
-  /* Console helper: print the OWNER_HASH for a chosen password.
-     Usage in dev-tools:  await Security.hashFor('my new pass') */
-  async hashFor(password) {
-    const h = await this.sha256(this.SALT + password);
-    console.log('%cOWNER_HASH =', 'font-weight:bold', h);
-    console.log('Paste that value into Security.OWNER_HASH in assets/js/security.js');
-    return h;
+  /* Console helper: print BOTH hashes for a chosen email + password.
+     Usage in dev-tools:
+        await Security.hashFor('owner@example.com', 'my new pass') */
+  async hashFor(email, password) {
+    const e = (email || '').trim().toLowerCase();
+    const emailHash = await this.sha256(this.SALT + e);
+    const ownerHash = await this.sha256(this.SALT + e + '|' + (password || ''));
+    console.log('%cOWNER_EMAIL_HASH =', 'font-weight:bold', emailHash);
+    console.log('%cOWNER_HASH       =', 'font-weight:bold', ownerHash);
+    console.log('Paste both into assets/js/security.js (OWNER_EMAIL_HASH & OWNER_HASH).');
+    return { emailHash, ownerHash };
   },
 
   /* Signature that binds a session to this build + its expiry.
@@ -147,10 +160,46 @@ const Security = {
     return this.isOwner();
   },
 
-  /* Attempt a login. Returns true on success and starts a session. */
-  async login(password) {
-    const h = await this.sha256(this.SALT + (password || ''));
-    if (h !== this.OWNER_HASH) return false;
+  /* ---- Brute-force lockout helpers (per-browser) ---- */
+
+  /* Returns 0 if not locked, else minutes remaining on the lockout. */
+  lockedFor() {
+    try {
+      const a = JSON.parse(localStorage.getItem(this.ATTEMPTS_KEY) || '{}');
+      if (a.lockUntil && Date.now() < a.lockUntil) {
+        return Math.max(1, Math.ceil((a.lockUntil - Date.now()) / 60000));
+      }
+    } catch (_) {}
+    return 0;
+  },
+
+  _recordFailure() {
+    let a;
+    try { a = JSON.parse(localStorage.getItem(this.ATTEMPTS_KEY) || '{}'); }
+    catch (_) { a = {}; }
+    a.count = (a.count || 0) + 1;
+    if (a.count >= this.MAX_ATTEMPTS) {
+      a.lockUntil = Date.now() + this.LOCKOUT_MINUTES * 60000;
+      a.count = 0; // reset counter; the lock now governs
+    }
+    localStorage.setItem(this.ATTEMPTS_KEY, JSON.stringify(a));
+  },
+
+  _clearFailures() {
+    localStorage.removeItem(this.ATTEMPTS_KEY);
+  },
+
+  /* Attempt a login with EMAIL + PASSWORD. Returns:
+       true            → success, session started
+       false           → wrong credentials
+       'locked'        → too many failures, login temporarily locked
+     Both factors are hashed together; neither is compared in clear. */
+  async login(email, password) {
+    if (this.lockedFor() > 0) return 'locked';
+    const e = (email || '').trim().toLowerCase();
+    const h = await this.sha256(this.SALT + e + '|' + (password || ''));
+    if (h !== this.OWNER_HASH) { this._recordFailure(); return false; }
+    this._clearFailures();
     const until = Date.now() + this.SESSION_HOURS * 3600 * 1000;
     const sig = await this._sign(until);
     localStorage.setItem(this.SESSION_KEY, JSON.stringify({ until, sig }));
