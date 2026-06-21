@@ -111,24 +111,25 @@ lives in one place: **`assets/js/security.js`**.
 
 | Layer | What it does | Where |
 |-------|--------------|-------|
-| **Authentication** | Password login. The password is never stored — only a salted **SHA-256 hash** (`OWNER_HASH`). Verified with the browser's Web Crypto API. | `security.js` → `login()` |
+| **Authentication** | **Email + password** login (two factors). Neither is stored — only salted **SHA-256 hashes** (`OWNER_EMAIL_HASH` and a combined `OWNER_HASH`). An attacker must know both the exact email *and* the password. Verified with the browser's Web Crypto API. A **5-attempt lockout** (15 min) throttles guessing. | `security.js` → `login()` |
 | **Session** | On success a **signed, time-limited session** is written to Local Storage (`pomls_owner_session_v1`). It auto-expires after `SESSION_HOURS` (default 8) and is re-validated on every page load; a hand-edited session fails its signature check and is discarded. | `security.js` → `init()` / `isOwner()` |
 | **UI gating** | `<body>` gets `owner-mode` or `viewer-mode`. Every management control is marked `.owner-only` and is hidden from visitors by CSS. `viewer-mode` is baked into each page's `<body>` so admin controls **never flash** before JS runs. | `style.css` §22, `applyMode()` |
 | **Action guards** | Every data-mutation (`DB.save/upsert/remove/importJSON/resetAll`, add/edit modal, delete, drag-to-move, reminders, category add/remove, profile edit) calls `Security.guard()` first. Because the check is **inside the data layer**, calls fired from the console / dev-tools are rejected too. | `app.js` (search “Security.guard”) |
 | **Page protection** | Owner-only pages (`owner.html`, `categories.html`, listed in `Security.PROTECTED_PAGES`) **redirect** non-owners to the login page. | `requireOwner()` |
 | **Session control** | Owner badge + **Log out** appear in the top bar / nav; the Owner Dashboard shows time remaining. | `renderAuthControl()` |
 
-### 🔑 Setting your password (do this before going live)
+### 🔑 Setting your owner email + password
 
-The shipped default password is **`Owner@2026`**. Change it:
+Login requires an **email and a password**, and only their hashes ship in the
+source — never the plain values. To set your own credentials:
 
 1. Open the site, press **F12 → Console**, and run:
    ```js
-   await Security.hashFor('your-new-strong-password')
+   await Security.hashFor('your-email@example.com', 'your-new-strong-password')
    ```
-2. Copy the printed hash.
-3. Paste it as the value of **`OWNER_HASH`** in `assets/js/security.js`.
-4. Save / redeploy. The old password no longer works.
+2. Copy the two printed hashes.
+3. Paste them as **`OWNER_EMAIL_HASH`** and **`OWNER_HASH`** in `assets/js/security.js`.
+4. Save / redeploy. The old credentials no longer work.
 
 > You can also change `SALT`, `SESSION_HOURS`, `LOGIN_PAGE`, and `PROTECTED_PAGES`
 > in the **CONFIGURATION** block at the top of `security.js` (all are commented).

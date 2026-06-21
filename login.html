@@ -36,6 +36,14 @@
       <!-- Login form -->
       <form id="loginForm" autocomplete="off" novalidate>
         <div class="field auth-field">
+          <label for="email">Owner email</label>
+          <div class="auth-input">
+            <i class="bi bi-envelope"></i>
+            <input type="email" id="email" placeholder="Enter email" autocomplete="username" required>
+          </div>
+        </div>
+
+        <div class="field auth-field">
           <label for="pw">Owner password</label>
           <div class="auth-input">
             <i class="bi bi-key"></i>
@@ -59,8 +67,7 @@
     </div>
 
     <p class="auth-foot text-faint">
-      <i class="bi bi-info-circle me-1"></i>Default password is <code>Owner@2026</code> — change it in
-      <code>assets/js/security.js</code>. See the README.
+      <i class="bi bi-shield-lock me-1"></i>Authorized owner access only.
     </p>
   </main>
 
@@ -74,10 +81,17 @@
       if (Security.isOwner()) { redirectNext(); return; }
 
       const form  = document.getElementById('loginForm');
+      const email = document.getElementById('email');
       const pw    = document.getElementById('pw');
       const btn   = document.getElementById('loginBtn');
       const errEl = document.getElementById('authError');
       const eye   = document.getElementById('toggleEye');
+
+      // If a previous lockout is still active, warn up front.
+      (function showLockIfAny() {
+        const mins = Security.lockedFor();
+        if (mins > 0) showError(`Too many attempts. Try again in ${mins} min.`);
+      })();
 
       // Show / hide password
       eye.onclick = () => {
@@ -97,15 +111,20 @@
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking…';
 
-        const ok = await Security.login(pw.value);
+        const ok = await Security.login(email.value, pw.value);
 
-        if (ok) {
+        if (ok === true) {
           btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Welcome back';
           redirectNext();
         } else {
           btn.disabled = false;
           btn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i>Sign in';
-          showError('Incorrect password. Please try again.');
+          if (ok === 'locked') {
+            const mins = Security.lockedFor();
+            showError(`Too many attempts. Try again in ${mins} min.`);
+          } else {
+            showError('Incorrect email or password. Please try again.');
+          }
           pw.value = '';
           pw.focus();
         }
