@@ -72,11 +72,11 @@
 
       <!-- Security tips -->
       <div class="card card-pad mt-4">
-        <div class="section-title">Security &amp; password</div>
+        <div class="section-title">Security &amp; sync</div>
         <ul class="text-soft owner-tips">
-          <li>Change your credentials: open dev-tools console and run <code>await Security.hashFor('your-email@example.com', 'your-new-password')</code>, then paste the two printed hashes into <code>OWNER_EMAIL_HASH</code> and <code>OWNER_HASH</code> in <code>assets/js/security.js</code> and redeploy.</li>
-          <li>Your session expires automatically after <b id="ttlHours"></b> hours of inactivity; use <b>Log out</b> on shared devices.</li>
-          <li>This client-side gate is best-effort. For server-enforced security, follow the Firebase upgrade in the README.</li>
+          <li>Your data is stored live in <b>Firebase Firestore</b> — every device that opens the site shows the same content, and your edits sync everywhere automatically.</li>
+          <li>Sign-in is handled by <b>Firebase Authentication</b>. Only the owner account can write; everyone else is read-only — enforced on the server, so it can't be bypassed from dev-tools.</li>
+          <li>To change your password: <b>Firebase Console → Authentication → Users</b>, or use the account's "reset password" email. Always <b>Log out</b> on shared devices.</li>
         </ul>
       </div>
     </div><!-- /.page-wrap -->
@@ -84,6 +84,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <!-- Security MUST load before app.js so the page can be guarded. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="./assets/js/firebase-config.js"></script>
   <script src="./assets/js/security.js"></script>
   <script src="./assets/js/app.js"></script>
 </body>
