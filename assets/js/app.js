@@ -49,51 +49,115 @@ const STORE_KEY = 'pomls_data_v1';
 const DB = {
   data: null,
 
-  /* Load from localStorage, or seed on very first visit */
-  load() {
+  /* A short id unique to THIS browser tab, stamped on every cloud
+     write so we can ignore our own live-sync echo (see subscribe). */
+  _clientId: 'c-' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36),
+  _unsub: null,
+
+  /* Merge a raw object into a complete, valid store: fill any missing
+     collection, add newly introduced category keys and profile fields.
+     Pure — does no storage I/O. */
+  _hydrate(raw) {
+    const data = (raw && typeof raw === 'object') ? raw : SEED_DATA();
+    data.categories = Object.assign({}, DEFAULT_CATEGORIES, data.categories || {});
+    ['opportunities','tasks','documents','achievements','contacts','research','projects','reminders']
+      .forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
+    data.profile = Object.assign({}, SEED_DATA().profile, data.profile || {});
+    if (!Array.isArray(data.profile.references)) data.profile.references = SEED_DATA().profile.references;
+    if (!Array.isArray(data.profile.experience)) data.profile.experience = SEED_DATA().profile.experience;
+    return data;
+  },
+
+  /* Instant first paint / offline fallback: read the local cache
+     (or seed on a brand-new browser). Synchronous. */
+  loadLocal() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
-      if (raw) {
-        this.data = JSON.parse(raw);
-        // make sure newly added category keys exist after upgrades
-        this.data.categories = Object.assign({}, DEFAULT_CATEGORIES, this.data.categories || {});
-        // guarantee every collection exists even if an old backup lacked it
-        ['opportunities','tasks','documents','achievements','contacts','research','projects','reminders']
-          .forEach(k => { if (!Array.isArray(this.data[k])) this.data[k] = []; });
-        // merge in any newly added profile fields (department, socials, references…)
-        // existing values win; brand-new keys fall back to the seed defaults.
-        this.data.profile = Object.assign({}, SEED_DATA().profile, this.data.profile || {});
-        if (!Array.isArray(this.data.profile.references)) this.data.profile.references = SEED_DATA().profile.references;
-        if (!Array.isArray(this.data.profile.experience)) this.data.profile.experience = SEED_DATA().profile.experience;
-      } else {
-        // First visit: seed the visitor's own sandbox copy (allowed for everyone).
-        this.data = SEED_DATA();
-        this._persist();
-      }
+      this.data = this._hydrate(raw ? JSON.parse(raw) : null);
     } catch (e) {
-      console.error('Could not read saved data, starting fresh.', e);
-      this.data = SEED_DATA();
-      this._persist();
+      console.error('Local cache unreadable — seeding fresh.', e);
+      this.data = this._hydrate(null);
     }
     return this.data;
   },
 
-  /* Raw write to localStorage — internal use only (seeding / restore).
-     Does NOT check authorization; never call this from a user action. */
-  _persist() {
+  /* Authoritative load from Firestore (the shared cloud copy that all
+     devices read). Falls back to the local cache if the network or
+     security rules deny it, so the site still renders offline. */
+  async loadCloud() {
+    if (typeof CLOUD_DOC === 'undefined' || !CLOUD_DOC) return this.loadLocal();
+    try {
+      const snap = await CLOUD_DOC.get();
+      if (snap.exists) {
+        const d = snap.data() || {};
+        this.data = this._hydrate(d.store || d);
+        this._persistLocal();
+      } else {
+        // No cloud document yet. Seed it from whatever is local now
+        // (preserving existing edits), but only the OWNER may create it.
+        if (!this.data) this.loadLocal();
+        if (Security.isOwner()) await this._persistCloud();
+      }
+    } catch (e) {
+      console.warn('Cloud load failed — using local cache.', e);
+      if (!this.data) this.loadLocal();
+    }
+    return this.data;
+  },
+
+  /* Live updates: when another device (or tab) saves, refresh in place.
+     onRemote() is called only for changes that did NOT originate here. */
+  subscribe(onRemote) {
+    if (typeof CLOUD_DOC === 'undefined' || !CLOUD_DOC) return;
+    if (this._unsub) { this._unsub(); this._unsub = null; }
+    this._unsub = CLOUD_DOC.onSnapshot(snap => {
+      if (!snap.exists) return;
+      const d = snap.data() || {};
+      if (d.writer === this._clientId) return; // ignore our own write echo
+      this.data = this._hydrate(d.store || d);
+      this._persistLocal();
+      if (typeof onRemote === 'function') onRemote();
+    }, err => console.warn('Live sync error', err));
+  },
+
+  /* Write the local cache copy (synchronous). */
+  _persistLocal() {
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(this.data));
     } catch (e) {
-      toast('Storage is full — export a backup and clear space.', 'err');
+      // Cache full — the cloud copy is still the source of truth.
+    }
+  },
+
+  /* Write the authoritative copy to Firestore (async). The server's
+     security rules reject this for anyone but the owner. */
+  async _persistCloud() {
+    if (typeof CLOUD_DOC === 'undefined' || !CLOUD_DOC) return;
+    setSync('saving');
+    try {
+      const json = JSON.stringify(this.data);
+      // Firestore caps a single document at ~1 MiB. Warn before a big
+      // save fails (heavy base64 uploads are the usual cause).
+      if (json.length > 950000) {
+        toast('Data is near the 1 MB cloud limit — use Drive links for large files.', 'err');
+      }
+      await CLOUD_DOC.set({ store: this.data, writer: this._clientId, updatedAt: Date.now() });
+      setSync('synced');
+    } catch (e) {
+      console.error('Cloud save failed', e);
+      setSync('error');
+      toast('Could not sync to cloud. Check your connection or sign-in.', 'err');
     }
   },
 
   /* Autosave — called after every change.
-     GUARDED: this is the single persistence chokepoint, so even a
-     console call like `DB.save()` is rejected for non-owners. */
+     GUARDED: the single persistence chokepoint, so even a console call
+     like `DB.save()` is rejected for non-owners. Writes BOTH the local
+     cache (instant) and the cloud (synced to every device). */
   save() {
     if (!Security.guard('save changes')) return;
-    this._persist();
+    this._persistLocal();
+    this._persistCloud();
   },
 
   getAll(entity) { return this.data[entity] || []; },
@@ -243,6 +307,36 @@ function toast(msg, kind = 'ok') {
   wrap.appendChild(t);
   setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(8px)'; }, 2600);
   setTimeout(() => t.remove(), 3000);
+}
+
+/* ---- tiny cloud-sync status pill (bottom-left) ----
+   Quietly reflects the Firestore sync: "Saving…" while a write is in
+   flight, "Synced" when it lands (then auto-fades), "Updated" when a
+   change arrives from another device, or "Sync failed" on error
+   (which stays until the next successful save). */
+let _syncHideTimer = null;
+function setSync(state) {
+  let el = document.getElementById('syncStatus');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'syncStatus';
+    el.className = 'sync-status';
+    document.body.appendChild(el);
+  }
+  clearTimeout(_syncHideTimer);
+  const map = {
+    saving:  { cls: 'is-saving', ico: 'arrow-repeat',             txt: 'Saving…' },
+    synced:  { cls: 'is-synced', ico: 'check-circle-fill',        txt: 'Synced' },
+    updated: { cls: 'is-synced', ico: 'cloud-arrow-down-fill',    txt: 'Updated' },
+    error:   { cls: 'is-error',  ico: 'exclamation-triangle-fill', txt: 'Sync failed' }
+  };
+  const s = map[state] || map.synced;
+  el.className = 'sync-status show ' + s.cls;
+  el.innerHTML = `<i class="bi bi-${s.ico}"></i><span>${s.txt}</span>`;
+  // success / remote-update auto-hide; an error stays put until next save
+  if (state === 'synced' || state === 'updated') {
+    _syncHideTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  }
 }
 
 /* ---- map a status/priority to a colour "tone" class ---- */
@@ -2258,11 +2352,9 @@ function initOwner() {
   // Defensive: never render management UI without a valid session.
   if (!Security.isOwner()) { location.replace(Security.LOGIN_PAGE); return; }
 
-  // Session info pill
+  // Session info pill — shows the signed-in owner account
   const si = document.getElementById('sessionInfo');
-  if (si) si.innerHTML = `<i class="bi bi-clock-history"></i> Session: ${Security.minutesLeft()} min left`;
-  const ttl = document.getElementById('ttlHours');
-  if (ttl) ttl.textContent = Security.SESSION_HOURS;
+  if (si) si.innerHTML = `<i class="bi bi-person-badge"></i> ${escapeHtml(Security.userEmail() || 'Owner')}`;
 
   // Content counts
   const entities = [
@@ -2357,14 +2449,36 @@ document.addEventListener('DOMContentLoaded', async () => {
   const page = document.body.dataset.page;
 
   /* SECURITY BOOTSTRAP — must run before anything renders.
-     1) validate any existing owner session,
+     1) resolve the Firebase auth state (owner or visitor),
      2) bounce visitors away from owner-only pages,
-     3) load data, render, then apply owner/viewer UI gating. */
+     3) paint instantly from cache, then load the authoritative
+        cloud copy, render, and apply owner/viewer UI gating. */
   await Security.init();
   if (!Security.requireOwner(page)) return; // redirected to login → stop
 
-  DB.load();
+  DB.loadLocal();        // instant first paint from the local cache
+  await DB.loadCloud();  // then the shared cloud copy (source of truth)
 
+  renderActivePage(page);
+
+  // Live sync: when another device changes the data, re-render — but
+  // never yank a form out from under the owner while a modal is open.
+  DB.subscribe(() => {
+    setSync('updated');
+    if (document.querySelector('.modal.show')) return;
+    renderActivePage(page);
+  });
+
+  // Ownership / copyright footer on every page.
+  renderFooter();
+
+  // Show owner tools / hide them from visitors (sets <body> class + auth control)
+  Security.applyMode();
+});
+
+/* Render (or re-render) the shared chrome + the active page initializer.
+   Safe to call repeatedly — used on first load and on every live update. */
+function renderActivePage(page) {
   // portfolio + landing run without the app sidebar/topbar
   if (page !== 'profile' && page !== 'index') {
     const titles = {
@@ -2387,12 +2501,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fn = PAGE_INIT[page];
   if (fn) fn();
 
-  // Ownership / copyright footer on every page.
-  renderFooter();
-
-  // Show owner tools / hide them from visitors (sets <body> class + auth control)
+  // re-apply owner/viewer gating to freshly rendered controls
   Security.applyMode();
-});
+}
 
 /* ==========================================================
    8. SEED DATA — sample/dummy records loaded on first run.

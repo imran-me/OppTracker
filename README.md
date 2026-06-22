@@ -8,8 +8,9 @@ Built for **Md Imran Hossain** — B.Sc. in Computing & Information System,
 Daffodil International University.
 
 - **100% frontend** — HTML5, CSS3, Bootstrap 5, Vanilla JavaScript
-- **No server, no database, no build step** — runs by opening `index.html`
-- **Data stays in your browser** via Local Storage, with JSON export/import for backup
+- **No build step** — runs by opening `index.html`
+- **Live multi-device sync** via **Firebase Firestore** (Local Storage kept as an offline cache) + JSON export/import for backup
+- **Owner-only editing** enforced server-side by **Firebase Authentication** + Firestore security rules
 - **GitHub Pages ready** — free hosting
 
 ---
@@ -96,7 +97,11 @@ matching page initializer (e.g. `initDashboard`).
 | Change the sample data                         | The `SEED_DATA()` function at the bottom of `app.js` |
 | Add a navigation link                          | The `NAV` array in `app.js`                          |
 
-All data is stored under the Local Storage key `pomls_data_v1`.
+**Data storage:** the whole store lives in one **Firestore document** (`opptrack/data`),
+read by every device for live sync. A copy is also kept under the Local Storage key
+`pomls_data_v1` as an offline cache / instant first paint. The data layer (`DB` in
+`app.js`) writes both: `DB._persistLocal()` (cache) and `DB._persistCloud()` (Firestore).
+Firebase project config lives in `assets/js/firebase-config.js`.
 
 ---
 
@@ -104,8 +109,29 @@ All data is stored under the Local Storage key `pomls_data_v1`.
 
 The site is **public to view** and **owner-only to manage**. Anyone with the link can
 browse, search, filter and read everything. Only the signed-in owner can add, edit,
-delete, archive, manage categories, import, reset or change the profile. All of this
-lives in one place: **`assets/js/security.js`**.
+delete, archive, manage categories, import, reset or change the profile.
+
+> **⚡ Now backed by Firebase.** Sign-in uses **Firebase Authentication** (the single
+> owner account set in `OWNER_EMAIL`, `assets/js/firebase-config.js`) and writes are
+> enforced by **Firestore security rules** on the server — so unauthorized edits are
+> rejected no matter what the browser does. This is real, server-enforced ownership,
+> not just the cosmetic client gate the section below originally described. The login
+> UI and guards still live in **`assets/js/security.js`**; data sync lives in `DB`
+> (`app.js`) + `assets/js/firebase-config.js`.
+>
+> **Firestore security rule** (paste in Firebase Console → Firestore → Rules):
+> ```
+> rules_version = '2';
+> service cloud.firestore {
+>   match /databases/{database}/documents {
+>     match /opptrack/data {
+>       allow read: if true;                                              // public can view
+>       allow write: if request.auth != null
+>                    && request.auth.token.email == 'me.imran.personal@gmail.com';  // only the owner can edit
+>     }
+>   }
+> }
+> ```
 
 ### How it works
 

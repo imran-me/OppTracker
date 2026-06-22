@@ -72,6 +72,10 @@
   </main>
 
   <!-- Security layer first, then Bootstrap (not strictly needed here). -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="./assets/js/firebase-config.js"></script>
   <script src="./assets/js/security.js"></script>
   <script>
     /* Standalone login controller — no app.js needed on this page. */
@@ -86,12 +90,6 @@
       const btn   = document.getElementById('loginBtn');
       const errEl = document.getElementById('authError');
       const eye   = document.getElementById('toggleEye');
-
-      // If a previous lockout is still active, warn up front.
-      (function showLockIfAny() {
-        const mins = Security.lockedFor();
-        if (mins > 0) showError(`Too many attempts. Try again in ${mins} min.`);
-      })();
 
       // Show / hide password
       eye.onclick = () => {
@@ -120,8 +118,11 @@
           btn.disabled = false;
           btn.innerHTML = '<i class="bi bi-box-arrow-in-right me-1"></i>Sign in';
           if (ok === 'locked') {
-            const mins = Security.lockedFor();
-            showError(`Too many attempts. Try again in ${mins} min.`);
+            showError('Too many attempts. Please wait a few minutes and try again.');
+          } else if (ok === 'notowner') {
+            showError('That account is not authorized to manage this site.');
+          } else if (ok === 'offline') {
+            showError('Cannot reach the server. Check your internet connection.');
           } else {
             showError('Incorrect email or password. Please try again.');
           }
