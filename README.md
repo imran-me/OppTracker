@@ -315,10 +315,12 @@ backend. Avoid a GitHub Gist + token on a public site — the write token would 
 
 ## Google Drive auto-backup (safety net)
 
-On top of Firebase, the whole dataset is also mirrored to **one file in the owner's Google
-Drive** — `opptrack-backup.json` — updated automatically on every save. Firebase stays the
-live copy the site reads/displays; Drive is a **backup** you can download anytime, so if
-Firebase ever fails you still have a current copy to **Import backup** from.
+On top of Firebase, the whole dataset is also mirrored to **one file in a dedicated folder**
+in the owner's Google Drive — `My Drive / OppTracker Backups / opptrack-backup.json` —
+updated automatically on every save. Firebase stays the live copy the site reads/displays;
+Drive is a **backup** you can download anytime, so if Firebase ever fails you still have a
+current copy to **Import backup** from. (The folder is created automatically on first backup;
+a file left in the root from earlier is moved into it.)
 
 ### How it works (`assets/js/drive.js`)
 
