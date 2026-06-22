@@ -502,7 +502,9 @@ const SCHEMAS = {
       { key: 'eventDate', label: 'Event date', type: 'date' },
       { key: 'notes', label: 'Notes', type: 'textarea', span: true },
       { key: 'image', label: 'Cover image URL', type: 'url', span: true },
-      { key: 'gallery', label: 'Photo gallery', type: 'images', span: true },
+      { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
+      { key: 'photos', label: 'Upload images', type: 'photos', span: true },
+      { key: 'files', label: 'Upload files (PDF, slides, data…)', type: 'files', span: true },
       { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio (under Wins)' }
     ]
   },
@@ -540,7 +542,9 @@ const SCHEMAS = {
       { key: 'image', label: 'Cover image URL', type: 'url' },
       { key: 'certLink', label: 'Certificate link', type: 'url' },
       { key: 'description', label: 'Description', type: 'textarea', span: true },
-      { key: 'gallery', label: 'Photo gallery', type: 'images', span: true },
+      { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
+      { key: 'photos', label: 'Upload images', type: 'photos', span: true },
+      { key: 'files', label: 'Upload files / certificate', type: 'files', span: true },
       { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   },
@@ -561,10 +565,16 @@ const SCHEMAS = {
     label: 'Research idea', icon: 'lightbulb',
     fields: [
       { key: 'title', label: 'Idea / title', type: 'text', required: true, span: true },
+      { key: 'subtitle', label: 'Subtitle / tagline', type: 'text', span: true },
       { key: 'field', label: 'Field', type: 'select', opts: 'subTypes' },
       { key: 'stage', label: 'Stage', type: 'select', opts: ['Idea', 'Literature Review', 'Problem Defined', 'In Progress', 'Drafting', 'Published'] },
+      { key: 'abstract', label: 'Abstract', type: 'textarea', span: true },
       { key: 'problem', label: 'Problem statement', type: 'textarea', span: true },
       { key: 'references', label: 'References / links', type: 'textarea', span: true },
+      { key: 'image', label: 'Cover image URL', type: 'url', span: true },
+      { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
+      { key: 'photos', label: 'Upload images / charts', type: 'photos', span: true },
+      { key: 'files', label: 'Upload files (PDF, data, slides…)', type: 'files', span: true },
       { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   },
@@ -572,14 +582,18 @@ const SCHEMAS = {
     label: 'Project', icon: 'diagram-3',
     fields: [
       { key: 'name', label: 'Project name', type: 'text', required: true, span: true },
+      { key: 'subtitle', label: 'Subtitle / tagline', type: 'text', span: true },
       { key: 'category', label: 'Category', type: 'select', opts: 'subTypes' },
       { key: 'status', label: 'Status', type: 'select', opts: 'projectStatuses' },
       { key: 'technologies', label: 'Technologies', type: 'text' },
       { key: 'team', label: 'Team members', type: 'text' },
       { key: 'link', label: 'Repo / demo link', type: 'url', span: true },
+      { key: 'abstract', label: 'Abstract / summary', type: 'textarea', span: true },
       { key: 'description', label: 'Description', type: 'textarea', span: true },
       { key: 'image', label: 'Cover image URL', type: 'url', span: true },
-      { key: 'gallery', label: 'Photo gallery', type: 'images', span: true },
+      { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
+      { key: 'photos', label: 'Upload images', type: 'photos', span: true },
+      { key: 'files', label: 'Upload files (PDF, slides, data…)', type: 'files', span: true },
       { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   }
@@ -616,6 +630,26 @@ function buildField(f, value) {
       ${cur}
       <input type="file" name="${f.key}" class="file-input">
       <small class="text-faint" style="font-size:11px">Stored privately in your browser. Max ${fmtBytes(MAX_UPLOAD_BYTES)} — use a Drive link for larger files.</small>
+    </div>`;
+  }
+
+  // Multiple uploads — `photos` (images) or `files` (any). Shows current
+  // items with a "remove" checkbox each, plus a multi-file picker to add more.
+  if (f.type === 'photos' || f.type === 'files') {
+    const isImg = f.type === 'photos';
+    const arr = Array.isArray(value) ? value : [];
+    const current = arr.map((it, i) => `
+      <div class="upl-item">
+        ${isImg ? `<span class="upl-thumb"><img src="${escapeHtml(it.data)}" alt=""></span>` : `<span class="upl-thumb file"><i class="bi bi-file-earmark-text"></i></span>`}
+        <span class="upl-name">${escapeHtml(it.name || 'file')}</span>
+        <small class="text-faint">${fmtBytes(it.size)}</small>
+        <label class="upl-rm"><input type="checkbox" name="__rm_${f.key}_${i}"> remove</label>
+      </div>`).join('');
+    return `<div class="field ${f.span ? 'col-span' : ''}">
+      <label>${f.label}</label>
+      <div class="upl-list ${isImg ? 'is-img' : ''}">${current || '<span class="text-faint" style="font-size:12px">None yet.</span>'}</div>
+      <input type="file" name="${f.key}" class="file-input" ${isImg ? 'accept="image/*"' : ''} multiple>
+      <small class="text-faint" style="font-size:11px">Select one or more. Max ${fmtBytes(MAX_UPLOAD_BYTES)} each — stored in your browser.</small>
     </div>`;
   }
   const v = value == null ? '' : value;
@@ -709,10 +743,12 @@ function openEntityModal(entity, id, afterSave) {
     const missing = schema.fields.find(f => f.required && f.type !== 'file' && !out[f.key]);
     if (missing) { toast(`${missing.label} is required.`, 'err'); form.elements[missing.key].focus(); return; }
 
-    // file uploads: read a newly picked file, honour "remove", else preserve
-    // the existing one (keys left off `out` are kept by DB.upsert's merge).
+    // Uploads (async): read newly picked file(s), honour "remove", else
+    // preserve. Keys left off `out` are kept by DB.upsert's merge.
     try {
       saveBtn.disabled = true;
+
+      // single-file fields (e.g. a document)
       for (const f of schema.fields.filter(x => x.type === 'file')) {
         const input = form.querySelector(`input[type="file"][name="${f.key}"]`);
         const file = input && input.files && input.files[0];
@@ -726,6 +762,28 @@ function openEntityModal(entity, id, afterSave) {
         } else if (remove) {
           out[f.key] = null;
         }
+      }
+
+      // multi-upload fields (photos / files): keep the un-removed existing
+      // items, then append any newly selected ones.
+      for (const f of schema.fields.filter(x => x.type === 'photos' || x.type === 'files')) {
+        const existing = Array.isArray(record[f.key]) ? record[f.key] : [];
+        const kept = existing.filter((_, i) => {
+          const cb = form.elements['__rm_' + f.key + '_' + i];
+          return !(cb && cb.checked);
+        });
+        const input = form.querySelector(`input[type="file"][name="${f.key}"]`);
+        const added = [];
+        if (input && input.files) {
+          for (const file of Array.from(input.files)) {
+            if (file.size > MAX_UPLOAD_BYTES) {
+              toast(`“${file.name}” is too large (max ${fmtBytes(MAX_UPLOAD_BYTES)}). Skipped.`, 'err');
+              continue;
+            }
+            added.push({ name: file.name, type: file.type, size: file.size, data: await readFileAsDataURL(file) });
+          }
+        }
+        out[f.key] = kept.concat(added);
       }
     } catch (e) {
       saveBtn.disabled = false;
@@ -1276,6 +1334,7 @@ function initResearch() {
             ${r.references ? `<div class="mt-2" style="font-size:12.5px"><b class="text-soft">References:</b> <span class="text-soft" style="white-space:pre-wrap">${escapeHtml(r.references)}</span></div>` : ''}
           </div>
           <div class="row-actions owner-only" style="opacity:1">
+            <button title="Content studio" onclick="openContentStudio('research','${r.id}', refreshCurrentPage)"><i class="bi bi-easel"></i></button>
             <button onclick="openEntityModal('research','${r.id}')"><i class="bi bi-pencil"></i></button>
             <button class="del" onclick="confirmDelete('research','${r.id}')"><i class="bi bi-trash3"></i></button>
           </div>
@@ -1296,11 +1355,14 @@ function initProjects() {
       <div class="card card-pad">
         <div class="d-flex align-items-center gap-2 mb-2"><span class="chip t-${statusTone(p.status)}"><span class="dot"></span>${escapeHtml(p.status || 'Idea')}</span>${p.category ? `<span class="chip chip-outline">${escapeHtml(p.category)}</span>` : ''}${p.featured ? '<span class="chip t-amber" title="Shown on portfolio"><i class="bi bi-star-fill"></i></span>' : ''}</div>
         <b style="font-size:15px;display:block">${escapeHtml(p.name)}</b>
-        <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(p.description || '')}</p>
+        ${p.subtitle ? `<small class="text-soft d-block" style="font-size:12px">${escapeHtml(p.subtitle)}</small>` : ''}
+        <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(p.abstract || p.description || '')}</p>
         ${p.technologies ? `<div class="mb-1" style="font-size:12px"><i class="bi bi-cpu me-1 text-soft"></i>${escapeHtml(p.technologies)}</div>` : ''}
         ${p.team ? `<div class="mb-2" style="font-size:12px"><i class="bi bi-people me-1 text-soft"></i>${escapeHtml(p.team)}</div>` : ''}
-        <div class="d-flex gap-2 mt-2">
+        ${(p.blocks && p.blocks.length) || (p.photos && p.photos.length) || (p.files && p.files.length) ? `<div class="mb-2" style="font-size:11.5px" class="text-faint">${(p.blocks && p.blocks.length) ? `<span class="me-2"><i class="bi bi-layout-text-window me-1"></i>${p.blocks.length} blocks</span>` : ''}${(p.photos && p.photos.length) ? `<span class="me-2"><i class="bi bi-images me-1"></i>${p.photos.length}</span>` : ''}${(p.files && p.files.length) ? `<span><i class="bi bi-paperclip me-1"></i>${p.files.length}</span>` : ''}</div>` : ''}
+        <div class="d-flex gap-2 mt-2 flex-wrap">
           ${p.link ? `<a class="btn btn-soft btn-sm" href="${escapeHtml(p.link)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Open</a>` : ''}
+          <button class="btn btn-soft btn-sm owner-only" onclick="openContentStudio('projects','${p.id}', refreshCurrentPage)"><i class="bi bi-easel me-1"></i>Studio</button>
           <button class="btn btn-ghost btn-sm owner-only" onclick="openEntityModal('projects','${p.id}')"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-ghost btn-sm text-danger owner-only" onclick="confirmDelete('projects','${p.id}')"><i class="bi bi-trash3"></i></button>
         </div>
@@ -1423,9 +1485,14 @@ function initProfile() {
       <button class="del" title="Delete" onclick="event.stopPropagation();confirmDelete('${entity}','${id}', initProfile)"><i class="bi bi-trash3"></i></button>
     </div>`;
 
-  // little camera badge showing how many photos a card carries
-  const photoCount = (item) => (item.image ? 1 : 0) + (Array.isArray(item.gallery) ? item.gallery.length : 0);
-  const photoBadge = (item) => { const n = photoCount(item); return n ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${n}</span>` : ''; };
+  // little badges showing how many photos / files a card carries
+  const photoCount = (item) => (item.image ? 1 : 0) + (Array.isArray(item.gallery) ? item.gallery.length : 0) + (Array.isArray(item.photos) ? item.photos.length : 0);
+  const fileCount = (item) => (Array.isArray(item.files) ? item.files.length : 0);
+  const photoBadge = (item) => {
+    const np = photoCount(item), nf = fileCount(item);
+    return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
+  };
+  const coverOf = (item) => item.image || (Array.isArray(item.gallery) && item.gallery[0]) || (Array.isArray(item.photos) && item.photos[0] && item.photos[0].data) || '';
 
   // Featured selection: show only items the owner marked "Show on portfolio".
   // If NONE are marked in a collection, fall back to showing them all so the
@@ -1464,15 +1531,16 @@ function initProfile() {
   const ordered = featured([...projects].sort((a, b) =>
     (a.status === 'Completed' ? 1 : 0) - (b.status === 'Completed' ? 1 : 0)));
   document.getElementById('pfProjects').innerHTML = ordered.map(pr => {
-    const cover = pr.image || (Array.isArray(pr.gallery) && pr.gallery[0]);
+    const cover = coverOf(pr);
     return `<div class="card card-pad pf-editable pf-clickable" data-detail="projects:${pr.id}">
       ${cardTools('projects', pr.id)}
       ${cover ? `<div class="pf-card-media"><img src="${escapeHtml(cover)}" alt="">${photoBadge(pr)}</div>` : ''}
       <span class="chip t-${statusTone(pr.status)} mb-2 d-inline-flex"><span class="dot"></span>${escapeHtml(pr.status || '')}</span>
       <b style="display:block;font-size:15px">${escapeHtml(pr.name)}</b>
-      <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(pr.description || '')}</p>
+      ${pr.subtitle ? `<small class="text-soft d-block mb-1" style="font-size:12.5px">${escapeHtml(pr.subtitle)}</small>` : ''}
+      <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(pr.abstract || pr.description || '')}</p>
       ${pr.technologies ? `<div style="font-size:12px" class="text-soft"><i class="bi bi-cpu me-1"></i>${escapeHtml(pr.technologies)}</div>` : ''}
-      ${pr.link ? `<a class="btn btn-soft btn-sm mt-2" href="${escapeHtml(pr.link)}" target="_blank" rel="noopener">View</a>` : ''}
+      <div class="pf-card-cta"><span><i class="bi bi-eye me-1"></i>View details</span>${!cover ? photoBadge(pr) : ''}</div>
     </div>`;
   }).join('') || '<p class="text-soft">No projects to show yet.</p>';
 
@@ -1486,8 +1554,11 @@ function initProfile() {
         <b style="font-size:15px">${escapeHtml(r.title)}</b>
         ${r.field ? `<span class="chip chip-outline">${escapeHtml(r.field)}</span>` : ''}
         ${r.stage ? `<span class="chip t-${statusTone(r.stage)}">${escapeHtml(r.stage)}</span>` : ''}
+        ${photoBadge(r)}
       </div>
-      ${r.problem ? `<p class="text-soft mt-1 mb-0" style="font-size:13px;white-space:pre-wrap">${escapeHtml(r.problem)}</p>` : ''}
+      ${r.subtitle ? `<small class="text-soft d-block mb-1" style="font-size:12.5px">${escapeHtml(r.subtitle)}</small>` : ''}
+      ${(r.abstract || r.problem) ? `<p class="text-soft mt-1 mb-0" style="font-size:13px;white-space:pre-wrap">${escapeHtml(r.abstract || r.problem)}</p>` : ''}
+      <div class="pf-card-cta"><span><i class="bi bi-eye me-1"></i>View details</span></div>
     </div>`).join('') : '<p class="text-soft">No research to show yet.</p>'; }
 
   // make portfolio cards open a detail view (ignoring clicks on owner tools / links)
@@ -1678,67 +1749,118 @@ function portfolioDetailDelegate(e) {
   openPortfolioDetail(entity, id);
 }
 
+/* ---- helpers shared by the detail view ---- */
+
+/* Every image for an item: cover URL + gallery URLs + uploaded photos. */
+function collectImages(item) {
+  return [item.image, ...(item.gallery || []), ...((item.photos || []).map(p => p && p.data))].filter(Boolean);
+}
+/* Uploaded files attached to an item. */
+function collectFiles(item) { return Array.isArray(item.files) ? item.files : []; }
+
+/* A downloadable file card for an uploaded file (data URL). */
+function fileCardHtml(f) {
+  const ext = (f.name || '').includes('.') ? (f.name.split('.').pop() || '').toUpperCase() : '';
+  return `<a class="pf-file" href="${escapeHtml(f.data)}" download="${escapeHtml(f.name || 'file')}">
+    <span class="pf-file-ic"><i class="bi bi-file-earmark-arrow-down"></i></span>
+    <span class="pf-file-meta"><b>${escapeHtml(f.name || 'File')}</b><small>${ext ? ext + ' · ' : ''}${fmtBytes(f.size)}</small></span>
+  </a>`;
+}
+
+/* Render the ordered rich-content blocks of a project / research item. */
+function renderContentBlocks(blocks) {
+  return (blocks || []).map(b => {
+    if (b.type === 'heading') return b.text ? `<h3 class="cb-h">${escapeHtml(b.text)}</h3>` : '';
+    if (b.type === 'text')    return b.text ? `<p class="cb-p">${escapeHtml(b.text)}</p>` : '';
+    if (b.type === 'code')    return b.code ? `<div class="cb-code"><div class="cb-code-bar"><i class="bi bi-code-slash me-1"></i>${escapeHtml(b.lang || 'code')}</div><pre><code>${escapeHtml(b.code)}</code></pre></div>` : '';
+    if (b.type === 'image') {
+      return b.src ? `<figure class="cb-img"><img src="${escapeHtml(b.src)}" alt="${escapeHtml(b.caption || '')}" loading="lazy" data-zoom="${escapeHtml(b.src)}">${b.caption ? `<figcaption>${escapeHtml(b.caption)}</figcaption>` : ''}</figure>` : '';
+    }
+    if (b.type === 'file') {
+      const href = b.data || b.url; if (!href) return '';
+      return `<a class="pf-file" href="${escapeHtml(href)}" ${b.data ? `download="${escapeHtml(b.name || 'file')}"` : 'target="_blank" rel="noopener"'}>
+        <span class="pf-file-ic"><i class="bi bi-paperclip"></i></span>
+        <span class="pf-file-meta"><b>${escapeHtml(b.label || b.name || 'File')}</b><small>${b.size ? fmtBytes(b.size) : (b.url ? 'external link' : '')}</small></span></a>`;
+    }
+    return '';
+  }).join('');
+}
+
 /* ---------- PORTFOLIO DETAIL (read-only "see everything") ----------
-   Opens a modal with the full record + a photo gallery. Photos are the
-   cover image plus every gallery URL; clicking one opens a lightbox.
-   Public visitors can view; the owner also gets an inline Edit button. */
+   An engaging modal: hero image → title/subtitle → abstract → body →
+   rich content blocks → contributors → gallery → files → details.
+   Public can view everything; the owner gets Edit + Content studio. */
 function openPortfolioDetail(entity, id) {
   const item = DB.get(entity, id);
   if (!item) return;
+  const rich = entity === 'projects' || entity === 'research';
 
-  const CFG = {
-    achievements: {
-      title: item.title, icon: 'trophy-fill', chips: [item.category, fmtDate(item.date)],
-      body: item.description, links: [[item.certLink, 'Certificate', 'patch-check']]
-    },
-    projects: {
-      title: item.name, icon: 'diagram-3-fill', chips: [item.status, item.category],
-      body: item.description, rows: [['Technologies', item.technologies], ['Team', item.team]],
-      links: [[item.link, 'Open project', 'box-arrow-up-right']]
-    },
-    opportunities: {
-      title: item.name, icon: typeIcon(item.type), chips: [item.status, item.type, item.subType],
-      body: item.notes, rows: [['Organizer', item.organizer], ['Country', item.country],
-        ['Funding', item.fundingType], ['Deadline', fmtDate(item.deadline)], ['Event', fmtDate(item.eventDate)]],
-      links: [[item.link, 'Official page', 'box-arrow-up-right']]
-    },
-    research: {
-      title: item.title, icon: 'lightbulb-fill', chips: [item.field, item.stage],
-      body: item.problem, rows: [['References', item.references]], links: []
-    }
-  }[entity];
-  if (!CFG) return;
+  const titleOf = item.name || item.title || 'Details';
+  const icon = entity === 'projects' ? 'diagram-3-fill'
+    : entity === 'research' ? 'lightbulb-fill'
+      : entity === 'achievements' ? 'trophy-fill' : typeIcon(item.type);
 
-  const photos = [item.image, ...(item.gallery || [])].filter(Boolean);
-  const chips = (CFG.chips || []).filter(c => c && c !== '—')
-    .map(c => `<span class="chip chip-outline">${escapeHtml(c)}</span>`).join('');
-  const rows = (CFG.rows || []).filter(([, v]) => v && v !== '—')
-    .map(([l, v]) => `<dt>${l}</dt><dd>${escapeHtml(v)}</dd>`).join('');
-  const links = (CFG.links || []).filter(([href]) => href)
-    .map(([href, label, ico]) => `<a class="btn btn-soft btn-sm" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="bi bi-${ico} me-1"></i>${label}</a>`).join('');
-  const gallery = photos.length
-    ? `<div class="pf-detail-gallery">${photos.map((src, i) => `<button type="button" class="pf-thumb" data-i="${i}"><img src="${escapeHtml(src)}" alt="${escapeHtml(CFG.title || '')} photo ${i + 1}" loading="lazy"></button>`).join('')}</div>`
-    : '<p class="text-faint" style="font-size:12.5px"><i class="bi bi-images me-1"></i>No photos added yet.</p>';
+  const chipsArr = entity === 'projects' ? [item.status, item.category]
+    : entity === 'research' ? [item.field, item.stage]
+      : entity === 'achievements' ? [item.category, fmtDate(item.date)]
+        : [item.status, item.type, item.subType];
+  const chips = chipsArr.filter(c => c && c !== '—').map(c => `<span class="chip chip-outline">${escapeHtml(c)}</span>`).join('');
+
+  const rowsArr = entity === 'projects' ? [['Technologies', item.technologies], ['Team', item.team]]
+    : entity === 'research' ? [['Field', item.field], ['Stage', item.stage], ['References', item.references]]
+      : entity === 'opportunities' ? [['Organizer', item.organizer], ['Country', item.country], ['Funding', item.fundingType], ['Deadline', fmtDate(item.deadline)], ['Event', fmtDate(item.eventDate)]]
+        : [['Date', fmtDate(item.date)]];
+  const rows = rowsArr.filter(([, v]) => v && v !== '—').map(([l, v]) => `<dt>${l}</dt><dd>${escapeHtml(v)}</dd>`).join('');
+
+  const linksArr = entity === 'achievements' ? [[item.certLink, 'Certificate', 'patch-check']]
+    : [[item.link, entity === 'opportunities' ? 'Official page' : 'Open link', 'box-arrow-up-right']];
+  const links = linksArr.filter(([href]) => href).map(([href, label, ico]) => `<a class="btn btn-soft btn-sm" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="bi bi-${ico} me-1"></i>${label}</a>`).join('');
+
+  const images = collectImages(item);
+  const files = collectFiles(item);
+  const hero = images[0] || '';
+  const rest = images.slice(1);
+  const body = item.description || item.notes || item.problem || '';
+  const contributors = (Array.isArray(item.contributors) ? item.contributors : []).filter(c => c && c.name);
+  const blocksHtml = renderContentBlocks(item.blocks);
+
+  const section = (title, inner) => `<div class="pf-detail-section"><div class="section-title">${title}</div>${inner}</div>`;
+  const galleryHtml = rest.length
+    ? section('Gallery', `<div class="pf-detail-gallery">${rest.map((src, i) => `<button type="button" class="pf-thumb" data-i="${i + 1}"><img src="${escapeHtml(src)}" loading="lazy" alt=""></button>`).join('')}</div>`)
+    : '';
+  const filesHtml = files.length ? section('Files', `<div class="pf-files">${files.map(fileCardHtml).join('')}</div>`) : '';
+  const contribHtml = contributors.length
+    ? section('Contributors', `<div class="pf-contributors">${contributors.map(c => `<div class="pf-contrib"><span class="pf-contrib-av">${initials(c.name)}</span><div class="min-w-0"><b>${escapeHtml(c.name)}</b>${c.role ? `<small>${escapeHtml(c.role)}</small>` : ''}</div></div>`).join('')}</div>`)
+    : '';
+  const empty = !images.length && !files.length && !blocksHtml && !body && !item.abstract && !rows;
 
   document.getElementById('entityModal')?.remove();
   const wrap = document.createElement('div');
   wrap.innerHTML = `
-  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
-    <div class="modal-header">
-      <div class="d-flex align-items-center gap-2">
-        <span class="stat-ico"><i class="bi bi-${CFG.icon}"></i></span>
-        <h5 class="modal-title">${escapeHtml(CFG.title || 'Details')}</h5>
+  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content pf-detail">
+    <button type="button" class="btn-close pf-detail-x" data-bs-dismiss="modal" aria-label="Close"></button>
+    ${hero ? `<button type="button" class="pf-hero-img" data-i="0"><img src="${escapeHtml(hero)}" alt="${escapeHtml(titleOf)}"><span class="pf-hero-zoom"><i class="bi bi-arrows-fullscreen"></i></span></button>` : ''}
+    <div class="modal-body pf-detail-body">
+      <div class="pf-detail-head">
+        <span class="stat-ico"><i class="bi bi-${icon}"></i></span>
+        <div class="min-w-0">
+          <h2 class="pf-detail-title">${escapeHtml(titleOf)}</h2>
+          ${item.subtitle ? `<p class="pf-detail-sub">${escapeHtml(item.subtitle)}</p>` : ''}
+        </div>
       </div>
-      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-    </div>
-    <div class="modal-body">
-      ${chips ? `<div class="d-flex flex-wrap gap-2 mb-3">${chips}</div>` : ''}
-      ${gallery}
-      ${CFG.body ? `<p class="mt-3" style="white-space:pre-wrap;font-size:14px">${escapeHtml(CFG.body)}</p>` : ''}
-      ${rows ? `<dl class="kv mt-2">${rows}</dl>` : ''}
+      ${chips ? `<div class="d-flex flex-wrap gap-2 mt-3 mb-1">${chips}</div>` : ''}
+      ${item.abstract ? `<p class="pf-detail-abstract">${escapeHtml(item.abstract)}</p>` : ''}
+      ${body ? `<p class="pf-detail-text">${escapeHtml(body)}</p>` : ''}
+      ${blocksHtml ? `<div class="pf-blocks">${blocksHtml}</div>` : ''}
+      ${contribHtml}
+      ${galleryHtml}
+      ${filesHtml}
+      ${rows ? section('Details', `<dl class="kv">${rows}</dl>`) : ''}
+      ${empty ? '<p class="text-faint" style="font-size:13px"><i class="bi bi-info-circle me-1"></i>No extra details added yet.</p>' : ''}
     </div>
     <div class="modal-footer">
       ${links}
+      ${rich ? `<button type="button" class="btn btn-ghost owner-only" id="pfDetailStudio"><i class="bi bi-easel me-1"></i>Content studio</button>` : ''}
       <button type="button" class="btn btn-ghost owner-only" id="pfDetailEdit"><i class="bi bi-pencil me-1"></i>Edit</button>
       <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
     </div>
@@ -1746,11 +1868,26 @@ function openPortfolioDetail(entity, id) {
   document.body.appendChild(wrap);
   const modalEl = document.getElementById('entityModal');
   const modal = new bootstrap.Modal(modalEl); modal.show();
-  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+
+  // Chain follow-up actions to fire only AFTER this modal fully hides, so
+  // bootstrap cleans up its backdrop before the next modal opens.
+  let nextAction = null;
+  modalEl.addEventListener('hidden.bs.modal', () => { wrap.remove(); if (nextAction) { const a = nextAction; nextAction = null; a(); } });
+
+  const reopen = () => setTimeout(() => {
+    if (document.body.dataset.page === 'profile') initProfile();
+    openPortfolioDetail(entity, id);
+  }, 60);
 
   const ed = document.getElementById('pfDetailEdit');
-  if (ed) ed.onclick = () => { modal.hide(); openEntityModal(entity, id, initProfile); };
-  modalEl.querySelectorAll('.pf-thumb').forEach(t => t.onclick = () => openLightbox(photos, +t.dataset.i));
+  if (ed) ed.onclick = () => { nextAction = () => openEntityModal(entity, id, reopen); modal.hide(); };
+  const st = document.getElementById('pfDetailStudio');
+  if (st) st.onclick = () => { nextAction = () => openContentStudio(entity, id, reopen); modal.hide(); };
+
+  // lightbox: hero (data-i=0) + gallery thumbs index into the full image list
+  modalEl.querySelectorAll('[data-i]').forEach(el => el.onclick = () => openLightbox(images, +el.dataset.i));
+  // zoom inline content-block images
+  modalEl.querySelectorAll('[data-zoom]').forEach(el => el.onclick = () => openLightbox([el.dataset.zoom], 0));
 }
 
 /* Full-screen image viewer with keyboard + arrow navigation. */
@@ -1784,6 +1921,164 @@ function openLightbox(photos, index) {
   document.addEventListener('keydown', onKey);
   document.body.appendChild(box);
   render();
+}
+
+/* ---------- CONTENT STUDIO (owner-only rich editor) ----------
+   A block-based builder for projects & research. Manages an ordered list
+   of content blocks (heading / text / code / image / file) plus a list of
+   contributors. Images and files can be uploaded (stored as data URLs) or
+   linked by URL. Everything it produces renders publicly in the detail view. */
+function openContentStudio(entity, id, afterSave) {
+  if (!Security.guard('manage content')) return;
+  const item = DB.get(entity, id);
+  if (!item) return;
+  let blocks = JSON.parse(JSON.stringify(item.blocks || []));
+  let contributors = JSON.parse(JSON.stringify(item.contributors || []));
+
+  document.getElementById('entityModal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title"><i class="bi bi-easel me-2"></i>Content studio — ${escapeHtml(item.name || item.title || '')}</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      <div class="section-title">Contributors</div>
+      <div id="csContrib"></div>
+      <button class="btn btn-soft btn-sm mt-2" id="csAddContrib"><i class="bi bi-person-plus me-1"></i>Add contributor</button>
+      <hr class="my-4">
+      <div class="d-flex align-items-center mb-3">
+        <div class="section-title mb-0">Content blocks</div>
+        <div class="dropdown ms-auto">
+          <button class="btn btn-primary btn-sm" data-bs-toggle="dropdown"><i class="bi bi-plus-lg me-1"></i>Add block</button>
+          <ul class="dropdown-menu dropdown-menu-end shadow">
+            <li><a class="dropdown-item" href="#" data-add="heading"><i class="bi bi-type-h1 me-2"></i>Heading</a></li>
+            <li><a class="dropdown-item" href="#" data-add="text"><i class="bi bi-text-paragraph me-2"></i>Text</a></li>
+            <li><a class="dropdown-item" href="#" data-add="code"><i class="bi bi-code-slash me-2"></i>Code</a></li>
+            <li><a class="dropdown-item" href="#" data-add="image"><i class="bi bi-image me-2"></i>Image</a></li>
+            <li><a class="dropdown-item" href="#" data-add="file"><i class="bi bi-paperclip me-2"></i>File</a></li>
+          </ul>
+        </div>
+      </div>
+      <div id="csBlocks" class="stack-16"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+      <button class="btn btn-primary" id="csSave"><i class="bi bi-check-lg me-1"></i>Save content</button>
+    </div>
+  </div></div></div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('entityModal');
+  const modal = new bootstrap.Modal(modalEl); modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+
+  const blocksEl = document.getElementById('csBlocks');
+  const contribEl = document.getElementById('csContrib');
+  const blockIcon = { heading: 'type-h1', text: 'text-paragraph', code: 'code-slash', image: 'image', file: 'paperclip' };
+
+  const blockBody = (b) => {
+    if (b.type === 'heading') return `<input data-bf="text" placeholder="Heading text" value="${escapeHtml(b.text || '')}">`;
+    if (b.type === 'text') return `<textarea data-bf="text" rows="3" placeholder="Write text… (line breaks are kept)">${escapeHtml(b.text || '')}</textarea>`;
+    if (b.type === 'code') return `<input data-bf="lang" placeholder="Language (e.g. python)" value="${escapeHtml(b.lang || '')}"><textarea data-bf="code" rows="5" class="img-list mt-2" placeholder="Paste code…">${escapeHtml(b.code || '')}</textarea>`;
+    if (b.type === 'image') return `
+      ${b.src ? `<div class="cs-prev"><img src="${escapeHtml(b.src)}" alt=""></div>` : ''}
+      <input type="file" data-file accept="image/*" class="file-input">
+      <input data-bf="src" class="mt-2" placeholder="…or paste an image URL" value="${escapeHtml(b.src && b.src.startsWith('data:') ? '' : (b.src || ''))}">
+      <input data-bf="caption" class="mt-2" placeholder="Caption (optional)" value="${escapeHtml(b.caption || '')}">`;
+    if (b.type === 'file') return `
+      ${b.name ? `<div class="cs-fileinfo"><i class="bi bi-paperclip me-1"></i>${escapeHtml(b.name)} <small class="text-faint">${b.size ? fmtBytes(b.size) : ''}</small></div>` : ''}
+      <input type="file" data-file class="file-input">
+      <input data-bf="url" class="mt-2" placeholder="…or paste a file URL" value="${escapeHtml(b.url || '')}">
+      <input data-bf="label" class="mt-2" placeholder="Label (optional)" value="${escapeHtml(b.label || '')}">`;
+    return '';
+  };
+  const blockRow = (b, i) => `
+    <div class="card card-pad cs-block" data-i="${i}">
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <span class="chip chip-outline"><i class="bi bi-${blockIcon[b.type] || 'square'} me-1"></i>${b.type}</span>
+        <div class="ms-auto cs-tools">
+          <button data-mv="-1" title="Move up"><i class="bi bi-arrow-up"></i></button>
+          <button data-mv="1" title="Move down"><i class="bi bi-arrow-down"></i></button>
+          <button data-del class="del" title="Delete"><i class="bi bi-trash3"></i></button>
+        </div>
+      </div>
+      ${blockBody(b)}
+    </div>`;
+  const contribRow = (c, i) => `
+    <div class="d-flex gap-2 mb-2 cs-contrib" data-i="${i}">
+      <input data-cf="name" placeholder="Name" value="${escapeHtml(c.name || '')}" style="flex:1.2">
+      <input data-cf="role" placeholder="Role / contribution" value="${escapeHtml(c.role || '')}" style="flex:1">
+      <button class="btn btn-ghost btn-sm text-danger" data-delc title="Remove"><i class="bi bi-x-lg"></i></button>
+    </div>`;
+
+  const syncContrib = () => contribEl.querySelectorAll('.cs-contrib').forEach(row => {
+    const i = +row.dataset.i; if (!contributors[i]) return;
+    row.querySelectorAll('[data-cf]').forEach(inp => { contributors[i][inp.dataset.cf] = inp.value.trim(); });
+  });
+
+  // Sync DOM → blocks model. Async: file inputs are read into data URLs here
+  // so that reordering / adding never loses a freshly picked file.
+  async function syncBlocks() {
+    for (const row of blocksEl.querySelectorAll('.cs-block')) {
+      const i = +row.dataset.i; const b = blocks[i]; if (!b) continue;
+      row.querySelectorAll('[data-bf]').forEach(inp => { if (inp.dataset.bf === 'src') return; b[inp.dataset.bf] = inp.value; });
+      const fi = row.querySelector('input[type="file"][data-file]');
+      let uploaded = null, upFile = null;
+      if (fi && fi.files && fi.files[0]) {
+        upFile = fi.files[0];
+        if (upFile.size > MAX_UPLOAD_BYTES) { toast(`“${upFile.name}” too large (max ${fmtBytes(MAX_UPLOAD_BYTES)}).`, 'err'); upFile = null; }
+        else uploaded = await readFileAsDataURL(upFile);
+      }
+      if (b.type === 'image') {
+        const typed = (row.querySelector('[data-bf="src"]') || {}).value;
+        if (uploaded) b.src = uploaded;
+        else if (typed && typed.trim()) b.src = typed.trim();
+      } else if (b.type === 'file') {
+        if (uploaded) { b.data = uploaded; b.name = upFile.name; b.size = upFile.size; b.ftype = upFile.type; }
+      }
+    }
+  }
+  const sync = async () => { await syncBlocks(); syncContrib(); };
+
+  const renderContrib = () => {
+    contribEl.innerHTML = contributors.length ? contributors.map(contribRow).join('')
+      : '<p class="text-faint" style="font-size:12.5px">No contributors yet.</p>';
+    contribEl.querySelectorAll('[data-delc]').forEach(b => b.onclick = () => { syncContrib(); contributors.splice(+b.closest('.cs-contrib').dataset.i, 1); renderContrib(); });
+  };
+  const renderBlocks = () => {
+    blocksEl.innerHTML = blocks.length ? blocks.map(blockRow).join('')
+      : '<p class="text-faint" style="font-size:13px">No blocks yet — use “Add block” to build the page.</p>';
+    blocksEl.querySelectorAll('[data-del]').forEach(btn => btn.onclick = async () => { await sync(); blocks.splice(+btn.closest('.cs-block').dataset.i, 1); renderBlocks(); });
+    blocksEl.querySelectorAll('[data-mv]').forEach(btn => btn.onclick = async () => {
+      await sync();
+      const i = +btn.closest('.cs-block').dataset.i, j = i + (+btn.dataset.mv);
+      if (j < 0 || j >= blocks.length) return;
+      [blocks[i], blocks[j]] = [blocks[j], blocks[i]];
+      renderBlocks();
+    });
+  };
+  renderContrib(); renderBlocks();
+
+  wrap.querySelectorAll('[data-add]').forEach(a => a.onclick = async (e) => { e.preventDefault(); await sync(); blocks.push({ type: a.dataset.add }); renderBlocks(); });
+  document.getElementById('csAddContrib').onclick = () => { syncContrib(); contributors.push({ name: '', role: '' }); renderContrib(); };
+
+  document.getElementById('csSave').onclick = async () => {
+    const btn = document.getElementById('csSave'); btn.disabled = true;
+    await sync();
+    const cleanBlocks = blocks.filter(b => {
+      if (b.type === 'heading' || b.type === 'text') return (b.text || '').trim();
+      if (b.type === 'code') return (b.code || '').trim();
+      if (b.type === 'image') return !!b.src;
+      if (b.type === 'file') return !!(b.data || b.url);
+      return false;
+    });
+    const saved = DB.upsert(entity, { id, blocks: cleanBlocks, contributors: contributors.filter(c => c.name) });
+    btn.disabled = false;
+    if (!saved) return;
+    toast('Content saved.', 'ok'); modal.hide();
+    if (afterSave) afterSave();
+  };
 }
 
 /* ---------- OWNER DASHBOARD (protected management hub) ---------- */
