@@ -60,7 +60,10 @@ const DB = {
         // guarantee every collection exists even if an old backup lacked it
         ['opportunities','tasks','documents','achievements','contacts','research','projects','reminders']
           .forEach(k => { if (!Array.isArray(this.data[k])) this.data[k] = []; });
-        if (!this.data.profile) this.data.profile = SEED_DATA().profile;
+        // merge in any newly added profile fields (department, socials, references…)
+        // existing values win; brand-new keys fall back to the seed defaults.
+        this.data.profile = Object.assign({}, SEED_DATA().profile, this.data.profile || {});
+        if (!Array.isArray(this.data.profile.references)) this.data.profile.references = SEED_DATA().profile.references;
       } else {
         // First visit: seed the visitor's own sandbox copy (allowed for everyone).
         this.data = SEED_DATA();
@@ -207,6 +210,28 @@ function initials(name) {
   return (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
 
+/* human-readable file size */
+function fmtBytes(n) {
+  if (n == null || isNaN(n)) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return Math.round(n / 1024) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+
+/* Read an uploaded File as a base64 data URL (so it can live in localStorage). */
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+/* Cap uploads so a single file can't blow the ~5 MB localStorage budget.
+   Bigger files should use the Google Drive / download link fields instead. */
+const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+
 /* small toast notifications (bottom-right) */
 function toast(msg, kind = 'ok') {
   let wrap = document.querySelector('.toast-wrap');
@@ -251,6 +276,60 @@ function typeIcon(type) {
     Internship: 'briefcase-fill', Training: 'easel-fill', Volunteer: 'heart-fill', Hackathon: 'code-slash'
   };
   return map[type] || 'stars';
+}
+
+/* Build the list of social / contact links the owner has filled in.
+   Only links that actually have a value are returned, so the UI never
+   shows an empty icon. WhatsApp is turned into a wa.me deep-link. */
+function socialLinks(p) {
+  p = p || {};
+  const out = [];
+  if (p.linkedin) out.push({ ico: 'linkedin', label: 'LinkedIn', href: p.linkedin });
+  if (p.facebook) out.push({ ico: 'facebook', label: 'Facebook', href: p.facebook });
+  if (p.whatsapp) out.push({ ico: 'whatsapp', label: 'WhatsApp', href: 'https://wa.me/' + p.whatsapp.replace(/[^\d]/g, '') });
+  if (p.github)   out.push({ ico: 'github', label: 'GitHub', href: p.github });
+  if (p.website)  out.push({ ico: 'globe', label: 'Website', href: p.website });
+  if (p.email)    out.push({ ico: 'envelope-fill', label: 'Email', href: 'mailto:' + p.email });
+  return out;
+}
+
+/* ==========================================================
+   2b. SHARED FOOTER — ownership / copyright notice on every page.
+   Injected once. Lands inside .main on app-shell pages so it sits
+   below the content column; on the portfolio / landing it appends
+   to <body>. The copyright owner is the profile name.
+   ========================================================== */
+function renderFooter() {
+  if (document.getElementById('siteFooter')) return;
+  const p = (DB.data && DB.data.profile) || {};
+  const owner = escapeHtml(p.name || 'Md Imran Hossain');
+  const year = new Date().getFullYear();
+  const social = socialLinks(p)
+    .map(l => `<a href="${escapeHtml(l.href)}" target="_blank" rel="noopener" title="${l.label}" aria-label="${l.label}"><i class="bi bi-${l.ico}"></i></a>`)
+    .join('');
+
+  const foot = document.createElement('footer');
+  foot.id = 'siteFooter';
+  foot.className = 'site-footer';
+  foot.innerHTML = `
+    <div class="sf-inner">
+      <div class="sf-brand">
+        <span class="sf-logo">O</span>
+        <div><b>OppTrack</b><small>Digital CV &amp; Opportunity Management System</small></div>
+      </div>
+      <div class="sf-legal">
+        <p class="sf-copy">© ${year} ${owner}. All rights reserved.</p>
+        <p class="sf-note">
+          <i class="bi bi-c-circle me-1"></i>Designed &amp; developed by ${owner}.
+          This project and all of its content are proprietary — no part may be copied,
+          reproduced, redistributed or reused in any form without the author's explicit
+          written permission.
+        </p>
+      </div>
+      ${social ? `<div class="sf-social">${social}</div>` : ''}
+    </div>`;
+
+  (document.querySelector('.main') || document.body).appendChild(foot);
 }
 
 /* ==========================================================
@@ -421,7 +500,10 @@ const SCHEMAS = {
       { key: 'openDate', label: 'Open date', type: 'date' },
       { key: 'deadline', label: 'Deadline', type: 'date' },
       { key: 'eventDate', label: 'Event date', type: 'date' },
-      { key: 'notes', label: 'Notes', type: 'textarea', span: true }
+      { key: 'notes', label: 'Notes', type: 'textarea', span: true },
+      { key: 'image', label: 'Cover image URL', type: 'url', span: true },
+      { key: 'gallery', label: 'Photo gallery', type: 'images', span: true },
+      { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio (under Wins)' }
     ]
   },
   tasks: {
@@ -442,6 +524,7 @@ const SCHEMAS = {
       { key: 'name', label: 'Document name', type: 'text', required: true, span: true },
       { key: 'category', label: 'Category', type: 'select', opts: 'documentCategories' },
       { key: 'status', label: 'Status', type: 'select', opts: 'documentStatuses' },
+      { key: 'file', label: 'Upload file (PDF, DOCX, image…)', type: 'file', span: true },
       { key: 'updatedDate', label: 'Last updated', type: 'date' },
       { key: 'expiryDate', label: 'Expiry date', type: 'date' },
       { key: 'driveLink', label: 'Google Drive link', type: 'url', span: true },
@@ -454,9 +537,11 @@ const SCHEMAS = {
       { key: 'title', label: 'Title', type: 'text', required: true, span: true },
       { key: 'category', label: 'Category', type: 'select', opts: 'achievementCategories' },
       { key: 'date', label: 'Date', type: 'date' },
-      { key: 'image', label: 'Image URL', type: 'url' },
+      { key: 'image', label: 'Cover image URL', type: 'url' },
       { key: 'certLink', label: 'Certificate link', type: 'url' },
-      { key: 'description', label: 'Description', type: 'textarea', span: true }
+      { key: 'description', label: 'Description', type: 'textarea', span: true },
+      { key: 'gallery', label: 'Photo gallery', type: 'images', span: true },
+      { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   },
   contacts: {
@@ -479,7 +564,8 @@ const SCHEMAS = {
       { key: 'field', label: 'Field', type: 'select', opts: 'subTypes' },
       { key: 'stage', label: 'Stage', type: 'select', opts: ['Idea', 'Literature Review', 'Problem Defined', 'In Progress', 'Drafting', 'Published'] },
       { key: 'problem', label: 'Problem statement', type: 'textarea', span: true },
-      { key: 'references', label: 'References / links', type: 'textarea', span: true }
+      { key: 'references', label: 'References / links', type: 'textarea', span: true },
+      { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   },
   projects: {
@@ -491,7 +577,10 @@ const SCHEMAS = {
       { key: 'technologies', label: 'Technologies', type: 'text' },
       { key: 'team', label: 'Team members', type: 'text' },
       { key: 'link', label: 'Repo / demo link', type: 'url', span: true },
-      { key: 'description', label: 'Description', type: 'textarea', span: true }
+      { key: 'description', label: 'Description', type: 'textarea', span: true },
+      { key: 'image', label: 'Cover image URL', type: 'url', span: true },
+      { key: 'gallery', label: 'Photo gallery', type: 'images', span: true },
+      { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   }
 };
@@ -501,9 +590,41 @@ const SCHEMAS = {
    Built from SCHEMAS so there is only one form to maintain.
    ========================================================== */
 function buildField(f, value) {
+  // Checkbox / toggle (e.g. "Show on portfolio") — laid out as one inline row.
+  if (f.type === 'checkbox') {
+    return `<div class="field ${f.span ? 'col-span' : ''}">
+      <label class="switch-row">
+        <input type="checkbox" name="${f.key}" ${value ? 'checked' : ''}>
+        <span>${f.hint || f.label}</span>
+      </label>
+    </div>`;
+  }
+
+  // File upload — shows the currently stored file (if any) with a "remove"
+  // option, plus a picker to replace it. Saved as a base64 data URL.
+  if (f.type === 'file') {
+    const cur = value && value.name
+      ? `<div class="file-current">
+           <i class="bi bi-paperclip"></i>
+           <span class="fc-name">${escapeHtml(value.name)}</span>
+           <small class="text-faint">${fmtBytes(value.size)}</small>
+           <label class="fc-remove"><input type="checkbox" name="__remove_${f.key}"> remove</label>
+         </div>`
+      : '';
+    return `<div class="field ${f.span ? 'col-span' : ''}">
+      <label>${f.label}</label>
+      ${cur}
+      <input type="file" name="${f.key}" class="file-input">
+      <small class="text-faint" style="font-size:11px">Stored privately in your browser. Max ${fmtBytes(MAX_UPLOAD_BYTES)} — use a Drive link for larger files.</small>
+    </div>`;
+  }
   const v = value == null ? '' : value;
   let input;
-  if (f.type === 'textarea') {
+  if (f.type === 'images') {
+    // gallery of image URLs, edited one-per-line
+    const txt = Array.isArray(value) ? value.join('\n') : v;
+    input = `<textarea name="${f.key}" class="img-list" rows="3" placeholder="Paste image URLs — one per line">${escapeHtml(txt)}</textarea>`;
+  } else if (f.type === 'textarea') {
     input = `<textarea name="${f.key}" placeholder="${f.label}">${escapeHtml(v)}</textarea>`;
   } else if (f.type === 'select') {
     let opts;
@@ -522,7 +643,7 @@ function buildField(f, value) {
     input = `<input type="${f.type}" name="${f.key}" value="${escapeHtml(v)}" placeholder="${f.label}">`;
   }
   return `<div class="field ${f.span ? 'col-span' : ''}">
-    <label>${f.label}${f.required ? ' <span class="req">*</span>' : ''}</label>
+    <label>${f.label}${f.required ? ' <span class="req">*</span>' : ''}${f.type === 'images' ? ' <small class="text-faint">(one URL per line)</small>' : ''}</label>
     ${input}
   </div>`;
 }
@@ -572,16 +693,49 @@ function openEntityModal(entity, id, afterSave) {
   modal.show();
   modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
 
-  document.getElementById('entitySave').onclick = () => {
+  document.getElementById('entitySave').onclick = async () => {
     const form = document.getElementById('entityForm');
+    const saveBtn = document.getElementById('entitySave');
     const out = id ? { id } : {};
-    schema.fields.forEach(f => { out[f.key] = form.elements[f.key].value.trim(); });
+    schema.fields.forEach(f => {
+      const el = form.elements[f.key];
+      if (!el || f.type === 'file') return; // file fields handled asynchronously below
+      if (f.type === 'checkbox') out[f.key] = el.checked;
+      else if (f.type === 'images') out[f.key] = el.value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+      else out[f.key] = el.value.trim();
+    });
 
-    // validate required fields
-    const missing = schema.fields.find(f => f.required && !out[f.key]);
+    // validate required (text) fields
+    const missing = schema.fields.find(f => f.required && f.type !== 'file' && !out[f.key]);
     if (missing) { toast(`${missing.label} is required.`, 'err'); form.elements[missing.key].focus(); return; }
 
-    DB.upsert(entity, out);
+    // file uploads: read a newly picked file, honour "remove", else preserve
+    // the existing one (keys left off `out` are kept by DB.upsert's merge).
+    try {
+      saveBtn.disabled = true;
+      for (const f of schema.fields.filter(x => x.type === 'file')) {
+        const input = form.querySelector(`input[type="file"][name="${f.key}"]`);
+        const file = input && input.files && input.files[0];
+        const remove = form.elements['__remove_' + f.key] && form.elements['__remove_' + f.key].checked;
+        if (file) {
+          if (file.size > MAX_UPLOAD_BYTES) {
+            toast(`“${file.name}” is too large (max ${fmtBytes(MAX_UPLOAD_BYTES)}). Use a Drive link instead.`, 'err');
+            saveBtn.disabled = false; return;
+          }
+          out[f.key] = { name: file.name, type: file.type, size: file.size, data: await readFileAsDataURL(file) };
+        } else if (remove) {
+          out[f.key] = null;
+        }
+      }
+    } catch (e) {
+      saveBtn.disabled = false;
+      toast('Could not read the selected file.', 'err');
+      return;
+    }
+
+    const saved = DB.upsert(entity, out);
+    saveBtn.disabled = false;
+    if (!saved) return; // guard rejected (not the owner)
     toast(`${schema.label} ${isEdit ? 'updated' : 'added'}.`, 'ok');
     modal.hide();
     if (afterSave) afterSave();
@@ -833,7 +987,7 @@ function initOpportunities() {
         <td class="name-cell">
           <div class="d-flex align-items-center gap-2">
             <span class="stat-ico-sm t-${statusTone(o.status)}"><i class="bi bi-${typeIcon(o.type)}"></i></span>
-            <div><b><a href="opportunity-details.html?id=${o.id}">${escapeHtml(o.name)}</a></b>
+            <div><b><a href="opportunity-details.html?id=${o.id}">${escapeHtml(o.name)}</a></b>${o.featured ? ' <i class="bi bi-star-fill" style="color:var(--amber);font-size:11px" title="Shown on portfolio"></i>' : ''}
             <small>${escapeHtml(o.organizer || '')}${o.country ? ' · ' + escapeHtml(o.country) : ''}</small></div>
           </div>
         </td>
@@ -991,6 +1145,31 @@ function initTasks() {
   draw();
 }
 
+/* Download a document's stored file (data URL → file on disk). */
+function downloadDoc(id) {
+  const d = DB.get('documents', id);
+  if (!d || !d.file) { toast('No file attached to this document.', 'err'); return; }
+  const a = document.createElement('a');
+  a.href = d.file.data;
+  a.download = d.file.name || 'document';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* Open a document's stored file in a new tab. Converts the data URL to a
+   short-lived blob URL so browsers reliably preview PDFs / images. */
+function viewDoc(id) {
+  const d = DB.get('documents', id);
+  if (!d || !d.file) { toast('No file attached to this document.', 'err'); return; }
+  fetch(d.file.data)
+    .then(r => r.blob())
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    })
+    .catch(() => toast('Could not open the file.', 'err'));
+}
+
 /* ---------- DOCUMENTS ---------- */
 function initDocuments() {
   const host = document.getElementById('docHost');
@@ -998,16 +1177,23 @@ function initDocuments() {
     const docs = DB.getAll('documents');
     if (!docs.length) { host.innerHTML = emptyState('folder', 'No documents yet', 'Track passports, CVs, SOPs, transcripts and their status.', 'Add document', () => openEntityModal('documents', null, draw), true); return; }
     host.innerHTML = `<div class="card table-card"><table class="dt"><thead><tr>
-        <th>Document</th><th>Category</th><th>Status</th><th>Updated</th><th>Expiry</th><th>Links</th><th></th>
+        <th>Document</th><th>Category</th><th>Status</th><th>Updated</th><th>Expiry</th><th>File / Links</th><th></th>
       </tr></thead><tbody>${docs.map(dc => {
         const exp = daysUntil(dc.expiryDate);
+        const linkBits = [];
+        if (dc.file) {
+          linkBits.push(`<a href="#" title="Download ${escapeHtml(dc.file.name)} (${fmtBytes(dc.file.size)})" onclick="event.preventDefault();downloadDoc('${dc.id}')"><i class="bi bi-download"></i></a>`);
+          linkBits.push(`<a href="#" title="Open ${escapeHtml(dc.file.name)}" onclick="event.preventDefault();viewDoc('${dc.id}')"><i class="bi bi-eye"></i></a>`);
+        }
+        if (dc.driveLink) linkBits.push(`<a href="${escapeHtml(dc.driveLink)}" target="_blank" rel="noopener" title="Drive"><i class="bi bi-google text-soft"></i></a>`);
+        if (dc.downloadLink) linkBits.push(`<a href="${escapeHtml(dc.downloadLink)}" target="_blank" rel="noopener" title="Download link"><i class="bi bi-link-45deg text-soft"></i></a>`);
         return `<tr>
-          <td class="name-cell"><b>${escapeHtml(dc.name)}</b></td>
+          <td class="name-cell"><b>${escapeHtml(dc.name)}</b>${dc.file ? ` <i class="bi bi-paperclip text-soft" title="${escapeHtml(dc.file.name)} · ${fmtBytes(dc.file.size)}"></i>` : ''}</td>
           <td><span class="chip chip-outline">${escapeHtml(dc.category || '—')}</span></td>
           <td>${statusChip(dc.status)}</td>
           <td class="date-cell">${fmtDate(dc.updatedDate)}</td>
           <td class="date-cell ${exp != null && exp < 60 ? 'text-danger' : ''}">${fmtDate(dc.expiryDate)}</td>
-          <td>${dc.driveLink ? `<a href="${escapeHtml(dc.driveLink)}" target="_blank" rel="noopener" title="Drive"><i class="bi bi-google text-soft"></i></a> ` : ''}${dc.downloadLink ? `<a href="${escapeHtml(dc.downloadLink)}" target="_blank" rel="noopener" title="Download"><i class="bi bi-download text-soft"></i></a>` : ''}${(!dc.driveLink && !dc.downloadLink) ? '<span class="text-faint">—</span>' : ''}</td>
+          <td><div class="doc-links">${linkBits.length ? linkBits.join('') : '<span class="text-faint">—</span>'}</div></td>
           <td><div class="row-actions">
             <button class="owner-only" onclick="openEntityModal('documents','${dc.id}')"><i class="bi bi-pencil"></i></button>
             <button class="del owner-only" onclick="confirmDelete('documents','${dc.id}')"><i class="bi bi-trash3"></i></button>
@@ -1027,7 +1213,7 @@ function initAchievements() {
     if (!items.length) { host.innerHTML = emptyState('trophy', 'No achievements yet', 'Showcase competitions, awards, certifications and leadership roles.', 'Add achievement', () => openEntityModal('achievements', null, draw), true); return; }
     host.innerHTML = `<div class="gal-grid">${items.map(a => `
       <div class="gal-card">
-        <div class="gc-media">${a.image ? `<img src="${escapeHtml(a.image)}" alt="${escapeHtml(a.title)}">` : `<i class="bi bi-${typeIcon(a.category) || 'trophy-fill'}"></i>`}</div>
+        <div class="gc-media">${a.image ? `<img src="${escapeHtml(a.image)}" alt="${escapeHtml(a.title)}">` : `<i class="bi bi-${typeIcon(a.category) || 'trophy-fill'}"></i>`}${a.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
         <div class="gc-body">
           <div class="d-flex align-items-center gap-2 mb-1"><span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || 'Achievement')}</span><small class="text-faint num ms-auto">${fmtDate(a.date)}</small></div>
           <b>${escapeHtml(a.title)}</b>
@@ -1108,7 +1294,7 @@ function initProjects() {
     if (!items.length) { host.innerHTML = emptyState('diagram-3', 'No projects yet', 'Track project ideas and active builds with their tech stack.', 'Add project', () => openEntityModal('projects', null, draw), true); return; }
     host.innerHTML = `<div class="gal-grid">${items.map(p => `
       <div class="card card-pad">
-        <div class="d-flex align-items-center gap-2 mb-2"><span class="chip t-${statusTone(p.status)}"><span class="dot"></span>${escapeHtml(p.status || 'Idea')}</span>${p.category ? `<span class="chip chip-outline">${escapeHtml(p.category)}</span>` : ''}</div>
+        <div class="d-flex align-items-center gap-2 mb-2"><span class="chip t-${statusTone(p.status)}"><span class="dot"></span>${escapeHtml(p.status || 'Idea')}</span>${p.category ? `<span class="chip chip-outline">${escapeHtml(p.category)}</span>` : ''}${p.featured ? '<span class="chip t-amber" title="Shown on portfolio"><i class="bi bi-star-fill"></i></span>' : ''}</div>
         <b style="font-size:15px;display:block">${escapeHtml(p.name)}</b>
         <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(p.description || '')}</p>
         ${p.technologies ? `<div class="mb-1" style="font-size:12px"><i class="bi bi-cpu me-1 text-soft"></i>${escapeHtml(p.technologies)}</div>` : ''}
@@ -1173,16 +1359,19 @@ function initCategories() {
   draw();
 }
 
-/* ---------- PROFILE / PORTFOLIO ---------- */
+/* ---------- PROFILE / PORTFOLIO (Digital CV) ---------- */
 function initProfile() {
   const p = DB.data.profile;
   const opps = DB.getAll('opportunities');
+  const projects = DB.getAll('projects');
+  const research = DB.getAll('research');
+  const wins = opps.filter(o => ['Won', 'Accepted', 'Completed'].includes(o.status));
   const stats = {
     applied: opps.filter(o => !['New', 'Researching'].includes(o.status)).length,
-    wins: opps.filter(o => ['Won', 'Accepted', 'Completed'].includes(o.status)).length,
-    projects: DB.getAll('projects').length,
+    wins: wins.length,
+    projects: projects.length,
     certs: DB.getAll('achievements').filter(a => a.category === 'Certification').length,
-    research: DB.getAll('research').length
+    research: research.length
   };
 
   // hero + about
@@ -1196,33 +1385,157 @@ function initProfile() {
   document.getElementById('pfSkills').innerHTML = (p.skills || []).map(s => `<span class="chip t-primary">${escapeHtml(s)}</span>`).join('');
   document.getElementById('pfInterests').innerHTML = (p.interests || []).map(s => `<span class="chip chip-outline">${escapeHtml(s)}</span>`).join('');
 
+  // hero social buttons
+  const heroSocial = document.getElementById('pfSocial');
+  if (heroSocial) heroSocial.innerHTML = socialLinks(p)
+    .map(l => `<a class="pf-soc" href="${escapeHtml(l.href)}" target="_blank" rel="noopener"><i class="bi bi-${l.ico}"></i><span>${l.label}</span></a>`).join('');
+
+  // academic / personal info card
+  const aboutEl = document.getElementById('pfAbout');
+  if (aboutEl) {
+    const rows = [
+      ['mortarboard-fill', 'University', p.university],
+      ['building', 'Department', p.department],
+      ['cpu-fill', 'Major', p.major],
+      ['award-fill', 'Degree', p.degree],
+      ['whatsapp', 'WhatsApp', p.whatsapp],
+      ['envelope-fill', 'Email', p.email]
+    ].filter(([, , v]) => v);
+    aboutEl.innerHTML = rows.map(([ico, label, v]) => `
+      <div class="pf-info-row">
+        <span class="pf-info-ico"><i class="bi bi-${ico}"></i></span>
+        <div><small>${label}</small><b>${escapeHtml(v)}</b></div>
+      </div>`).join('');
+  }
+
   // stats row
-  const sEl = document.getElementById('pfStats');
-  sEl.innerHTML = [
+  document.getElementById('pfStats').innerHTML = [
     ['Applied', stats.applied], ['Wins', stats.wins], ['Projects', stats.projects],
     ['Certifications', stats.certs], ['Research', stats.research]
   ].map(([l, v]) => `<div class="pf-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
 
+  // Owner-only edit/delete controls for a portfolio card. `initProfile`
+  // is passed as the after-save / after-delete callback so the page
+  // refreshes in place. Hidden from visitors by the `.owner-only` class.
+  const cardTools = (entity, id) => `
+    <div class="pf-tools owner-only">
+      <button title="Edit" onclick="event.stopPropagation();openEntityModal('${entity}','${id}', initProfile)"><i class="bi bi-pencil"></i></button>
+      <button class="del" title="Delete" onclick="event.stopPropagation();confirmDelete('${entity}','${id}', initProfile)"><i class="bi bi-trash3"></i></button>
+    </div>`;
+
+  // little camera badge showing how many photos a card carries
+  const photoCount = (item) => (item.image ? 1 : 0) + (Array.isArray(item.gallery) ? item.gallery.length : 0);
+  const photoBadge = (item) => { const n = photoCount(item); return n ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${n}</span>` : ''; };
+
+  // Featured selection: show only items the owner marked "Show on portfolio".
+  // If NONE are marked in a collection, fall back to showing them all so the
+  // portfolio is never empty by default.
+  const featured = (list, max) => {
+    const flagged = list.filter(x => x.featured);
+    const out = flagged.length ? flagged : list;
+    return (max && !flagged.length) ? out.slice(0, max) : out;
+  };
+
   // showcase: achievements
-  document.getElementById('pfAchievements').innerHTML = DB.getAll('achievements').slice(0, 6).map(a => `
-    <div class="gal-card">
-      <div class="gc-media">${a.image ? `<img src="${escapeHtml(a.image)}" alt="">` : `<i class="bi bi-trophy-fill"></i>`}</div>
+  document.getElementById('pfAchievements').innerHTML = featured(DB.getAll('achievements'), 6).map(a => `
+    <div class="gal-card pf-clickable" data-detail="achievements:${a.id}">
+      <div class="gc-media">${a.image ? `<img src="${escapeHtml(a.image)}" alt="">` : `<i class="bi bi-trophy-fill"></i>`}${photoBadge(a)}${cardTools('achievements', a.id)}</div>
       <div class="gc-body"><span class="chip t-${statusTone(a.category)} mb-2 d-inline-flex">${escapeHtml(a.category || '')}</span><b>${escapeHtml(a.title)}</b><p>${escapeHtml(a.description || '')}</p></div>
     </div>`).join('') || '<p class="text-soft">No achievements to show yet.</p>';
 
-  // showcase: projects
-  document.getElementById('pfProjects').innerHTML = DB.getAll('projects').slice(0, 6).map(pr => `
-    <div class="card card-pad">
+  // wins & recognition (won / accepted / completed opportunities)
+  const winsEl = document.getElementById('pfWins');
+  if (winsEl) { const w = featured(wins); winsEl.innerHTML = w.length ? w.map(o => `
+    <div class="pf-win pf-clickable" data-detail="opportunities:${o.id}">
+      <span class="pf-win-ico t-green"><i class="bi bi-${typeIcon(o.type)}"></i></span>
+      <div class="flex-grow-1">
+        <b>${escapeHtml(o.name)}</b>
+        <small>${escapeHtml(o.organizer || '')}${o.country ? ' · ' + escapeHtml(o.country) : ''}</small>
+      </div>
+      <div class="pf-win-meta">
+        <span class="chip chip-outline">${escapeHtml(o.type || '')}</span>
+        ${o.eventDate || o.deadline ? `<small class="num text-faint">${fmtDate(o.eventDate || o.deadline)}</small>` : ''}
+        ${photoBadge(o)}
+      </div>
+      ${cardTools('opportunities', o.id)}
+    </div>`).join('') : '<p class="text-soft">No wins recorded yet.</p>'; }
+
+  // showcase: projects (ongoing first, then the rest)
+  const ordered = featured([...projects].sort((a, b) =>
+    (a.status === 'Completed' ? 1 : 0) - (b.status === 'Completed' ? 1 : 0)));
+  document.getElementById('pfProjects').innerHTML = ordered.map(pr => {
+    const cover = pr.image || (Array.isArray(pr.gallery) && pr.gallery[0]);
+    return `<div class="card card-pad pf-editable pf-clickable" data-detail="projects:${pr.id}">
+      ${cardTools('projects', pr.id)}
+      ${cover ? `<div class="pf-card-media"><img src="${escapeHtml(cover)}" alt="">${photoBadge(pr)}</div>` : ''}
       <span class="chip t-${statusTone(pr.status)} mb-2 d-inline-flex"><span class="dot"></span>${escapeHtml(pr.status || '')}</span>
       <b style="display:block;font-size:15px">${escapeHtml(pr.name)}</b>
       <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(pr.description || '')}</p>
       ${pr.technologies ? `<div style="font-size:12px" class="text-soft"><i class="bi bi-cpu me-1"></i>${escapeHtml(pr.technologies)}</div>` : ''}
       ${pr.link ? `<a class="btn btn-soft btn-sm mt-2" href="${escapeHtml(pr.link)}" target="_blank" rel="noopener">View</a>` : ''}
-    </div>`).join('') || '<p class="text-soft">No projects to show yet.</p>';
+    </div>`;
+  }).join('') || '<p class="text-soft">No projects to show yet.</p>';
 
-  // edit profile button
+  // research
+  const resEl = document.getElementById('pfResearch');
+  if (resEl) { const rs = featured(research); resEl.innerHTML = rs.length ? rs.map(r => `
+    <div class="card card-pad pf-editable pf-clickable" data-detail="research:${r.id}">
+      ${cardTools('research', r.id)}
+      <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+        <span class="stat-ico t-blue"><i class="bi bi-lightbulb-fill"></i></span>
+        <b style="font-size:15px">${escapeHtml(r.title)}</b>
+        ${r.field ? `<span class="chip chip-outline">${escapeHtml(r.field)}</span>` : ''}
+        ${r.stage ? `<span class="chip t-${statusTone(r.stage)}">${escapeHtml(r.stage)}</span>` : ''}
+      </div>
+      ${r.problem ? `<p class="text-soft mt-1 mb-0" style="font-size:13px;white-space:pre-wrap">${escapeHtml(r.problem)}</p>` : ''}
+    </div>`).join('') : '<p class="text-soft">No research to show yet.</p>'; }
+
+  // make portfolio cards open a detail view (ignoring clicks on owner tools / links)
+  ['pfAchievements', 'pfWins', 'pfProjects', 'pfResearch'].forEach(cid => {
+    const c = document.getElementById(cid);
+    if (c) c.onclick = portfolioDetailDelegate;
+  });
+
+  // references / testimonials
+  const refsEl = document.getElementById('pfReferences');
+  const refs = p.references || [];
+  if (refsEl) refsEl.innerHTML = refs.length ? refs.map(r => `
+    <div class="pf-ref">
+      <div class="pf-ref-quote"><i class="bi bi-quote"></i>${escapeHtml(r.quote || '')}</div>
+      <div class="pf-ref-who">
+        <div class="pf-ref-av">${r.photo ? `<img src="${escapeHtml(r.photo)}" alt="${escapeHtml(r.name)}">` : initials(r.name)}</div>
+        <div class="min-w-0">
+          <b>${escapeHtml(r.name)}</b>
+          <small>${escapeHtml(r.position || '')}${r.institute ? ' · ' + escapeHtml(r.institute) : ''}</small>
+        </div>
+      </div>
+    </div>`).join('') : '<p class="text-soft">No references added yet.</p>';
+
+  // contact section
+  const contactEl = document.getElementById('pfContact');
+  if (contactEl) {
+    const links = socialLinks(p);
+    contactEl.innerHTML = links.length
+      ? links.map(l => `<a class="pf-soc lg" href="${escapeHtml(l.href)}" target="_blank" rel="noopener"><i class="bi bi-${l.ico}"></i><span>${l.label}</span></a>`).join('')
+      : '<p class="text-soft">No contact links added yet.</p>';
+  }
+
+  // owner-only edit hooks
   const editBtn = document.getElementById('pfEdit');
   if (editBtn) editBtn.onclick = openProfileEditor;
+  const refBtn = document.getElementById('pfManageRefs');
+  if (refBtn) refBtn.onclick = openReferencesEditor;
+
+  // owner-only "Add" buttons per section (open the same guarded modals,
+  // then re-render the portfolio in place).
+  const addHooks = {
+    pfAddWin: 'opportunities', pfAddAch: 'achievements',
+    pfAddProj: 'projects', pfAddRes: 'research'
+  };
+  Object.entries(addHooks).forEach(([id, entity]) => {
+    const b = document.getElementById(id);
+    if (b) b.onclick = () => openEntityModal(entity, null, initProfile);
+  });
 }
 
 function openProfileEditor() {
@@ -1236,12 +1549,26 @@ function openProfileEditor() {
     <div class="modal-body"><form id="pfForm" class="form-grid">
       <div class="field col-span"><label>Full name</label><input name="name" value="${escapeHtml(p.name)}"></div>
       <div class="field col-span"><label>Headline</label><input name="headline" value="${escapeHtml(p.headline || '')}"></div>
-      <div class="field"><label>Degree</label><input name="degree" value="${escapeHtml(p.degree || '')}"></div>
-      <div class="field"><label>University</label><input name="university" value="${escapeHtml(p.university || '')}"></div>
       <div class="field col-span"><label>Photo URL</label><input name="photo" value="${escapeHtml(p.photo || '')}"></div>
       <div class="field col-span"><label>Biography</label><textarea name="bio">${escapeHtml(p.bio || '')}</textarea></div>
+
+      <div class="field col-span"><div class="section-title mb-0 mt-1">Academic</div></div>
+      <div class="field"><label>Degree</label><input name="degree" value="${escapeHtml(p.degree || '')}"></div>
+      <div class="field"><label>University</label><input name="university" value="${escapeHtml(p.university || '')}"></div>
+      <div class="field"><label>Department</label><input name="department" value="${escapeHtml(p.department || '')}"></div>
+      <div class="field"><label>Major</label><input name="major" value="${escapeHtml(p.major || '')}"></div>
+
+      <div class="field col-span"><div class="section-title mb-0 mt-1">Skills &amp; interests</div></div>
       <div class="field col-span"><label>Skills (comma separated)</label><input name="skills" value="${escapeHtml((p.skills || []).join(', '))}"></div>
       <div class="field col-span"><label>Interests (comma separated)</label><input name="interests" value="${escapeHtml((p.interests || []).join(', '))}"></div>
+
+      <div class="field col-span"><div class="section-title mb-0 mt-1">Contact &amp; social</div></div>
+      <div class="field"><label>Email</label><input name="email" type="email" value="${escapeHtml(p.email || '')}"></div>
+      <div class="field"><label>WhatsApp number</label><input name="whatsapp" value="${escapeHtml(p.whatsapp || '')}"></div>
+      <div class="field"><label>LinkedIn URL</label><input name="linkedin" type="url" value="${escapeHtml(p.linkedin || '')}"></div>
+      <div class="field"><label>Facebook URL</label><input name="facebook" type="url" value="${escapeHtml(p.facebook || '')}"></div>
+      <div class="field"><label>GitHub URL</label><input name="github" type="url" value="${escapeHtml(p.github || '')}"></div>
+      <div class="field"><label>Website URL</label><input name="website" type="url" value="${escapeHtml(p.website || '')}"></div>
     </form></div>
     <div class="modal-footer"><button class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="pfSave"><i class="bi bi-check-lg me-1"></i>Save profile</button></div>
   </div></div></div>`;
@@ -1253,12 +1580,210 @@ function openProfileEditor() {
     const f = document.getElementById('pfForm');
     Object.assign(p, {
       name: f.name.value.trim(), headline: f.headline.value.trim(), degree: f.degree.value.trim(),
-      university: f.university.value.trim(), photo: f.photo.value.trim(), bio: f.bio.value.trim(),
+      university: f.university.value.trim(), department: f.department.value.trim(), major: f.major.value.trim(),
+      photo: f.photo.value.trim(), bio: f.bio.value.trim(),
+      email: f.email.value.trim(), whatsapp: f.whatsapp.value.trim(),
+      linkedin: f.linkedin.value.trim(), facebook: f.facebook.value.trim(),
+      github: f.github.value.trim(), website: f.website.value.trim(),
       skills: f.skills.value.split(',').map(s => s.trim()).filter(Boolean),
       interests: f.interests.value.split(',').map(s => s.trim()).filter(Boolean)
     });
     DB.save(); toast('Profile saved.', 'ok'); modal.hide(); initProfile();
   };
+}
+
+/* ---------- REFERENCES / TESTIMONIALS EDITOR (owner-only) ----------
+   References live on profile.references = [{name,position,institute,photo,quote}].
+   This modal edits the whole list at once: add rows, fill them, delete
+   rows, then Save writes them back through the guarded DB.save(). */
+function openReferencesEditor() {
+  if (!Security.guard('manage references')) return;
+  const p = DB.data.profile;
+  let working = JSON.parse(JSON.stringify(p.references || []));
+
+  document.getElementById('entityModal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">References &amp; testimonials</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <p class="text-soft" style="font-size:13px">Add teachers, mentors or bosses with their role, institute, photo and a short quote.</p>
+      <div id="refRows" class="stack-16"></div>
+      <button class="btn btn-soft btn-sm mt-3" id="refAdd"><i class="bi bi-plus-lg me-1"></i>Add reference</button>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="refSave"><i class="bi bi-check-lg me-1"></i>Save references</button></div>
+  </div></div></div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('entityModal');
+  const modal = new bootstrap.Modal(modalEl); modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+
+  const rowsEl = document.getElementById('refRows');
+
+  const rowHtml = (r, i) => `
+    <div class="card card-pad ref-edit" data-i="${i}">
+      <div class="d-flex align-items-center mb-2">
+        <b style="font-size:13px">Reference ${i + 1}</b>
+        <button class="btn btn-ghost btn-sm text-danger ms-auto" data-del="${i}"><i class="bi bi-trash3"></i></button>
+      </div>
+      <div class="form-grid">
+        <div class="field"><label>Name</label><input data-f="name" value="${escapeHtml(r.name || '')}"></div>
+        <div class="field"><label>Position</label><input data-f="position" value="${escapeHtml(r.position || '')}"></div>
+        <div class="field"><label>Institute / company</label><input data-f="institute" value="${escapeHtml(r.institute || '')}"></div>
+        <div class="field"><label>Photo URL</label><input data-f="photo" value="${escapeHtml(r.photo || '')}"></div>
+        <div class="field col-span"><label>Quote / what they say</label><textarea data-f="quote">${escapeHtml(r.quote || '')}</textarea></div>
+      </div>
+    </div>`;
+
+  // Pull the current DOM inputs back into `working` so re-renders don't lose edits.
+  const syncFromDom = () => {
+    rowsEl.querySelectorAll('.ref-edit').forEach(row => {
+      const i = +row.dataset.i;
+      if (!working[i]) return;
+      row.querySelectorAll('[data-f]').forEach(inp => { working[i][inp.dataset.f] = inp.value.trim(); });
+    });
+  };
+
+  const render = () => {
+    rowsEl.innerHTML = working.length ? working.map(rowHtml).join('')
+      : '<p class="text-faint" style="font-size:13px">No references yet. Add one below.</p>';
+    rowsEl.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      syncFromDom();
+      working.splice(+b.dataset.del, 1);
+      render();
+    });
+  };
+  render();
+
+  document.getElementById('refAdd').onclick = () => {
+    syncFromDom();
+    working.push({ name: '', position: '', institute: '', photo: '', quote: '' });
+    render();
+  };
+
+  document.getElementById('refSave').onclick = () => {
+    syncFromDom();
+    p.references = working.filter(r => r.name); // drop blank rows (no name)
+    DB.save(); toast('References saved.', 'ok'); modal.hide(); initProfile();
+  };
+}
+
+/* Click handler shared by every portfolio card grid. Opens the read-only
+   detail view unless the click landed on an owner tool, link or button. */
+function portfolioDetailDelegate(e) {
+  if (e.target.closest('.pf-tools') || e.target.closest('a') || e.target.closest('button')) return;
+  const card = e.target.closest('[data-detail]');
+  if (!card) return;
+  const [entity, id] = card.dataset.detail.split(':');
+  openPortfolioDetail(entity, id);
+}
+
+/* ---------- PORTFOLIO DETAIL (read-only "see everything") ----------
+   Opens a modal with the full record + a photo gallery. Photos are the
+   cover image plus every gallery URL; clicking one opens a lightbox.
+   Public visitors can view; the owner also gets an inline Edit button. */
+function openPortfolioDetail(entity, id) {
+  const item = DB.get(entity, id);
+  if (!item) return;
+
+  const CFG = {
+    achievements: {
+      title: item.title, icon: 'trophy-fill', chips: [item.category, fmtDate(item.date)],
+      body: item.description, links: [[item.certLink, 'Certificate', 'patch-check']]
+    },
+    projects: {
+      title: item.name, icon: 'diagram-3-fill', chips: [item.status, item.category],
+      body: item.description, rows: [['Technologies', item.technologies], ['Team', item.team]],
+      links: [[item.link, 'Open project', 'box-arrow-up-right']]
+    },
+    opportunities: {
+      title: item.name, icon: typeIcon(item.type), chips: [item.status, item.type, item.subType],
+      body: item.notes, rows: [['Organizer', item.organizer], ['Country', item.country],
+        ['Funding', item.fundingType], ['Deadline', fmtDate(item.deadline)], ['Event', fmtDate(item.eventDate)]],
+      links: [[item.link, 'Official page', 'box-arrow-up-right']]
+    },
+    research: {
+      title: item.title, icon: 'lightbulb-fill', chips: [item.field, item.stage],
+      body: item.problem, rows: [['References', item.references]], links: []
+    }
+  }[entity];
+  if (!CFG) return;
+
+  const photos = [item.image, ...(item.gallery || [])].filter(Boolean);
+  const chips = (CFG.chips || []).filter(c => c && c !== '—')
+    .map(c => `<span class="chip chip-outline">${escapeHtml(c)}</span>`).join('');
+  const rows = (CFG.rows || []).filter(([, v]) => v && v !== '—')
+    .map(([l, v]) => `<dt>${l}</dt><dd>${escapeHtml(v)}</dd>`).join('');
+  const links = (CFG.links || []).filter(([href]) => href)
+    .map(([href, label, ico]) => `<a class="btn btn-soft btn-sm" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="bi bi-${ico} me-1"></i>${label}</a>`).join('');
+  const gallery = photos.length
+    ? `<div class="pf-detail-gallery">${photos.map((src, i) => `<button type="button" class="pf-thumb" data-i="${i}"><img src="${escapeHtml(src)}" alt="${escapeHtml(CFG.title || '')} photo ${i + 1}" loading="lazy"></button>`).join('')}</div>`
+    : '<p class="text-faint" style="font-size:12.5px"><i class="bi bi-images me-1"></i>No photos added yet.</p>';
+
+  document.getElementById('entityModal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header">
+      <div class="d-flex align-items-center gap-2">
+        <span class="stat-ico"><i class="bi bi-${CFG.icon}"></i></span>
+        <h5 class="modal-title">${escapeHtml(CFG.title || 'Details')}</h5>
+      </div>
+      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+      ${chips ? `<div class="d-flex flex-wrap gap-2 mb-3">${chips}</div>` : ''}
+      ${gallery}
+      ${CFG.body ? `<p class="mt-3" style="white-space:pre-wrap;font-size:14px">${escapeHtml(CFG.body)}</p>` : ''}
+      ${rows ? `<dl class="kv mt-2">${rows}</dl>` : ''}
+    </div>
+    <div class="modal-footer">
+      ${links}
+      <button type="button" class="btn btn-ghost owner-only" id="pfDetailEdit"><i class="bi bi-pencil me-1"></i>Edit</button>
+      <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Close</button>
+    </div>
+  </div></div></div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('entityModal');
+  const modal = new bootstrap.Modal(modalEl); modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+
+  const ed = document.getElementById('pfDetailEdit');
+  if (ed) ed.onclick = () => { modal.hide(); openEntityModal(entity, id, initProfile); };
+  modalEl.querySelectorAll('.pf-thumb').forEach(t => t.onclick = () => openLightbox(photos, +t.dataset.i));
+}
+
+/* Full-screen image viewer with keyboard + arrow navigation. */
+function openLightbox(photos, index) {
+  if (!photos || !photos.length) return;
+  let i = index || 0;
+  document.getElementById('pfLightbox')?.remove();
+  const box = document.createElement('div');
+  box.id = 'pfLightbox';
+  box.className = 'pf-lightbox';
+
+  const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
+  const step = (d) => { i = (i + d + photos.length) % photos.length; render(); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowLeft' && photos.length > 1) step(-1);
+    else if (e.key === 'ArrowRight' && photos.length > 1) step(1);
+  };
+  const render = () => {
+    box.innerHTML = `
+      <button class="lb-close" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+      ${photos.length > 1 ? `<button class="lb-nav lb-prev" aria-label="Previous"><i class="bi bi-chevron-left"></i></button>` : ''}
+      <img src="${escapeHtml(photos[i])}" alt="Photo ${i + 1}">
+      ${photos.length > 1 ? `<button class="lb-nav lb-next" aria-label="Next"><i class="bi bi-chevron-right"></i></button>` : ''}
+      ${photos.length > 1 ? `<div class="lb-count">${i + 1} / ${photos.length}</div>` : ''}`;
+    box.querySelector('.lb-close').onclick = (e) => { e.stopPropagation(); close(); };
+    const prev = box.querySelector('.lb-prev'); if (prev) prev.onclick = (e) => { e.stopPropagation(); step(-1); };
+    const next = box.querySelector('.lb-next'); if (next) next.onclick = (e) => { e.stopPropagation(); step(1); };
+  };
+  box.onclick = (e) => { if (e.target === box) close(); }; // click backdrop to close
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(box);
+  render();
 }
 
 /* ---------- OWNER DASHBOARD (protected management hub) ---------- */
@@ -1325,6 +1850,10 @@ function initOwner() {
 
 /* ---------- INDEX / LANDING ---------- */
 function initIndex() {
+  // Public-first: visitors land on the portfolio (Digital CV). The owner's
+  // private command-centre landing is shown only after sign-in.
+  if (!Security.isOwner()) { location.replace('profile.html'); return; }
+
   const opps = DB.getAll('opportunities');
   const p = DB.data.profile;
   document.getElementById('lgName').textContent = p.name.split(' ')[0];
@@ -1393,6 +1922,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fn = PAGE_INIT[page];
   if (fn) fn();
 
+  // Ownership / copyright footer on every page.
+  renderFooter();
+
   // Show owner tools / hide them from visitors (sets <body> class + auth control)
   Security.applyMode();
 });
@@ -1410,13 +1942,26 @@ function SEED_DATA() {
   return {
     profile: {
       name: 'Md Imran Hossain',
-      headline: 'CS & Information System Student · AI / Systems',
+      headline: 'AI Major · Computing & Information System · Daffodil International University',
       degree: 'B.Sc. in Computing & Information System',
+      department: 'Computing and Information System (CIS)',
+      major: 'Artificial Intelligence (AI)',
       university: 'Daffodil International University',
       photo: '',
-      bio: 'Computing & Information System student focused on Artificial Intelligence, data-driven systems and product strategy. I build practical software, compete in hackathons, and actively pursue scholarships, fellowships and research opportunities to grow at the intersection of engineering and innovation.',
+      bio: 'Computing & Information System student majoring in Artificial Intelligence at Daffodil International University. I build practical software, compete in hackathons, and actively pursue scholarships, fellowships and research opportunities to grow at the intersection of engineering and innovation.',
       skills: ['Python', 'JavaScript', 'Machine Learning', 'Data Analysis', 'SQL', 'System Design', 'Research', 'Leadership'],
-      interests: ['Artificial Intelligence', 'Entrepreneurship', 'Robotics', 'Open Source', 'Public Speaking']
+      interests: ['Artificial Intelligence', 'Entrepreneurship', 'Robotics', 'Open Source', 'Public Speaking'],
+      email: '',
+      phone: '+8801641606561',
+      whatsapp: '+8801641606561',
+      facebook: 'https://fb.com/msg.imran',
+      linkedin: 'https://linkedin.com/in/msgimran',
+      github: '',
+      website: '',
+      references: [
+        { name: 'Prof. Dr. Aminul Rahman', position: 'Professor, Department of CSE', institute: 'Daffodil International University', photo: '', quote: 'Imran is among the most driven students I have taught — methodical, curious and genuinely passionate about applied AI. He turns ideas into working systems.' },
+        { name: 'Sadia Islam', position: 'Programme Mentor', institute: 'Chevening Alumni Network', photo: '', quote: 'A dependable, fast-learning mentee who turns feedback into results. He raises the standard of every team he joins.' }
+      ]
     },
 
     opportunities: [
