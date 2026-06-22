@@ -1,8 +1,8 @@
 # OppTrack — Personal Opportunity, Achievement, Project & Activity Management System
 
-A complete, offline-first personal dashboard **and** public portfolio for managing
+A complete, cloud-synced personal dashboard **and** public portfolio for managing
 scholarships, fellowships, competitions, hackathons, tasks, documents, achievements,
-contacts, research and projects.
+contacts, research and projects. Data syncs live across all your devices via Firebase.
 
 Built for **Md Imran Hossain** — B.Sc. in Computing & Information System,
 Daffodil International University.
@@ -31,7 +31,10 @@ python3 -m http.server 8000
 npx serve .
 ```
 
-> All sample data loads automatically on first run. Edit anything and it saves instantly.
+> Sample data loads on first run. Viewing works anywhere; **owner login + editing needs a
+> served origin** (e.g. `http://localhost:8000`, not a `file://` double-click) because
+> Firebase Authentication requires an `http(s)` domain that is in your Firebase **Authorized
+> domains** list. Edits then save to Firestore and sync to every device automatically.
 
 ---
 
@@ -56,10 +59,11 @@ npx serve .
 ├── owner.html              # Owner Dashboard — secure content-management hub
 │
 ├── assets/
-│   ├── css/style.css       # One centralized stylesheet (design system + components + login UI)
-│   ├── js/app.js           # One centralized engine (data layer, UI, all page logic)
-│   ├── js/security.js      # Owner-only access control: auth, sessions, guards, UI gating
-│   └── img/favicon.svg     # Brand mark; drop profile/achievement images here too
+│   ├── css/style.css           # One centralized stylesheet (design system + components + login UI)
+│   ├── js/app.js               # One centralized engine (data layer, UI, all page logic)
+│   ├── js/firebase-config.js   # Firebase project config + init; sets OWNER_EMAIL + the Firestore doc
+│   ├── js/security.js          # Owner-only access control via Firebase Auth: login, guards, UI gating
+│   └── img/favicon.svg         # Brand mark; drop profile/achievement images here too
 │
 ├── data/
 │   └── backup-guide.md     # Export / import + Google Drive backup workflow
@@ -137,53 +141,45 @@ delete, archive, manage categories, import, reset or change the profile.
 
 | Layer | What it does | Where |
 |-------|--------------|-------|
-| **Authentication** | **Email + password** login (two factors). Neither is stored — only salted **SHA-256 hashes** (`OWNER_EMAIL_HASH` and a combined `OWNER_HASH`). An attacker must know both the exact email *and* the password. Verified with the browser's Web Crypto API. A **5-attempt lockout** (15 min) throttles guessing. | `security.js` → `login()` |
-| **Session** | On success a **signed, time-limited session** is written to Local Storage (`pomls_owner_session_v1`). It auto-expires after `SESSION_HOURS` (default 8) and is re-validated on every page load; a hand-edited session fails its signature check and is discarded. | `security.js` → `init()` / `isOwner()` |
-| **UI gating** | `<body>` gets `owner-mode` or `viewer-mode`. Every management control is marked `.owner-only` and is hidden from visitors by CSS. `viewer-mode` is baked into each page's `<body>` so admin controls **never flash** before JS runs. | `style.css` §22, `applyMode()` |
-| **Action guards** | Every data-mutation (`DB.save/upsert/remove/importJSON/resetAll`, add/edit modal, delete, drag-to-move, reminders, category add/remove, profile edit) calls `Security.guard()` first. Because the check is **inside the data layer**, calls fired from the console / dev-tools are rejected too. | `app.js` (search “Security.guard”) |
+| **Authentication** | **Firebase Authentication** email/password sign-in. The owner is the single account whose email equals `OWNER_EMAIL`. Firebase keeps the session signed in across reloads/devices; brute-force throttling is handled by Firebase itself. | `security.js` → `login()` / `init()` |
+| **Authorization (server)** | The real wall: **Firestore security rules** allow public *read* but permit *write* only when `request.auth.token.email` equals the owner email. Rejected on Google's servers, so dev-tools / console writes fail no matter what the browser does. | Firestore Console → Rules |
+| **UI gating** | `<body>` gets `owner-mode` or `viewer-mode`. Every management control is marked `.owner-only` and hidden from visitors by CSS. `viewer-mode` is baked into each page's `<body>` so admin controls **never flash** before JS runs. | `style.css` §22, `applyMode()` |
+| **Action guards** | Every data-mutation (`DB.save/upsert/remove/importJSON/resetAll`, add/edit modal, delete, drag-to-move, reminders, category add/remove, profile edit) calls `Security.guard()` first. This is a client-side UX gate; the server rules above are what actually enforce it. | `app.js` (search “Security.guard”) |
 | **Page protection** | Owner-only pages (`owner.html`, `categories.html`, listed in `Security.PROTECTED_PAGES`) **redirect** non-owners to the login page. | `requireOwner()` |
-| **Session control** | Owner badge + **Log out** appear in the top bar / nav; the Owner Dashboard shows time remaining. | `renderAuthControl()` |
+| **Session control** | Owner badge + **Log out** appear in the top bar / nav; the Owner Dashboard shows the signed-in account. | `renderAuthControl()` |
 
-### 🔑 Setting your owner email + password
+### 🔑 Setting / changing the owner account
 
-Login requires an **email and a password**, and only their hashes ship in the
-source — never the plain values. To set your own credentials:
+The owner is one Firebase Authentication user. To change who can edit:
 
-1. Open the site, press **F12 → Console**, and run:
-   ```js
-   await Security.hashFor('your-email@example.com', 'your-new-strong-password')
-   ```
-2. Copy the two printed hashes.
-3. Paste them as **`OWNER_EMAIL_HASH`** and **`OWNER_HASH`** in `assets/js/security.js`.
-4. Save / redeploy. The old credentials no longer work.
+1. **Firebase Console → Authentication → Users** — add (or edit) the user, e.g.
+   `me.imran.personal@gmail.com` with a password.
+2. Set the same email as **`OWNER_EMAIL`** in `assets/js/firebase-config.js`.
+3. Set the same email in the **Firestore security rule** (`request.auth.token.email == '…'`).
+4. Save / redeploy. To change just the password, use **Authentication → Users** (or the
+   "reset password" email) — no code change needed.
 
-> You can also change `SALT`, `SESSION_HOURS`, `LOGIN_PAGE`, and `PROTECTED_PAGES`
-> in the **CONFIGURATION** block at the top of `security.js` (all are commented).
+> The Firebase **config values** in `firebase-config.js` (apiKey, projectId, …) are safe to
+> be public; they only identify the project. Edit power comes solely from the security rule.
 
 ### Signing in / out
 
 - Click **Owner login** (top bar, landing page, or portfolio nav) → `login.html`.
-- After signing in you land on the **Owner Dashboard** (`owner.html`): content counts,
-  one-click management links, quick-add, backup/restore and a danger zone.
+- Sign in with the owner email + password → you land on the **Owner Dashboard**
+  (`owner.html`): content counts, management links, quick-add, backup/restore, danger zone.
 - Click the **log-out** icon to end the session immediately (do this on shared devices).
 
-### ⚠️ Honest security note — read this
+### ✅ Security note — this is server-enforced
 
-This is a **100% client-side static site** (e.g. GitHub Pages) with **no server**, and the
-data lives in each visitor's **own browser**. On such a site, *no client-only code can be
-made fully tamper-proof*: a determined person can read the JavaScript or edit their own
-Local Storage by hand. This layer (hashed password, signed session, guarded writes,
-redirects, hidden controls) is the correct, practical solution here **because**:
+Because data now lives in **Firestore** (not just the browser) and writes are gated by
+**Firebase security rules**, owner-only editing is enforced on the server:
 
-- A visitor who bypasses the gate only changes **their own private local copy** — it never
-  reaches you or any other visitor.
-- The content you publish is whatever ships in `app.js` (`SEED_DATA`) or your committed
-  data; visitors cannot alter that for anyone else.
+- A visitor can **read** everything but **cannot write** — the server rejects it, even from
+  the dev-tools console or a hand-crafted request.
+- Whatever the owner saves is the single shared copy every visitor sees.
 
-If you need **server-enforced** owner-only control (where unauthorized writes are rejected
-no matter what the browser does), move the data layer to a backend — see the
-**Firebase** section below. Firebase Auth + Firestore security rules enforce ownership on
-the server, which dev-tools cannot bypass. Only `DB.load()` / `DB.save()` need to change.
+The one thing that ships publicly is the Firebase config (harmless) — never put secrets in
+client code; the security rule is the protection.
 
 ---
 
@@ -224,9 +220,10 @@ the server, which dev-tools cannot bypass. Only `DB.load()` / `DB.save()` need t
 
 The included `.nojekyll` file ensures GitHub serves every file untouched.
 
-> **Note on data:** Local Storage is per-browser and per-device. Your records do **not**
-> sync between phone and laptop automatically. Use **Export backup** and **Import backup**
-> (top-bar cloud icon) to move data between devices — see `data/backup-guide.md`.
+> **Note on data:** records now **sync automatically across devices** via Firebase Firestore
+> (see the *Firebase live sync* section). For the live site to work you must publish the
+> Firestore security rules and add your Pages domain to Firebase **Authorized domains**.
+> Export/Import JSON (top-bar cloud icon) still works as a manual backup.
 
 ---
 
@@ -242,42 +239,77 @@ Full Google Drive workflow: see [`data/backup-guide.md`](data/backup-guide.md).
 
 ---
 
-## Future upgrade: Firebase (optional, for multi-device sync)
+## Firebase live sync — how it's set up (already configured)
 
-Local Storage is perfect for a single device. If you later want your data to **sync across
-phone and laptop** and have **cloud backup**, Firebase is a clean, mostly-free next step
-that keeps the project serverless.
+This site uses **Firebase Firestore** for live, cross-device data sync and **Firebase
+Authentication** for owner login. Everything below is already wired into the code; this
+section documents how it works and how to reproduce it on a fresh Firebase project.
 
-Recommended path:
+### What was done (architecture)
 
-1. **Create a Firebase project** at <https://console.firebase.google.com> and add a Web app.
-2. **Enable Authentication** (Email/Password or Google sign-in) so only you can write.
-3. **Enable Cloud Firestore** (a NoSQL document database).
-4. **Add the SDK** to your pages (CDN, no build step needed):
-   ```html
-   <script type="module">
-     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.x/firebase-app.js";
-     import { getFirestore, doc, setDoc, getDoc }
-       from "https://www.gstatic.com/firebasejs/10.x/firebase-firestore.js";
-     const app = initializeApp({ /* your config */ });
-     const db  = getFirestore(app);
-   </script>
+- **One Firestore document holds everything.** The entire store (opportunities, tasks,
+  profile, categories, …) is saved as a single document at **`opptrack/data`**. Every
+  device reads this same document, so they all show identical content.
+- **Local Storage is now just a cache.** `pomls_data_v1` is still written on every save,
+  but only for instant first paint and offline fallback. Firestore is the source of truth.
+- **`DB` (in `app.js`) was rewired** — the rest of the app was untouched because every page
+  already reads/writes through `DB`:
+  - `DB.loadLocal()` — instant paint from the cache.
+  - `DB.loadCloud()` — fetches the authoritative copy from Firestore on startup.
+  - `DB.subscribe()` — a Firestore `onSnapshot` listener that pushes changes from other
+    devices live and re-renders the page (it pauses while an edit modal is open).
+  - `DB.save()` → `DB._persistLocal()` (cache) **and** `DB._persistCloud()` (Firestore),
+    automatically, on every change. No manual "sync" step.
+- **Sync indicator** — a small bottom-left pill (`setSync()` in `app.js`, styled in
+  `style.css` §23) shows **Saving… → Synced** on owner edits, **Updated** when a remote
+  change arrives, or **Sync failed** on error.
+- **Login is Firebase Auth** (`security.js`), locked to the single `OWNER_EMAIL`. The old
+  client-side hashed-password gate was removed.
+- **Firebase loads via the compat CDN SDK** (no build step). These tags were added to every
+  page, before `security.js`:
+  ```html
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="./assets/js/firebase-config.js"></script>
+  ```
+
+### One-time Firebase Console setup
+
+1. **Create a project** at <https://console.firebase.google.com> → add a **Web app** (`</>`).
+   Copy the `firebaseConfig` object into `assets/js/firebase-config.js`.
+2. **Authentication → Sign-in method:** enable **Email/Password**.
+3. **Authentication → Users → Add user:** create the owner (email + password). Put that same
+   email in `OWNER_EMAIL` (`firebase-config.js`) and in the security rule (below).
+4. **Authentication → Settings → Authorized domains:** add your GitHub Pages domain
+   (e.g. `your-username.github.io`) so sign-in works on the live site.
+5. **Firestore Database → Create database** (production mode), then **Rules tab → paste →
+   Publish:**
    ```
-5. **Mirror the storage layer.** The whole app already reads/writes through one object
-   (`DB` in `app.js`). To go cloud, change just `DB.load()` and `DB.save()`:
-   - `save()` → also write `DB.data` to a Firestore document, e.g. `users/{uid}/store/main`.
-   - `load()` → read that document on startup; fall back to Local Storage when offline.
-   Because every page uses `DB`, nothing else needs to change.
-6. **Lock it down** with Firestore security rules so a user can only read/write their own
-   document:
-   ```
-   match /users/{uid}/{document=**} {
-     allow read, write: if request.auth != null && request.auth.uid == uid;
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /opptrack/data {
+         allow read: if true;                                              // public can view
+         allow write: if request.auth != null
+                      && request.auth.token.email == 'me.imran.personal@gmail.com';  // only the owner can edit
+       }
+     }
    }
    ```
 
-Other options if you outgrow Firestore: **Supabase** (Postgres + auth, generous free tier)
-or a private **GitHub Gist** as a simple JSON store via the GitHub API.
+### First run & good-to-know
+
+- **First owner login seeds the cloud.** The Firestore document starts empty; the first
+  time the owner loads/saves, the app copies *that device's* current data up as the master.
+  Do your first owner login on the device that already holds your real data.
+- **1 MB document limit.** Firestore caps a single document at ~1 MiB. Many base64-uploaded
+  images/PDFs can approach it (the app warns near the limit) — prefer Drive/download links
+  for large files, or graduate uploads to **Firebase Storage** (also free) later.
+- **Free tier** (Spark plan) limits are far beyond a personal site's needs.
+
+Other backends if you ever outgrow Firestore: **Supabase** (Postgres + auth) or a private
+backend. Avoid a GitHub Gist + token on a public site — the write token would be exposed.
 
 ---
 
