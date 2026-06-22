@@ -1899,12 +1899,15 @@ function openLightbox(photos, index) {
   box.id = 'pfLightbox';
   box.className = 'pf-lightbox';
 
-  const close = () => { box.remove(); document.removeEventListener('keydown', onKey); };
+  const close = () => { box.remove(); document.removeEventListener('keydown', onKey, true); };
   const step = (d) => { i = (i + d + photos.length) % photos.length; render(); };
+  // Capture-phase handler: when the lightbox sits on top of a bootstrap
+  // modal, stopPropagation keeps Esc / arrows from reaching the modal
+  // underneath (so Esc closes only the lightbox, not the detail view).
   const onKey = (e) => {
-    if (e.key === 'Escape') close();
-    else if (e.key === 'ArrowLeft' && photos.length > 1) step(-1);
-    else if (e.key === 'ArrowRight' && photos.length > 1) step(1);
+    if (e.key === 'Escape') { e.stopPropagation(); close(); }
+    else if (e.key === 'ArrowLeft' && photos.length > 1) { e.stopPropagation(); step(-1); }
+    else if (e.key === 'ArrowRight' && photos.length > 1) { e.stopPropagation(); step(1); }
   };
   const render = () => {
     box.innerHTML = `
@@ -1918,7 +1921,7 @@ function openLightbox(photos, index) {
     const next = box.querySelector('.lb-next'); if (next) next.onclick = (e) => { e.stopPropagation(); step(1); };
   };
   box.onclick = (e) => { if (e.target === box) close(); }; // click backdrop to close
-  document.addEventListener('keydown', onKey);
+  document.addEventListener('keydown', onKey, true);
   document.body.appendChild(box);
   render();
 }
