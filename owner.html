@@ -70,6 +70,22 @@
         </div>
       </div>
 
+      <!-- Google Drive auto-backup -->
+      <div class="card card-pad mt-4" id="driveCard">
+        <div class="section-title">Google Drive backup</div>
+        <p class="text-soft" style="font-size:13px">
+          Every change is mirrored to a single <code>opptrack-backup.json</code> in your Google Drive,
+          alongside Firebase. A safety net: if Firebase ever fails, open that file from Drive and
+          restore it with <b>Import backup</b> above. Connect once — backups then run automatically.
+        </p>
+        <div id="driveStatus" class="mb-3"></div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-soft btn-sm" id="driveConnect"><i class="bi bi-google me-1"></i>Connect Drive</button>
+          <button class="btn btn-soft btn-sm" id="driveBackupNow"><i class="bi bi-cloud-arrow-up me-1"></i>Back up now</button>
+          <a class="btn btn-ghost btn-sm" id="driveOpen" target="_blank" rel="noopener" hidden><i class="bi bi-box-arrow-up-right me-1"></i>Open in Drive</a>
+        </div>
+      </div>
+
       <!-- Security tips -->
       <div class="card card-pad mt-4">
         <div class="section-title">Security &amp; sync</div>
@@ -88,6 +104,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
   <script src="./assets/js/firebase-config.js"></script>
+  <script src="./assets/js/drive.js"></script>
   <script src="./assets/js/security.js"></script>
   <script src="./assets/js/app.js"></script>
 </body>

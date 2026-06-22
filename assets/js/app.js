@@ -150,14 +150,24 @@ const DB = {
     }
   },
 
+  /* Mirror the whole store to the owner's Google Drive (backup only).
+     Debounced + silent: does nothing unless the owner has connected
+     Drive (Owner Dashboard → Connect Drive). */
+  _persistDrive() {
+    if (typeof Drive === 'undefined' || !Drive) return;
+    if (!Security.isOwner()) return;
+    try { Drive.backup(JSON.stringify(this.data)); } catch (e) { /* never block a save on backup */ }
+  },
+
   /* Autosave — called after every change.
      GUARDED: the single persistence chokepoint, so even a console call
-     like `DB.save()` is rejected for non-owners. Writes BOTH the local
-     cache (instant) and the cloud (synced to every device). */
+     like `DB.save()` is rejected for non-owners. Writes the local cache
+     (instant), the cloud (synced to every device) and the Drive backup. */
   save() {
     if (!Security.guard('save changes')) return;
     this._persistLocal();
     this._persistCloud();
+    this._persistDrive();
   },
 
   getAll(entity) { return this.data[entity] || []; },
@@ -325,16 +335,19 @@ function setSync(state) {
   }
   clearTimeout(_syncHideTimer);
   const map = {
-    saving:  { cls: 'is-saving', ico: 'arrow-repeat',             txt: 'Saving…' },
-    synced:  { cls: 'is-synced', ico: 'check-circle-fill',        txt: 'Synced' },
-    updated: { cls: 'is-synced', ico: 'cloud-arrow-down-fill',    txt: 'Updated' },
-    error:   { cls: 'is-error',  ico: 'exclamation-triangle-fill', txt: 'Sync failed' }
+    saving:        { cls: 'is-saving', ico: 'arrow-repeat',             txt: 'Saving…' },
+    synced:        { cls: 'is-synced', ico: 'check-circle-fill',        txt: 'Synced' },
+    updated:       { cls: 'is-synced', ico: 'cloud-arrow-down-fill',    txt: 'Updated' },
+    error:         { cls: 'is-error',  ico: 'exclamation-triangle-fill', txt: 'Sync failed' },
+    'drive-saving':{ cls: 'is-saving', ico: 'cloud-arrow-up',           txt: 'Backing up to Drive…' },
+    'drive-done':  { cls: 'is-synced', ico: 'cloud-check-fill',         txt: 'Backed up to Drive' },
+    'drive-error': { cls: 'is-error',  ico: 'exclamation-triangle-fill', txt: 'Drive backup failed' }
   };
   const s = map[state] || map.synced;
   el.className = 'sync-status show ' + s.cls;
   el.innerHTML = `<i class="bi bi-${s.ico}"></i><span>${s.txt}</span>`;
   // success / remote-update auto-hide; an error stays put until next save
-  if (state === 'synced' || state === 'updated') {
+  if (state === 'synced' || state === 'updated' || state === 'drive-done') {
     _syncHideTimer = setTimeout(() => el.classList.remove('show'), 1800);
   }
 }
@@ -2403,6 +2416,39 @@ function initOwner() {
       DB.resetAll(); location.reload();
     }
   };
+
+  // ---- Google Drive backup controls ----
+  const dConnect = document.getElementById('driveConnect');
+  const dBackup = document.getElementById('driveBackupNow');
+  const dStatus = document.getElementById('driveStatus');
+  const dOpen = document.getElementById('driveOpen');
+  const hasDrive = typeof Drive !== 'undefined' && Drive;
+
+  const renderDriveStatus = () => {
+    if (!dStatus) return;
+    const connected = hasDrive && Drive.isConnected();
+    dStatus.innerHTML = connected
+      ? '<span class="chip t-green"><span class="dot"></span>Connected — backups run automatically</span>'
+      : '<span class="chip t-amber"><span class="dot"></span>Not connected — click “Connect Drive” once</span>';
+    if (dConnect) dConnect.style.display = connected ? 'none' : '';
+    const link = hasDrive ? Drive.fileLink() : '';
+    if (dOpen) { if (link) { dOpen.href = link; dOpen.hidden = false; } else { dOpen.hidden = true; } }
+  };
+
+  if (dConnect) dConnect.onclick = async () => {
+    if (!hasDrive) return;
+    try { await Drive.connect(); toast('Google Drive connected.', 'ok'); renderDriveStatus(); }
+    catch (e) { toast('Could not connect Google Drive.', 'err'); }
+  };
+  if (dBackup) dBackup.onclick = async () => {
+    if (!hasDrive) return;
+    try { await Drive.backupNow(JSON.stringify(DB.data)); toast('Backed up to Drive.', 'ok'); renderDriveStatus(); }
+    catch (e) { toast('Drive backup failed — connect Drive first.', 'err'); }
+  };
+
+  renderDriveStatus();
+  // a silent reconnect may finish after first paint → refresh the badge
+  if (hasDrive) Drive.trySilentConnect().then(renderDriveStatus);
 }
 
 /* ---------- INDEX / LANDING ---------- */
@@ -2474,6 +2520,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Show owner tools / hide them from visitors (sets <body> class + auth control)
   Security.applyMode();
+
+  // Owner only: route Drive-backup status to the pill and try to
+  // reconnect Drive silently so backups keep flowing across pages.
+  if (Security.isOwner() && typeof Drive !== 'undefined' && Drive) {
+    Drive.onStatus = (st) => setSync(st === 'saving' ? 'drive-saving' : st === 'done' ? 'drive-done' : 'drive-error');
+    Drive.trySilentConnect();
+  }
 });
 
 /* Render (or re-render) the shared chrome + the active page initializer.
