@@ -20,6 +20,7 @@
   <nav class="pf-nav">
     <a class="brand" href="profile.html"><span class="logo">O</span><b style="font-family:var(--font-display)">Portfolio</b></a>
     <a href="#about">About</a>
+    <a href="#experience">Experience</a>
     <a href="#wins">Wins</a>
     <a href="#projects">Projects</a>
     <a href="#research">Research</a>
@@ -37,6 +38,7 @@
     <div>
       <div class="eyebrow">Digital CV &amp; Portfolio</div>
       <h1 id="pfName">Name</h1>
+      <div id="pfCurrentRole" class="mb-2"></div>
       <p class="text-soft mb-2" id="pfHeadline" style="font-size:17px;font-weight:600;color:var(--primary-700)"></p>
       <p id="pfBio"></p>
       <p class="num text-soft mt-3" id="pfMeta" style="font-size:13px"></p>
@@ -56,6 +58,16 @@
     <h2>About</h2>
     <p class="lead-sub">University, department, major and how to reach me.</p>
     <div class="pf-info-grid" id="pfAbout"></div>
+  </section>
+
+  <!-- Experience -->
+  <section class="pf-section" id="experience">
+    <div class="pf-sec-head">
+      <h2 class="mb-0">Experience</h2>
+      <button class="btn btn-soft btn-sm owner-only ms-auto" id="pfManageExp"><i class="bi bi-pencil me-1"></i>Manage</button>
+    </div>
+    <p class="lead-sub">Roles across AI, operations, data and strategy.</p>
+    <div class="pf-timeline" id="pfExperience"></div>
   </section>
 
   <!-- Wins & recognition -->
