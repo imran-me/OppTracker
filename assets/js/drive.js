@@ -25,10 +25,13 @@ const Drive = {
   SCOPE: 'https://www.googleapis.com/auth/drive.file',
   FILE_NAME: 'opptrack-backup.json',
   FILE_ID_KEY: 'pomls_drive_backup_id',
+  FOLDER_NAME: 'OppTracker Backups',
+  FOLDER_ID_KEY: 'pomls_drive_folder_id',
 
   _token: null,
   _tokenExp: 0,
   _fileId: null,
+  _folderId: null,
   _tokenClient: null,
   _gsiReady: null,
   _debounce: null,
@@ -129,14 +132,62 @@ const Drive = {
     return null;
   },
 
+  /* Find (or create once) the dedicated backup folder, so the file
+     lives in "My Drive / OppTracker Backups" rather than the root. */
+  async _findOrCreateFolder(token) {
+    if (this._folderId) return this._folderId;
+    const cached = localStorage.getItem(this.FOLDER_ID_KEY);
+    if (cached) { this._folderId = cached; return cached; }
+    const q = encodeURIComponent(`name='${this.FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&fields=files(id,name)`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.files && j.files.length) {
+        this._folderId = j.files[0].id;
+        localStorage.setItem(this.FOLDER_ID_KEY, this._folderId);
+        return this._folderId;
+      }
+    }
+    const cr = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: this.FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })
+    });
+    if (!cr.ok) throw new Error('Drive folder create failed: ' + cr.status);
+    const cj = await cr.json();
+    this._folderId = cj.id;
+    localStorage.setItem(this.FOLDER_ID_KEY, cj.id);
+    return this._folderId;
+  },
+
+  /* Make sure an existing backup file sits inside the folder (moves a
+     file that was previously created in the Drive root). */
+  async _ensureInFolder(token, fileId, folderId) {
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!r.ok) return;
+    const j = await r.json();
+    const parents = j.parents || [];
+    if (parents.includes(folderId)) return; // already in place
+    const remove = parents.join(',');
+    await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?addParents=${folderId}${remove ? '&removeParents=' + encodeURIComponent(remove) : ''}&fields=id`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer ' + token }
+    });
+  },
+
   /* Create or overwrite the backup file with the given JSON. */
   async backupNow(jsonString) {
     const token = await this._validToken();
+    const folderId = await this._findOrCreateFolder(token);
     const fileId = await this._findFileId(token);
     if (!fileId) {
-      // First time: create the file (multipart: metadata + media).
+      // First time: create the file (multipart: metadata + media) in the folder.
       const boundary = 'opptrackbackupboundary';
-      const metadata = { name: this.FILE_NAME, mimeType: 'application/json' };
+      const metadata = { name: this.FILE_NAME, mimeType: 'application/json', parents: [folderId] };
       const body =
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
         JSON.stringify(metadata) +
@@ -153,6 +204,8 @@ const Drive = {
       this._fileId = j.id;
       localStorage.setItem(this.FILE_ID_KEY, j.id);
     } else {
+      // Make sure an older root-level file gets moved into the folder.
+      try { await this._ensureInFolder(token, fileId, folderId); } catch (e) { /* non-fatal */ }
       // Update the existing file's contents.
       const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
         method: 'PATCH',
