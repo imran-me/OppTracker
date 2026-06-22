@@ -578,6 +578,44 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 .upl-rm { margin-left: auto; font-size: 11.5px; color: var(--text-soft); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .upl-list.is-img .upl-rm { margin: 0; }
 
+/* Current-role badge in the hero */
+.pf-role-badge { display: inline-flex; align-items: center; padding: 6px 14px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--primary-700); font-weight: 700; font-size: 13.5px; }
+
+/* Clickable stat cards */
+.pf-stat { position: relative; border: 1px solid var(--line); cursor: pointer; text-align: center;
+  width: 100%; font: inherit; transition: transform .15s, box-shadow .15s, border-color .15s; }
+.pf-stat:hover { transform: translateY(-2px); border-color: var(--primary); box-shadow: var(--shadow-md); }
+.pf-stat .pf-stat-cue { position: absolute; top: 8px; right: 8px; color: var(--text-faint); opacity: 0; transition: opacity .15s; font-size: 16px; }
+.pf-stat:hover .pf-stat-cue { opacity: 1; color: var(--primary); }
+
+/* Stat-list modal rows */
+.stat-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; font: inherit;
+  padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  margin-bottom: 8px; cursor: pointer; transition: all .15s; }
+.stat-row:hover { border-color: var(--primary); background: var(--primary-soft); }
+.stat-row-ic { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 10px; background: var(--primary-soft);
+  color: var(--primary-700); display: grid; place-items: center; font-size: 16px; }
+.stat-row-body { flex: 1; min-width: 0; }
+.stat-row-body b { display: block; font-size: 13.5px; }
+.stat-row-body small { color: var(--text-soft); font-size: 12px; }
+
+/* Experience timeline */
+.pf-timeline { position: relative; padding-left: 26px; }
+.pf-timeline::before { content: ""; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: var(--line); }
+.pf-exp { position: relative; padding-bottom: 22px; }
+.pf-exp:last-child { padding-bottom: 0; }
+.pf-exp-dot { position: absolute; left: -26px; top: 4px; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 3px solid var(--primary); }
+.pf-exp-body b { font-size: 15px; }
+.pf-exp-meta { font-size: 13.5px; color: var(--primary-700); font-weight: 600; }
+.pf-exp-dates { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.pf-exp-summary { font-size: 13.5px; color: var(--text-soft); margin: 8px 0 0; line-height: 1.6; white-space: pre-wrap; }
+
+/* Profile photo preview in the editor */
+.pf-photo-edit { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.pf-photo-edit img { width: 72px; height: 72px; border-radius: 14px; object-fit: cover; border: 1px solid var(--line); }
+
 /* "View details" call-to-action on portfolio cards */
 .pf-card-cta { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 10px;
   border-top: 1px solid var(--line-2); font-size: 12.5px; color: var(--primary-700); font-weight: 600; }

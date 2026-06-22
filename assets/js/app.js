@@ -64,6 +64,7 @@ const DB = {
         // existing values win; brand-new keys fall back to the seed defaults.
         this.data.profile = Object.assign({}, SEED_DATA().profile, this.data.profile || {});
         if (!Array.isArray(this.data.profile.references)) this.data.profile.references = SEED_DATA().profile.references;
+        if (!Array.isArray(this.data.profile.experience)) this.data.profile.experience = SEED_DATA().profile.experience;
       } else {
         // First visit: seed the visitor's own sandbox copy (allowed for everyone).
         this.data = SEED_DATA();
@@ -1437,11 +1438,19 @@ function initProfile() {
   };
 
   // hero + about
+  const experience = Array.isArray(p.experience) ? p.experience : [];
+  const current = experience.find(e => e.current);
   document.getElementById('pfName').textContent = p.name;
   document.getElementById('pfHeadline').textContent = p.headline || '';
   document.getElementById('pfBio').textContent = p.bio || '';
   document.getElementById('pfPhoto').innerHTML = p.photo ? `<img src="${escapeHtml(p.photo)}" alt="${escapeHtml(p.name)}">` : initials(p.name);
   document.getElementById('pfMeta').innerHTML = `${escapeHtml(p.degree || '')}${p.university ? ' · ' + escapeHtml(p.university) : ''}`;
+  const eyebrowEl = document.querySelector('.pf-hero .eyebrow');
+  if (eyebrowEl) eyebrowEl.textContent = p.eyebrow || 'Digital CV & Portfolio';
+  // current role badge under the headline
+  const roleEl = document.getElementById('pfCurrentRole');
+  if (roleEl) roleEl.innerHTML = current
+    ? `<span class="pf-role-badge"><i class="bi bi-briefcase-fill me-1"></i>${escapeHtml(current.role)}${current.company ? ' · ' + escapeHtml(current.company) : ''}</span>` : '';
 
   // skills + interests
   document.getElementById('pfSkills').innerHTML = (p.skills || []).map(s => `<span class="chip t-primary">${escapeHtml(s)}</span>`).join('');
@@ -1470,11 +1479,29 @@ function initProfile() {
       </div>`).join('');
   }
 
-  // stats row
-  document.getElementById('pfStats').innerHTML = [
-    ['Applied', stats.applied], ['Wins', stats.wins], ['Projects', stats.projects],
-    ['Certifications', stats.certs], ['Research', stats.research]
-  ].map(([l, v]) => `<div class="pf-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  // stats row — each card is clickable and opens the list behind the number
+  const statEl = document.getElementById('pfStats');
+  statEl.innerHTML = [
+    ['Applied', stats.applied, 'applied'], ['Wins', stats.wins, 'wins'], ['Projects', stats.projects, 'projects'],
+    ['Certifications', stats.certs, 'certs'], ['Research', stats.research, 'research']
+  ].map(([l, v, k]) => `<button type="button" class="pf-stat" data-stat="${k}"><div class="v">${v}</div><div class="l">${l}</div><span class="pf-stat-cue"><i class="bi bi-arrow-right-short"></i></span></button>`).join('');
+  statEl.querySelectorAll('[data-stat]').forEach(b => b.onclick = () => openStatList(b.dataset.stat));
+
+  // experience timeline
+  const expEl = document.getElementById('pfExperience');
+  if (expEl) expEl.innerHTML = experience.length ? experience.map(e => `
+    <div class="pf-exp">
+      <div class="pf-exp-dot"></div>
+      <div class="pf-exp-body">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <b>${escapeHtml(e.role || '')}</b>
+          ${e.current ? '<span class="chip t-green" style="font-size:11px"><span class="dot"></span>Current</span>' : ''}
+        </div>
+        <div class="pf-exp-meta">${escapeHtml(e.company || '')}${e.location ? ' · ' + escapeHtml(e.location) : ''}</div>
+        ${(e.start || e.end || e.current) ? `<div class="pf-exp-dates num">${escapeHtml(e.start || '')}${(e.start && (e.end || e.current)) ? ' — ' : ''}${e.current ? 'Present' : escapeHtml(e.end || '')}</div>` : ''}
+        ${e.summary ? `<p class="pf-exp-summary">${escapeHtml(e.summary)}</p>` : ''}
+      </div>
+    </div>`).join('') : '<p class="text-soft">No experience added yet.</p>';
 
   // Owner-only edit/delete controls for a portfolio card. `initProfile`
   // is passed as the after-save / after-delete callback so the page
@@ -1596,6 +1623,8 @@ function initProfile() {
   if (editBtn) editBtn.onclick = openProfileEditor;
   const refBtn = document.getElementById('pfManageRefs');
   if (refBtn) refBtn.onclick = openReferencesEditor;
+  const expBtn = document.getElementById('pfManageExp');
+  if (expBtn) expBtn.onclick = openExperienceEditor;
 
   // owner-only "Add" buttons per section (open the same guarded modals,
   // then re-render the portfolio in place).
@@ -1618,9 +1647,16 @@ function openProfileEditor() {
   <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
     <div class="modal-header"><h5 class="modal-title">Edit profile</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
     <div class="modal-body"><form id="pfForm" class="form-grid">
+      <div class="field col-span">
+        <label>Profile photo</label>
+        ${p.photo ? `<div class="pf-photo-edit"><img src="${escapeHtml(p.photo)}" alt="current photo"><label class="fc-remove"><input type="checkbox" name="photoRemove"> remove</label></div>` : ''}
+        <input type="file" name="photoFile" accept="image/*" class="file-input">
+        <input name="photo" class="mt-2" placeholder="…or paste an image URL" value="${escapeHtml(p.photo && p.photo.startsWith('data:') ? '' : (p.photo || ''))}">
+        <small class="text-faint" style="font-size:11px">Upload from your device or paste a URL. Max ${fmtBytes(MAX_UPLOAD_BYTES)}.</small>
+      </div>
       <div class="field col-span"><label>Full name</label><input name="name" value="${escapeHtml(p.name)}"></div>
+      <div class="field col-span"><label>Eyebrow (small label above name)</label><input name="eyebrow" value="${escapeHtml(p.eyebrow || '')}" placeholder="Digital CV &amp; Portfolio"></div>
       <div class="field col-span"><label>Headline</label><input name="headline" value="${escapeHtml(p.headline || '')}"></div>
-      <div class="field col-span"><label>Photo URL</label><input name="photo" value="${escapeHtml(p.photo || '')}"></div>
       <div class="field col-span"><label>Biography</label><textarea name="bio">${escapeHtml(p.bio || '')}</textarea></div>
 
       <div class="field col-span"><div class="section-title mb-0 mt-1">Academic</div></div>
@@ -1635,7 +1671,7 @@ function openProfileEditor() {
 
       <div class="field col-span"><div class="section-title mb-0 mt-1">Contact &amp; social</div></div>
       <div class="field"><label>Email</label><input name="email" type="email" value="${escapeHtml(p.email || '')}"></div>
-      <div class="field"><label>WhatsApp number</label><input name="whatsapp" value="${escapeHtml(p.whatsapp || '')}"></div>
+      <div class="field"><label>Phone / WhatsApp</label><input name="whatsapp" value="${escapeHtml(p.whatsapp || '')}"></div>
       <div class="field"><label>LinkedIn URL</label><input name="linkedin" type="url" value="${escapeHtml(p.linkedin || '')}"></div>
       <div class="field"><label>Facebook URL</label><input name="facebook" type="url" value="${escapeHtml(p.facebook || '')}"></div>
       <div class="field"><label>GitHub URL</label><input name="github" type="url" value="${escapeHtml(p.github || '')}"></div>
@@ -1647,19 +1683,98 @@ function openProfileEditor() {
   const modalEl = document.getElementById('entityModal');
   const modal = new bootstrap.Modal(modalEl); modal.show();
   modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
-  document.getElementById('pfSave').onclick = () => {
+  document.getElementById('pfSave').onclick = async () => {
     const f = document.getElementById('pfForm');
+    const btn = document.getElementById('pfSave'); btn.disabled = true;
+    // Photo: a newly uploaded file wins, then a typed URL, then "remove",
+    // otherwise keep the existing one.
+    let photo = p.photo || '';
+    try {
+      const file = f.photoFile && f.photoFile.files && f.photoFile.files[0];
+      const typed = f.photo.value.trim();
+      if (file) {
+        if (file.size > MAX_UPLOAD_BYTES) { toast(`Image too large (max ${fmtBytes(MAX_UPLOAD_BYTES)}).`, 'err'); btn.disabled = false; return; }
+        photo = await readFileAsDataURL(file);
+      } else if (f.photoRemove && f.photoRemove.checked) {
+        photo = '';
+      } else if (typed) {
+        photo = typed;
+      }
+    } catch (e) { toast('Could not read the image.', 'err'); btn.disabled = false; return; }
     Object.assign(p, {
-      name: f.name.value.trim(), headline: f.headline.value.trim(), degree: f.degree.value.trim(),
-      university: f.university.value.trim(), department: f.department.value.trim(), major: f.major.value.trim(),
-      photo: f.photo.value.trim(), bio: f.bio.value.trim(),
+      name: f.name.value.trim(), eyebrow: f.eyebrow.value.trim(), headline: f.headline.value.trim(),
+      degree: f.degree.value.trim(), university: f.university.value.trim(), department: f.department.value.trim(),
+      major: f.major.value.trim(), photo, bio: f.bio.value.trim(),
       email: f.email.value.trim(), whatsapp: f.whatsapp.value.trim(),
       linkedin: f.linkedin.value.trim(), facebook: f.facebook.value.trim(),
       github: f.github.value.trim(), website: f.website.value.trim(),
       skills: f.skills.value.split(',').map(s => s.trim()).filter(Boolean),
       interests: f.interests.value.split(',').map(s => s.trim()).filter(Boolean)
     });
-    DB.save(); toast('Profile saved.', 'ok'); modal.hide(); initProfile();
+    DB.save(); toast('Profile saved.', 'ok'); btn.disabled = false; modal.hide(); initProfile();
+  };
+}
+
+/* ---------- EXPERIENCE EDITOR (owner-only) ----------
+   profile.experience = [{role,company,location,start,end,current,summary}].
+   Edits the whole list at once, like the references editor. */
+function openExperienceEditor() {
+  if (!Security.guard('manage experience')) return;
+  const p = DB.data.profile;
+  let working = JSON.parse(JSON.stringify(p.experience || []));
+
+  document.getElementById('entityModal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Experience</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <p class="text-soft" style="font-size:13px">Add roles with company, dates and a short summary. Tick “current” for your present role.</p>
+      <div id="expRows" class="stack-16"></div>
+      <button class="btn btn-soft btn-sm mt-3" id="expAdd"><i class="bi bi-plus-lg me-1"></i>Add role</button>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="expSave"><i class="bi bi-check-lg me-1"></i>Save experience</button></div>
+  </div></div></div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('entityModal');
+  const modal = new bootstrap.Modal(modalEl); modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+  const rowsEl = document.getElementById('expRows');
+
+  const rowHtml = (r, i) => `
+    <div class="card card-pad exp-edit" data-i="${i}">
+      <div class="d-flex align-items-center mb-2">
+        <b style="font-size:13px">Role ${i + 1}</b>
+        <button class="btn btn-ghost btn-sm text-danger ms-auto" data-del="${i}"><i class="bi bi-trash3"></i></button>
+      </div>
+      <div class="form-grid">
+        <div class="field col-span"><label>Role / title</label><input data-f="role" value="${escapeHtml(r.role || '')}"></div>
+        <div class="field"><label>Company</label><input data-f="company" value="${escapeHtml(r.company || '')}"></div>
+        <div class="field"><label>Location</label><input data-f="location" value="${escapeHtml(r.location || '')}"></div>
+        <div class="field"><label>Start (e.g. Apr 2023)</label><input data-f="start" value="${escapeHtml(r.start || '')}"></div>
+        <div class="field"><label>End (blank if current)</label><input data-f="end" value="${escapeHtml(r.end || '')}"></div>
+        <div class="field col-span"><label class="switch-row"><input type="checkbox" data-f="current" ${r.current ? 'checked' : ''}> <span>This is my current role</span></label></div>
+        <div class="field col-span"><label>Summary</label><textarea data-f="summary">${escapeHtml(r.summary || '')}</textarea></div>
+      </div>
+    </div>`;
+
+  const syncFromDom = () => rowsEl.querySelectorAll('.exp-edit').forEach(row => {
+    const i = +row.dataset.i; if (!working[i]) return;
+    row.querySelectorAll('[data-f]').forEach(inp => {
+      working[i][inp.dataset.f] = inp.type === 'checkbox' ? inp.checked : inp.value.trim();
+    });
+  });
+  const render = () => {
+    rowsEl.innerHTML = working.length ? working.map(rowHtml).join('')
+      : '<p class="text-faint" style="font-size:13px">No roles yet. Add one below.</p>';
+    rowsEl.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { syncFromDom(); working.splice(+b.dataset.del, 1); render(); });
+  };
+  render();
+  document.getElementById('expAdd').onclick = () => { syncFromDom(); working.push({ role: '', company: '', location: '', start: '', end: '', current: false, summary: '' }); render(); };
+  document.getElementById('expSave').onclick = () => {
+    syncFromDom();
+    p.experience = working.filter(r => r.role || r.company);
+    DB.save(); toast('Experience saved.', 'ok'); modal.hide(); initProfile();
   };
 }
 
@@ -1737,6 +1852,58 @@ function openReferencesEditor() {
     p.references = working.filter(r => r.name); // drop blank rows (no name)
     DB.save(); toast('References saved.', 'ok'); modal.hide(); initProfile();
   };
+}
+
+/* ---------- STAT LIST (click a portfolio stat → see what's behind it) ----------
+   Opens a modal listing the records counted by a stat card. Each row opens
+   that item's detail view. Public-visible (read-only). */
+function openStatList(kind) {
+  const opps = DB.getAll('opportunities');
+  const CFG = {
+    applied: { title: 'Applied & in progress', entity: 'opportunities', icon: 'send-fill',
+      items: opps.filter(o => !['New', 'Researching'].includes(o.status)) },
+    wins: { title: 'Wins & recognition', entity: 'opportunities', icon: 'trophy-fill',
+      items: opps.filter(o => ['Won', 'Accepted', 'Completed'].includes(o.status)) },
+    projects: { title: 'Projects', entity: 'projects', icon: 'diagram-3-fill', items: DB.getAll('projects') },
+    certs: { title: 'Certifications', entity: 'achievements', icon: 'patch-check-fill',
+      items: DB.getAll('achievements').filter(a => a.category === 'Certification') },
+    research: { title: 'Research', entity: 'research', icon: 'lightbulb-fill', items: DB.getAll('research') }
+  }[kind];
+  if (!CFG) return;
+
+  const rows = CFG.items.map(it => {
+    const name = it.name || it.title || 'Untitled';
+    const sub = it.organizer || it.category || it.field || it.technologies || '';
+    const meta = it.status || it.stage || (it.date ? fmtDate(it.date) : '');
+    return `<button type="button" class="stat-row" data-open="${CFG.entity}:${it.id}">
+      <span class="stat-row-ic"><i class="bi bi-${CFG.icon}"></i></span>
+      <span class="stat-row-body"><b>${escapeHtml(name)}</b>${sub ? `<small>${escapeHtml(sub)}</small>` : ''}</span>
+      ${meta ? `<span class="chip chip-outline">${escapeHtml(meta)}</span>` : ''}
+      <i class="bi bi-chevron-right text-faint"></i>
+    </button>`;
+  }).join('');
+
+  document.getElementById('entityModal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header">
+      <div class="d-flex align-items-center gap-2"><span class="stat-ico"><i class="bi bi-${CFG.icon}"></i></span>
+        <h5 class="modal-title">${CFG.title} <span class="text-faint num">(${CFG.items.length})</span></h5></div>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">${rows || '<p class="text-soft mb-0">Nothing here yet.</p>'}</div>
+  </div></div></div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('entityModal');
+  const modal = new bootstrap.Modal(modalEl); modal.show();
+  let nextAction = null;
+  modalEl.addEventListener('hidden.bs.modal', () => { wrap.remove(); if (nextAction) { const a = nextAction; nextAction = null; a(); } });
+  modalEl.querySelectorAll('[data-open]').forEach(b => b.onclick = () => {
+    const [entity, id] = b.dataset.open.split(':');
+    nextAction = () => openPortfolioDetail(entity, id);
+    modal.hide();
+  });
 }
 
 /* Click handler shared by every portfolio card grid. Opens the read-only
@@ -2240,25 +2407,32 @@ function SEED_DATA() {
   return {
     profile: {
       name: 'Md Imran Hossain',
-      headline: 'AI Major · Computing & Information System · Daffodil International University',
+      eyebrow: 'Digital CV & Portfolio',
+      headline: 'Head of AI, Strategy & Research · Business Operations | Tech & Strategy Specialist',
       degree: 'B.Sc. in Computing & Information System',
       department: 'Computing and Information System (CIS)',
       major: 'Artificial Intelligence (AI)',
       university: 'Daffodil International University',
       photo: '',
-      bio: 'Computing & Information System student majoring in Artificial Intelligence at Daffodil International University. I build practical software, compete in hackathons, and actively pursue scholarships, fellowships and research opportunities to grow at the intersection of engineering and innovation.',
-      skills: ['Python', 'JavaScript', 'Machine Learning', 'Data Analysis', 'SQL', 'System Design', 'Research', 'Leadership'],
+      bio: 'AI, strategy and operations specialist and Computing & Information System student majoring in Artificial Intelligence at Daffodil International University. I lead AI strategy and research, build practical software, and have hands-on experience across business operations, data analysis and project management — bridging engineering, strategy and execution.',
+      skills: ['Strategic Development', 'Project Management', 'Python', 'Machine Learning', 'Data Analysis', 'Flutter / Dart', 'Web Development', 'Operations', 'Leadership'],
       interests: ['Artificial Intelligence', 'Entrepreneurship', 'Robotics', 'Open Source', 'Public Speaking'],
-      email: '',
-      phone: '+8801641606561',
+      email: 'me.imran.personal@gmail.com',
+      phone: '+8801972037650',
       whatsapp: '+8801641606561',
       facebook: 'https://fb.com/msg.imran',
       linkedin: 'https://linkedin.com/in/msgimran',
       github: '',
       website: '',
+      experience: [
+        { role: 'Head of AI, Strategy & Research', company: 'Epal IT Solutions | Epal Group', location: '', start: '2026', end: '', current: true, summary: 'Leading AI strategy, research and product direction across the group — turning emerging AI into practical, deployable solutions.' },
+        { role: 'Trade Documentation & Accounts Executive', company: 'SAS Foodstuff Trading L.L.C.', location: 'Al Qusais, UAE (Remote)', start: 'Sep 2025', end: 'Apr 2026', current: false, summary: 'Managed accounts, invoices and financial records. Prepared export–import and shipment documentation; handled quotations, packing lists and trade paperwork.' },
+        { role: 'Operations & Office Management Executive', company: 'Al Manar Properties Ltd.', location: 'Adarsha Sadar, Cumilla', start: 'Sep 2025', end: 'Apr 2026', current: false, summary: 'Managed office operations and administrative activities; assisted management in business planning and coordination; prepared official documents, quotations and correspondence.' },
+        { role: 'Data Analyst & Web Content Coordinator', company: 'Fulcrum Care Consulting', location: 'Croydon, Surrey, UK (Remote)', start: 'Apr 2023', end: 'Aug 2024', current: false, summary: 'Analyzed CQC inspection data for care homes; prepared reports and operational insights; designed and maintained care resource directories; updated website content and frontend information.' }
+      ],
       references: [
-        { name: 'Prof. Dr. Aminul Rahman', position: 'Professor, Department of CSE', institute: 'Daffodil International University', photo: '', quote: 'Imran is among the most driven students I have taught — methodical, curious and genuinely passionate about applied AI. He turns ideas into working systems.' },
-        { name: 'Sadia Islam', position: 'Programme Mentor', institute: 'Chevening Alumni Network', photo: '', quote: 'A dependable, fast-learning mentee who turns feedback into results. He raises the standard of every team he joins.' }
+        { name: 'Shah Alam', position: 'Managing Director', institute: 'Al Manar Properties Ltd.', photo: '', quote: 'Imran is dependable, sharp and a genuine problem-solver — he handled our operations and documentation with real ownership and care.' },
+        { name: 'Prof. Dr. Aminul Rahman', position: 'Professor, Department of CSE', institute: 'Daffodil International University', photo: '', quote: 'Among the most driven students I have taught — methodical, curious and genuinely passionate about applied AI. He turns ideas into working systems.' }
       ]
     },
 
