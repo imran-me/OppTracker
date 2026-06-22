@@ -313,6 +313,48 @@ backend. Avoid a GitHub Gist + token on a public site — the write token would 
 
 ---
 
+## Google Drive auto-backup (safety net)
+
+On top of Firebase, the whole dataset is also mirrored to **one file in the owner's Google
+Drive** — `opptrack-backup.json` — updated automatically on every save. Firebase stays the
+live copy the site reads/displays; Drive is a **backup** you can download anytime, so if
+Firebase ever fails you still have a current copy to **Import backup** from.
+
+### How it works (`assets/js/drive.js`)
+
+- Uses **Google Identity Services** for a short-lived OAuth token with the least-privilege
+  **`drive.file`** scope — the app can only touch files it created, nothing else in your Drive.
+- `DB.save()` → `DB._persistDrive()` → `Drive.backup()` (debounced ~1.5 s) writes/overwrites
+  the single backup file. The bottom-left pill shows **Backing up to Drive… → Backed up**.
+- Connect once from **Owner Dashboard → Google Drive backup → Connect Drive** (a one-time
+  Google popup; in Testing mode you'll click *Advanced → continue*). After that the token is
+  re-acquired **silently** on each page load, so backups keep running with no further clicks.
+- Backups never block a save and never run for visitors — owner only.
+
+### One-time Google Cloud setup
+
+In **console.cloud.google.com** (reuse the same project):
+
+1. **Enable** the **Google Drive API**.
+2. **Google Auth Platform** → **Branding** (app name + emails), **Audience** (External +
+   add yourself as a **test user**), **Data Access** (add scope `.../auth/drive.file`).
+3. **Clients → Create OAuth client → Web application**, with **Authorized JavaScript origins**
+   = your Pages origin (`https://imran-me.github.io`) and `http://localhost:8000`.
+4. Put the resulting **Client ID** in `Drive.CLIENT_ID` (`assets/js/drive.js`).
+
+> Note: an OAuth **JavaScript origin** is scheme + domain only — `https://imran-me.github.io`,
+> **not** `https://imran-me.github.io/OppTracker/` (no path allowed). The site under the
+> `/OppTracker/` path is still covered by that origin.
+
+### Good to know
+
+- The backup file lives in **your own Drive** (private to you) — open/download it from
+  drive.google.com, or via **Owner Dashboard → Open in Drive**.
+- Unlike Firestore's 1 MB document cap, a Drive file can be large — so the Drive backup can
+  hold more than Firestore if your data (with base64 uploads) ever grows past 1 MB.
+
+---
+
 ## Browser support
 
 Latest Chrome, Edge, Firefox and Safari. Fully responsive for mobile, tablet and desktop.
