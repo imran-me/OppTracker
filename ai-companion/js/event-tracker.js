@@ -44,8 +44,10 @@ export class EventTracker {
       activity.notifyActivity();
       const el = e.target;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
-        const r = el.getBoundingClientRect();
-        nav.goTo(this.ctx.screenXToWorld(r.left + r.width / 2));
+        if (!this.ctx.stayHome) {                 // stay put when home-locked
+          const r = el.getBoundingClientRect();
+          nav.goTo(this.ctx.screenXToWorld(r.left + r.width / 2));
+        }
         character.setState('think');
         clearTimeout(this._typingTimer);
         this._typingTimer = setTimeout(() => {
@@ -63,7 +65,7 @@ export class EventTracker {
     // ---- Scroll: stroll alongside the page ----
     this._on(window, 'scroll', () => {
       activity.notifyActivity();
-      if (Math.random() < 0.25) nav.wander();
+      if (!this.ctx.stayHome && Math.random() < 0.25) nav.wander();
     });
 
     // ---- Tab focus / blur ----

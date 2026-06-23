@@ -41,9 +41,9 @@ export class ActivityEngine {
       } else {
         emotion.react('waving', { priority: 2 });
       }
-      // Stroll back toward the user's side of the screen.
-      nav.wander();
-      this.phase = 'active';
+      // Stroll back toward the user — unless home-locked, then stay put.
+      if (this.ctx.stayHome) nav.goHome(); else nav.wander();
+      this.phase = this.ctx.stayHome ? 'home' : 'active';
       this.busyUntil = now + 2500;
     }
   }
@@ -59,6 +59,9 @@ export class ActivityEngine {
     const { idle } = this.ctx.config;
     const since = now - this.lastActive;
     const { character, nav, ai, home, emotion } = this.ctx;
+
+    // Home-lock: EON sits at home and never wanders or climbs the idle ladder.
+    if (this.ctx.stayHome) { this.phase = 'home'; return; }
 
     // Don't reshuffle while mid-activity or while walking somewhere.
     const busy = now < this.busyUntil || nav.moving;
