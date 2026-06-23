@@ -298,11 +298,9 @@ export class EonModel {
     const ptrX = opts.lookX || 0, ptrY = opts.lookY || 0;
     const particles = opts.particles || null;
 
-    // --- physics-driven locomotion inputs ---
+    // --- locomotion cadence (steps scale with actual speed) ---
     const speed = opts.speed || 0;          // 0..1 fraction of max speed
-    const mvx = opts.vx || 0;               // -1..1 horizontal velocity
     this._speed = speed;
-    // step cadence advances with actual speed: fast = quick steps, slow = slow
     this.walkPhase = (this.walkPhase || 0) + dt * (4 + speed * 10);
 
     const slp = (this.state === 'sleep');
@@ -310,17 +308,11 @@ export class EonModel {
               : (this.state === 'walk') ? Math.abs(Math.sin(this.walkPhase)) * 0.06 * speed : 0;
     eon.position.y = (slp ? 0.06 : 0.16) + Math.sin(t * 1.6) * (slp ? 0 : 0.05) + hop;
 
-    // facing turn + gentle idle sway
+    // facing turn + gentle idle sway (stays upright — no tilt/lean)
     this.turn += (((facing > 0 ? 0.32 : -0.32)) - this.turn) * 0.08;
     const sway = Math.sin(t * 0.5) * 0.10;
-    // momentum: bank into sideways travel + a slight forward lean while walking
-    const bankT = -mvx * 0.20;
-    const leanT = (this.state === 'walk') ? speed * 0.10 : 0;
-    this._bank = (this._bank || 0) + (bankT - (this._bank || 0)) * 0.1;
-    this._lean = (this._lean || 0) + (leanT - (this._lean || 0)) * 0.1;
     eon.rotation.y = this.turn + sway;
-    eon.rotation.z = Math.sin(t * 1.2) * 0.014 + this._bank;
-    eon.rotation.x = this._lean;
+    eon.rotation.z = Math.sin(t * 1.2) * 0.014;
 
     head.rotation.z += ((cfg.tilt || 0) - head.rotation.z) * 0.08;
 
