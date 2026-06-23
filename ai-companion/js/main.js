@@ -86,6 +86,7 @@ class Eon {
     });
 
     this.home.mount(this.layer);
+    this._setSize(this._userScale || 1);     // apply saved size now the model exists
 
     // ---- restore memory + live state, then resume or greet ----
     const saved = await this.ai.loadState();
@@ -130,6 +131,8 @@ class Eon {
         <div class="eon-pan-row" id="eon-modes"></div>
         <div class="eon-pan-h">Energy <span id="eon-energy-v"></span></div>
         <input type="range" id="eon-energy" min="0" max="100" value="50" class="eon-range">
+        <div class="eon-pan-h">Size</div>
+        <input type="range" id="eon-size" min="55" max="175" value="100" class="eon-range">
       </div>
       <div id="eon-controls">
         <button class="eon-chip" id="eon-settings" title="EON settings">⚙</button>
@@ -196,6 +199,20 @@ class Eon {
     const showE = () => { energyV.textContent = energy.value < 34 ? '· calm' : energy.value > 66 ? '· lively' : '· balanced'; };
     energy.oninput = () => { this.ctx.activityLevel = energy.value / 100; showE(); };
     showE();
+
+    // size (applied for real once the character exists; see boot)
+    const size = this.layer.querySelector('#eon-size');
+    const savedSize = parseFloat(localStorage.getItem('eon-size'));
+    this._userScale = (!isNaN(savedSize) && savedSize > 0) ? savedSize : 1;
+    size.value = Math.round(this._userScale * 100);
+    size.oninput = () => this._setSize(size.value / 100);
+  }
+
+  /** Set EON's on-screen size (combined with the Focus-mode shrink). */
+  _setSize(scale) {
+    this._userScale = scale;
+    try { localStorage.setItem('eon-size', String(scale)); } catch {}
+    if (this.character) this.character.root.scale.setScalar(scale * (this.ctx.focus ? 0.62 : 1));
   }
 
   /** Switch behaviour mode: follow / roam / focus / home. */
@@ -205,8 +222,8 @@ class Eon {
     this.ctx.followMode = (m === 'follow');
     if (m === 'home') { if (!this.ctx.stayHome) this._setStayHome(true); }
     else if (this.ctx.stayHome) { this._setStayHome(false); }
-    // Focus/DND: shrink + go quiet
-    this.character.root.scale.setScalar(this.ctx.focus ? 0.62 : 1);
+    // Focus/DND: shrink + go quiet (keeps the user's size preference)
+    this.character.root.scale.setScalar((this.ctx.focus ? 0.62 : 1) * (this._userScale || 1));
     if (this._syncModes) this._syncModes();
   }
 

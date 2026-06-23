@@ -409,6 +409,9 @@ export class CharacterController {
 
   setBadgeGlow(v) { this.badgeTarget = v; }
 
+  /** Trigger a full-body emote (delegated to the detailed model). */
+  playEmote(name) { if (this.detailed && this.modelObj) this.modelObj.playEmote(name); }
+
   /** True for one-shot states that should auto-return to idle. */
   _oneShotDuration(s) {
     return ({ wave: 2.2, celebrate: 2.6, think: 2.8, stretch: 2.0,
