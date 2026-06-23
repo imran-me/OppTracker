@@ -7,6 +7,10 @@
    ============================================================ */
 import * as THREE from 'three';
 
+// GLTFLoader is imported lazily inside _loadModel so a CDN failure can fall
+// back to the procedural EON instead of breaking the whole module.
+const GLTF_LOADER_URL = 'https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
+
 // Smooth critically-damped lerp toward a target (frame-rate independent).
 const damp = (cur, tgt, lambda, dt) => cur + (tgt - cur) * (1 - Math.exp(-lambda * dt));
 
@@ -20,6 +24,8 @@ export class CharacterController {
     this.scene = scene;
     this.P = palette;
     this.scale = opts.scale ?? 42;
+    this.targetPx = opts.targetPx ?? 96;   // on-screen height for a loaded model
+    this.baseYaw = opts.baseYaw ?? 0;      // rotate the model's "front" if needed
     this.state = 'idle';
     this.prevState = 'idle';
     this.stateTime = 0;
@@ -29,9 +35,74 @@ export class CharacterController {
     this._nextBlink = 2 + Math.random() * 3;
     this.badgeTarget = 0.6;          // persistent badge-glow target
     this.onStateEnd = null;          // optional one-shot callback
+    this.ready = false;              // true once a body exists
+    this.rigless = false;            // true when driving a static (un-rigged) GLB
 
-    this._build();
-    if (opts.withPet) this._buildPet();
+    if (opts.modelUrl) {
+      // Real 3D model: whole-body animation (no skeleton in the mesh).
+      this._setupRigless();
+      this._loadModel(opts.modelUrl);
+    } else {
+      // Procedural EON: per-limb rig.
+      this._build();
+      this.ready = true;
+      if (opts.withPet) this._buildPet();
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Rigless (static-GLB) mode — animate the whole body
+  // ---------------------------------------------------------------
+  _setupRigless() {
+    this.root = new THREE.Group();              // navigates
+    this.bob = new THREE.Group();               // vertical bob / hop
+    this.gesture = new THREE.Group();           // lean / pitch / spin / squash
+    this.bob.add(this.gesture);
+    this.root.add(this.bob);
+    this.scene.add(this.root);
+    this.gpose = { bobY: 0, hop: 0, lean: 0, pitch: 0, sx: 1, sy: 1 };
+    this._spin = 0;
+    this.headAnchor = new THREE.Object3D();     // bubble / look anchor (set after load)
+    this.gesture.add(this.headAnchor);
+  }
+
+  async _loadModel(url) {
+    let GLTFLoader;
+    try {
+      ({ GLTFLoader } = await import(GLTF_LOADER_URL));
+    } catch (e) {
+      console.warn('[EON] GLTFLoader unavailable — using procedural fallback.', e);
+      this.scene.remove(this.root); this._build(); this.ready = true; return;
+    }
+    new GLTFLoader().load(url, (gltf) => {
+      const model = gltf.scene;
+      // Normalise: scale to target on-screen height, feet at y=0, centred X/Z.
+      const box = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3(); box.getSize(size);
+      const center = new THREE.Vector3(); box.getCenter(center);
+      const h = size.y || 1;
+      model.position.x -= center.x;
+      model.position.z -= center.z;
+      model.position.y -= box.min.y;            // drop feet to the ground
+      model.rotation.y = this.baseYaw;
+      model.traverse((o) => {
+        if (o.isMesh) {
+          o.frustumCulled = false;
+          if (o.material) o.material.envMapIntensity = 1;
+        }
+      });
+      this.root.scale.setScalar(this.targetPx / h);
+      this.gesture.add(model);
+      this.headAnchor.position.set(0, h * 1.04, 0);
+      this.model = model;
+      this.rigless = true;
+      this.ready = true;
+    }, undefined, (err) => {
+      console.warn('[EON] model failed to load — using procedural fallback.', err);
+      this.scene.remove(this.root);
+      this._build();
+      this.ready = true;
+    });
   }
 
   // ---------------------------------------------------------------
@@ -297,9 +368,92 @@ export class CharacterController {
   }
 
   // ---------------------------------------------------------------
+  // Whole-body animation for a static (un-rigged) model.
+  // No skeleton → express states via bob, hop, lean, pitch, spin and
+  // squash-and-stretch. Reads alive without per-limb bones.
+  // ---------------------------------------------------------------
+  _updateRigless(dt, t, ctx) {
+    this.stateTime += dt;
+    const s = this.state, st = this.stateTime;
+    let bobY = 0, hop = 0, lean = 0, pitch = 0, spinV = 0, sx = 1, sy = 1;
+
+    switch (s) {
+      case 'walk': hop = Math.abs(Math.sin(t * 9)) * 0.05; lean = 0.06 * this.facing; break;
+      case 'run':  hop = Math.abs(Math.sin(t * 13)) * 0.10; lean = 0.16 * this.facing; break;
+      case 'wave': lean = Math.sin(t * 10) * 0.20; hop = Math.abs(Math.sin(t * 3)) * 0.03; break;
+      case 'think':
+        lean = 0.16; pitch = 0.12;
+        if (Math.random() < dt * 2.2 && ctx) ctx.particles?.think(this._worldHead(0.15, 0.3));
+        break;
+      case 'work': bobY = -0.05; lean = Math.sin(t * 22) * 0.012; break;
+      case 'read': bobY = -0.05; pitch = 0.18; break;
+      case 'drinkTea':
+        bobY = -0.03; pitch = 0.08;
+        if (Math.random() < dt * 3 && ctx) ctx.particles?.steam(this._worldHead(0.1, 0.25));
+        break;
+      case 'celebrate':
+        hop = Math.abs(Math.sin(t * 7)) * 0.28; spinV = 6.5;
+        if (st < 0.05 && ctx) ctx.particles?.confetti(this._worldHead(0, 0.5), 30);
+        break;
+      case 'excited': hop = Math.abs(Math.sin(t * 9)) * 0.16; break;
+      case 'dance':
+        hop = Math.abs(Math.sin(t * 8)) * 0.14; lean = Math.sin(t * 4) * 0.22;
+        spinV = Math.sin(t * 3) * 3.2;
+        break;
+      case 'stretch': sy = 1.12; sx = 0.94; bobY = 0.04; break;
+      case 'brushTeeth':
+        lean = Math.sin(t * 16) * 0.05;
+        if (Math.random() < dt * 4 && ctx) ctx.particles?.steam(this._worldHead(0.1, 0.15));
+        break;
+      case 'sleep':
+        bobY = -0.08 + Math.sin(t * 1.2) * 0.02; lean = 0.18; pitch = 0.10;
+        if (Math.random() < dt * 1.2 && ctx) ctx.particles?.zzz(this._worldHead(0.2, 0.5));
+        break;
+      case 'wakeUp': sy = 1 + Math.max(0, 1 - st) * 0.12; bobY = Math.sin(t * 8) * 0.03; break;
+      case 'confused': lean = Math.sin(t * 3) * 0.18; break;
+      case 'proud': bobY = 0.03; sy = 1.05; break;
+      case 'idle':
+      default:
+        bobY = Math.sin(t * 1.8) * 0.03; lean = Math.sin(t * 0.7) * 0.03;
+        break;
+    }
+
+    // squash & stretch on hops (mid-air stretch, gives weight)
+    if (hop > 0.001) { sy *= 1 + hop * 0.4; sx *= 1 - hop * 0.25; }
+    this._spin += spinV * dt;
+
+    // damp toward targets for smoothness
+    const g = this.gpose, L = 12;
+    g.bobY = damp(g.bobY, bobY, L, dt); g.hop = damp(g.hop, hop, L, dt);
+    g.lean = damp(g.lean, lean, L, dt); g.pitch = damp(g.pitch, pitch, L, dt);
+    g.sx = damp(g.sx, sx, L, dt);       g.sy = damp(g.sy, sy, L, dt);
+
+    this.bob.position.y = g.bobY + g.hop;
+    const lookPitch = s !== 'sleep' ? -this.look.y * 0.12 : 0;
+    this.gesture.rotation.set(g.pitch + lookPitch, this._spin, g.lean);
+    this.gesture.scale.set(g.sx, g.sy, g.sx);
+
+    // whole-body turn: face travel direction + subtle lean toward cursor
+    const faceTurn = (this.facing > 0 ? 0.35 : -0.35) + this.baseYaw;
+    const lookYaw = s !== 'sleep' ? this.look.x * 0.25 : 0;
+    this.root.rotation.y = damp(this.root.rotation.y, faceTurn + lookYaw, 8, dt);
+
+    // auto-return one-shot states
+    const dur = this._oneShotDuration(s);
+    if (dur && st >= dur) {
+      const cb = this.onStateEnd; this.onStateEnd = null;
+      this.setState('idle');
+      if (cb) cb();
+    }
+  }
+
+  // ---------------------------------------------------------------
   // Per-frame update
   // ---------------------------------------------------------------
   update(dt, t, ctx) {
+    if (!this.ready) return;                              // body not built yet
+    if (this.rigless) return this._updateRigless(dt, t, ctx);
+
     this.stateTime += dt;
     const p = this.pose;
     const P = this._neutralPose();   // reset targets each frame, then override

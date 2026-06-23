@@ -49,8 +49,14 @@ class Eon {
     const ctx = (this.ctx = { config: this.config });
 
     this.particles = new ParticleSystem(this.scene, this.config.palette);
-    this.character = new CharacterController(this.scene, this.config.palette,
-      { withPet: this.config.features.pet, scale: 42 });
+    this.character = new CharacterController(this.scene, this.config.palette, {
+      withPet: this.config.features.pet,
+      scale: 42,                          // procedural fallback scale
+      // Real 3D model (1.8 MB web build). Remove modelUrl to use procedural EON.
+      modelUrl: `${this._base}assets/models/EPAL_EON_body_ar_v001.glb`,
+      targetPx: 110,                      // on-screen height
+      baseYaw: 0,                         // tweak if his front faces away
+    });
     this.nav = new Navigator({ bounds: () => this._bounds(), speed: 150 });
 
     this.ai       = new AiCore(ctx);
