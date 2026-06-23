@@ -1,2 +1,6 @@
 # Runtime state written by the PHP backend — never commit user state.
 assets/.state/
+
+# Hi-res model kept local only (web uses the _ar_ build)
+assets/models/*_lo_*.glb
+assets/models/EON_erp_embed.html
