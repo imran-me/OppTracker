@@ -1,0 +1,2 @@
+# Runtime state written by the PHP backend — never commit user state.
+assets/.state/

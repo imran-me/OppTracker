@@ -1,0 +1,88 @@
+/* ============================================================
+   EON — home.css
+   EON's tiny cozy smart-house in the bottom-right corner.
+   Pure CSS/SVG so it stays crisp and cheap (no extra 3D cost).
+   The house is a backdrop; EON (3D) walks in front of it.
+   ============================================================ */
+
+#eon-home {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 200px;
+  height: 150px;
+  pointer-events: none;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 14px 34px rgba(16, 24, 40, .20);
+  border: 1.5px solid rgba(123, 84, 224, .25);
+  /* warm interior wall */
+  background:
+    linear-gradient(180deg, #2a3f86 0%, #233679 55%, #1b2b63 100%);
+  opacity: 0;
+  transform: translateY(12px) scale(.98);
+  transition: opacity .4s ease, transform .4s cubic-bezier(.2, .8, .3, 1);
+}
+#eon-home.show { opacity: 1; transform: translateY(0) scale(1); }
+
+/* Floor strip */
+#eon-home .home-floor {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 30px;
+  background: linear-gradient(180deg, #36306b, #2a2456);
+  border-top: 2px solid rgba(176, 143, 240, .35);
+}
+
+/* Window with day/night sky (driven by JS via data-time on #eon-home) */
+#eon-home .home-window {
+  position: absolute;
+  left: 14px; top: 16px;
+  width: 56px; height: 46px;
+  border-radius: 8px;
+  border: 3px solid var(--eon-purple);
+  background: linear-gradient(180deg, #8ed0ff, #cdeaff);
+  overflow: hidden;
+}
+#eon-home .home-window::before { /* sun/moon */
+  content: "";
+  position: absolute;
+  right: 8px; top: 7px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #ffd76a;
+  box-shadow: 0 0 10px #ffd76a;
+}
+#eon-home[data-time="evening"] .home-window { background: linear-gradient(180deg, #ff9e6b, #ffd0a8); }
+#eon-home[data-time="night"]   .home-window { background: linear-gradient(180deg, #14204d, #29407e); }
+#eon-home[data-time="night"]   .home-window::before { background: #eaf2ff; box-shadow: 0 0 10px #cfe0ff; }
+#eon-home[data-time="morning"] .home-window { background: linear-gradient(180deg, #bfe6ff, #eaf7ff); }
+
+/* Rain streaks (toggled by .raining) */
+#eon-home .home-window .rain {
+  position: absolute; inset: 0; opacity: 0; transition: opacity .4s;
+  background-image: repeating-linear-gradient(115deg, rgba(255,255,255,.5) 0 1px, transparent 1px 6px);
+  animation: eon-rain 0.5s linear infinite;
+}
+#eon-home.raining .home-window .rain { opacity: .7; }
+
+/* Furniture — simple rounded blocks in the palette */
+#eon-home .furn { position: absolute; border-radius: 6px; }
+#eon-home .bed     { right: 12px; bottom: 30px; width: 64px; height: 22px; background: var(--eon-blue); box-shadow: inset 0 -6px 0 rgba(0,0,0,.12); }
+#eon-home .bed::before { content:""; position:absolute; left:4px; top:-8px; width:16px; height:12px; background:var(--eon-white); border-radius:4px; } /* pillow */
+#eon-home .sofa    { left: 14px; bottom: 30px; width: 46px; height: 18px; background: var(--eon-violet); }
+#eon-home .tea     { left: 66px; bottom: 30px; width: 16px; height: 12px; background: #6b4a2a; border-radius:3px; }
+#eon-home .lamp    { left: 92px; bottom: 30px; width: 6px; height: 30px; background: var(--eon-purple); }
+#eon-home .lamp::before { content:""; position:absolute; left:-7px; top:-10px; width:20px; height:12px; background:var(--eon-lime); border-radius:50% 50% 8px 8px; box-shadow:0 0 12px rgba(126,217,87,.6); }
+#eon-home .plant   { right: 16px; bottom: 30px; width: 12px; height: 16px; background: #5a3b22; border-radius:3px; }
+#eon-home .plant::before { content:""; position:absolute; left:-4px; top:-12px; width:20px; height:16px; background:var(--eon-lime); border-radius:50% 50% 40% 40%; }
+#eon-home .shelf   { left: 14px; top: 70px; width: 40px; height: 8px; background: var(--eon-purple); }
+#eon-home .tv      { right: 14px; top: 18px; width: 40px; height: 28px; background: #0b1430; border:2px solid var(--eon-cyan); border-radius:5px; }
+#eon-home .tv.on::after { content:""; position:absolute; inset:3px; background:linear-gradient(120deg,var(--eon-cyan),var(--eon-blue)); border-radius:3px; opacity:.85; animation: eon-tv-flicker 2.2s ease-in-out infinite; }
+
+/* Little name plate */
+#eon-home .home-name {
+  position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%);
+  font: 700 9px var(--eon-font); letter-spacing: .12em; color: var(--eon-white);
+  opacity: .7;
+}

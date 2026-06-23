@@ -442,10 +442,27 @@ a:hover { color: var(--primary-700); }
    14. Achievement gallery / cards
    ----------------------------------------------------------- */
 .gal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 16px; }
-.gal-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow-sm); transition: transform .15s, box-shadow .15s; }
-.gal-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
-.gal-card .gc-media { position: relative; height: 132px; background: linear-gradient(135deg, var(--primary-soft), #dfe7fb); display: grid; place-items: center; color: var(--primary); font-size: 34px; }
+.gal-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
+  box-shadow: 0 4px 16px rgba(16, 24, 40, .06); transition: transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s ease, border-color .22s ease; }
+.gal-card:hover { transform: translateY(-6px); box-shadow: 0 18px 40px rgba(16, 24, 40, .14); border-color: var(--primary); }
+.gal-card .gc-media { position: relative; height: 150px; background: linear-gradient(135deg, var(--primary-soft), #dfe7fb); display: grid; place-items: center; color: var(--primary); font-size: 34px; }
 .gal-card .gc-media img { width: 100%; height: 100%; object-fit: cover; }
+/* Photo collage in a card's media area: 1, 2 or 3 tiles based on image count.
+   Crop is biased toward the upper-middle (object-position center 32%) because
+   in most photos faces sit in the top half — this keeps heads inside the frame
+   even in the small stacked tiles. Images gently zoom in on card hover. */
+.cc-collage { position: absolute; inset: 0; display: grid; gap: 3px; background: var(--line); }
+.cc-collage .cc-tile { position: relative; overflow: hidden; }
+.cc-collage img { width: 100%; height: 100%; object-fit: cover; object-position: center 32%; display: block;
+  transition: transform .5s cubic-bezier(.2,.7,.3,1); }
+.gal-card:hover .cc-collage img, .pf-card-media:hover .cc-collage img { transform: scale(1.07); }
+.cc-2 { grid-template-columns: 1fr 1fr; }
+.cc-3 { grid-template-columns: 1.6fr 1fr; grid-template-rows: 1fr 1fr; }
+.cc-3 .cc-tile:first-child { grid-row: 1 / span 2; }
+.cc-more { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(11, 18, 32, .55);
+  color: #fff; font-weight: 700; font-size: 18px; font-family: var(--font-display); letter-spacing: .5px;
+  backdrop-filter: blur(1px); transition: background .2s ease; }
+.gal-card:hover .cc-more, .pf-card-media:hover .cc-more { background: rgba(11, 18, 32, .42); }
 .gal-card .gc-body { padding: 14px 15px; }
 .gal-card .gc-body b { font-size: 14px; font-weight: 700; color: #16203a; display: block; }
 .gal-card .gc-body p { font-size: 12.5px; color: var(--text-soft); margin: 6px 0 10px; }
@@ -721,6 +738,8 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 .pf-win { display: flex; align-items: center; gap: 14px; background: var(--surface);
   border: 1px solid var(--line); border-radius: var(--r); padding: 14px 18px; box-shadow: var(--shadow-sm); }
 .pf-win-ico { width: 42px; height: 42px; flex: 0 0 auto; border-radius: 12px; display: grid; place-items: center; font-size: 19px; }
+.pf-win-thumb { overflow: hidden; background: var(--line); }
+.pf-win-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: center 32%; }
 .pf-win b { display: block; font-size: 14.5px; }
 .pf-win small { display: block; color: var(--text-soft); font-size: 12.5px; }
 .pf-win-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; }
@@ -948,4 +967,38 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 .sync-status.is-synced { color: var(--green); }
 .sync-status.is-error  { color: var(--red); border-color: #f6d6d4; }
 @keyframes syncspin { to { transform: rotate(360deg); } }
+
+/* -----------------------------------------------------------
+   Interactive cards — shared "floating glow" across every section
+   ----------------------------------------------------------- */
+/* Resting: a soft ambient shadow so cards already feel lifted.
+   Hover: rise, deeper shadow and an indigo ring. Applied to every
+   item card in the app — gallery, contacts, research, projects,
+   dashboard stats, kanban, wins and references. */
+.card-glow, .stat, .kcard, .pf-win, .pf-ref {
+  transition: transform .22s cubic-bezier(.2, .7, .3, 1), box-shadow .22s ease, border-color .22s ease;
+}
+.card-glow { box-shadow: 0 4px 16px rgba(16, 24, 40, .06); }
+.card-glow:hover,
+.stat:hover,
+.pf-win:hover,
+.pf-ref:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 16px 36px rgba(16, 24, 40, .13);
+  border-color: var(--primary);
+}
+/* Kanban cards are draggable — keep their lift gentle. */
+.kcard:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(16, 24, 40, .12); border-color: var(--primary); }
+
+/* Photo-frame tiles: each collage image sits in a white frame, slightly
+   inset from the others, with its own shadow so it reads as a stacked,
+   elevated print rather than a flat fill. */
+.cc-collage { gap: 6px; padding: 6px; background: linear-gradient(135deg, var(--primary-soft), #dfe3fd); }
+.cc-collage .cc-tile {
+  border: 3px solid #c2c6f4; border-radius: 8px; background: #c2c6f4;
+  box-shadow: 0 3px 9px rgba(16, 24, 40, .11); }
+.cc-collage img { border-radius: 5px; }
+/* The frame shadow lifts a touch more when the whole card is hovered. */
+.gal-card:hover .cc-collage .cc-tile,
+.pf-card-media:hover .cc-collage .cc-tile { box-shadow: 0 6px 16px rgba(16, 24, 40, .16); }
 @media (prefers-reduced-motion: reduce) { .sync-status.is-saving i { animation: none; } }

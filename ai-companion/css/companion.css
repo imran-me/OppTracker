@@ -1,0 +1,134 @@
+/* ============================================================
+   EON — companion.css
+   The full-viewport overlay that hosts EON. Pointer-events are
+   OFF on the layer so the ERP stays fully usable; only EON's own
+   hit-area and UI chips capture clicks.
+   ============================================================ */
+
+:root {
+  --eon-ocean:  #1f6dff;
+  --eon-blue:   #2f8bff;
+  --eon-cyan:   #28c7d8;
+  --eon-lime:   #7ed957;
+  --eon-navy:   #10225e;
+  --eon-violet: #7b54e0;
+  --eon-purple: #b08ff0;
+  --eon-white:  #eef4ff;
+  --eon-shadow: 0 10px 30px rgba(16, 24, 40, .18);
+  --eon-font: "Plus Jakarta Sans", "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+/* Root layer injected into <body>. Sits above the app, ignores pointer. */
+#eon-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;        /* above app chrome, below native dialogs */
+  pointer-events: none;
+  overflow: hidden;
+  font-family: var(--eon-font);
+}
+
+/* The Three.js canvas fills the layer. */
+#eon-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Invisible circular hit-area that follows EON so clicks register on him. */
+#eon-hit {
+  position: absolute;
+  width: 90px;
+  height: 110px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 50%;
+  /* debug: outline: 1px dashed red; */
+}
+
+/* Soft contact shadow under EON (separate from the 3D scene for crispness). */
+#eon-floor-shadow {
+  position: absolute;
+  width: 70px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(16, 24, 40, .28), transparent 70%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: opacity .3s;
+}
+
+/* ---------------- Speech bubble ---------------- */
+.eon-bubble {
+  position: absolute;
+  max-width: 220px;
+  transform: translate(-50%, -100%);
+  background: #fff;
+  color: #16203a;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border: 1.5px solid var(--eon-ocean);
+  box-shadow: var(--eon-shadow);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .25s ease, transform .25s cubic-bezier(.2, .8, .3, 1);
+  white-space: normal;
+  z-index: 2;
+}
+.eon-bubble.show { opacity: 1; }
+.eon-bubble::after {           /* little tail */
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -9px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-right: 1.5px solid var(--eon-ocean);
+  border-bottom: 1.5px solid var(--eon-ocean);
+  transform: translateX(-50%) rotate(45deg);
+}
+.eon-bubble .eon-emoji { margin-right: 4px; }
+
+/* ---------------- Control chip (mute / settings) ---------------- */
+#eon-controls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+  z-index: 3;
+}
+.eon-chip {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, .9);
+  color: var(--eon-ocean);
+  box-shadow: var(--eon-shadow);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font-size: 15px;
+  transition: transform .15s, background .15s;
+  backdrop-filter: blur(6px);
+}
+.eon-chip:hover { transform: translateY(-2px); background: #fff; }
+
+/* Respect users who prefer less motion: dim, don't animate wildly. */
+@media (prefers-reduced-motion: reduce) {
+  .eon-bubble { transition: opacity .2s linear; }
+}
+
+/* Hide EON cleanly on very small screens (optional, keeps mobile clean). */
+@media (max-width: 560px) {
+  #eon-layer.eon-hide-mobile { display: none; }
+}

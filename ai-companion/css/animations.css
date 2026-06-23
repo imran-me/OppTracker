@@ -1,0 +1,37 @@
+/* ============================================================
+   EON — animations.css
+   Keyframes for the 2D/DOM effects (bubbles, home ambience).
+   3D character motion lives in the JS controller, not here.
+   ============================================================ */
+
+@keyframes eon-rain {
+  from { background-position: 0 0; }
+  to   { background-position: -12px 30px; }
+}
+
+@keyframes eon-tv-flicker {
+  0%, 100% { opacity: .85; }
+  50%      { opacity: .55; }
+}
+
+/* Speech bubble entrance pop */
+@keyframes eon-bubble-pop {
+  0%   { transform: translate(-50%, -90%) scale(.8); opacity: 0; }
+  60%  { transform: translate(-50%, -104%) scale(1.04); opacity: 1; }
+  100% { transform: translate(-50%, -100%) scale(1); opacity: 1; }
+}
+.eon-bubble.pop { animation: eon-bubble-pop .32s cubic-bezier(.2, .8, .3, 1) forwards; }
+
+/* Control chip gentle attention pulse (used once on first load) */
+@keyframes eon-chip-pulse {
+  0%, 100% { box-shadow: var(--eon-shadow); }
+  50%      { box-shadow: 0 0 0 6px rgba(31, 109, 255, .18), var(--eon-shadow); }
+}
+.eon-chip.pulse { animation: eon-chip-pulse 1.6s ease-in-out 2; }
+
+/* Home wake/sleep dim overlay */
+#eon-home .home-dim {
+  position: absolute; inset: 0; background: #050a1e;
+  opacity: 0; transition: opacity .8s ease; pointer-events: none;
+}
+#eon-home[data-time="night"] .home-dim { opacity: .28; }
