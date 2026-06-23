@@ -377,9 +377,20 @@ export class EonModel {
     this.legL.rotation.x += (lLx - this.legL.rotation.x) * 0.15;
     this.legR.rotation.x += (lRx - this.legR.rotation.x) * 0.15;
 
-    // ZZZ via the companion's particle system (tracks his real position)
-    if (cfg.zzz && particles && Math.random() < dt * 1.2) {
-      const wp = new THREE.Vector3(); this.headAnchor.getWorldPosition(wp); particles.zzz(wp);
+    // dragged: limbs dangle & flail (overrides arm/leg pose while held)
+    if (opts.held) {
+      const f = Math.sin(t * 9) * 0.4;
+      eon.rotation.z = Math.sin(t * 5) * 0.12;
+      this.armL.shoulder.rotation.set(0.3 + f, 0, 0.5 + f * 0.3);
+      this.armR.shoulder.rotation.set(0.3 - f, 0, -0.5 - f * 0.3);
+      this.legL.rotation.x = -0.3 + f; this.legR.rotation.x = -0.3 - f;
+    }
+
+    // sleep: ZZZ + the occasional dream glyph (tracks his real position)
+    if (cfg.zzz && particles) {
+      const wp = new THREE.Vector3(); this.headAnchor.getWorldPosition(wp);
+      if (Math.random() < dt * 1.0) particles.zzz(wp);
+      if (Math.random() < dt * 0.5) particles.dream(wp);
     }
   }
 }

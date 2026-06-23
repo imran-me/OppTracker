@@ -100,7 +100,7 @@ export class AiCore {
   // -------------------- speech --------------------
   speak(text, ttl = 3200) {
     if (!this.ctx.config.features.speech) return;
-    if (this.ctx.stayHome) return;        // home-locked: stay quiet, no bubbles
+    if (this.ctx.stayHome || this.ctx.focus) return;   // quiet when parked / in Focus mode
     this.bubble = { text, until: performance.now() + ttl };
   }
 
@@ -110,8 +110,11 @@ export class AiCore {
     if (this.bubble && now < this.bubble.until) return;
     if (Math.random() > 0.5) return;                   // and only sometimes
     this._lastAmbient = now;
-    let msg = SMART_MESSAGES[Math.floor(Math.random() * SMART_MESSAGES.length)];
-    if (this.memory.visits > 1 && Math.random() < 0.3) msg = 'Welcome back.';
+    // half the time, use a personality-flavored line; otherwise a smart tip.
+    let msg;
+    const p = this.ctx.personality;
+    if (p && Math.random() < 0.5) msg = p.line('idle');
+    else { msg = SMART_MESSAGES[Math.floor(Math.random() * SMART_MESSAGES.length)]; if (this.memory.visits > 1 && Math.random() < 0.3) msg = 'Welcome back.'; }
     this.speak(msg);
   }
 

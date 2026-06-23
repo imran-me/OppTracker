@@ -120,6 +120,24 @@ export class ParticleSystem {
     });
   }
 
+  /** A floating dream/thought glyph (used while sleeping). */
+  dream(pos) {
+    const set = ['💭', '⭐', '🍩', '📖', '🌴', '🎈', '🏆', '🚀'];
+    const ch = set[Math.floor(Math.random() * set.length)];
+    this._spawn(glyphTex(ch, '#ffffff'), {
+      pos: pos.clone(), size: 20, life: 2.4,
+      vel: new THREE.Vector3(6, 14, 0),
+    });
+  }
+
+  /** Any emoji/char floating up (generic). */
+  emote(ch, pos) {
+    this._spawn(glyphTex(ch, '#ffffff'), {
+      pos: pos.clone(), size: 18, life: 1.6,
+      vel: new THREE.Vector3((Math.random() - 0.5) * 8, 22, 0),
+    });
+  }
+
   /** Confetti burst — used on success/celebrate. */
   confetti(pos, count = 26) {
     const colors = [this.palette.ocean, this.palette.lime, this.palette.violet,
