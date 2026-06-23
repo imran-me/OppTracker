@@ -1,160 +1,80 @@
-# EON Brain — Portable Learning & Awareness Engine
+# EON Brain — Firebase edition (free, no server)
 
-EON's **mind**. Connect it to any system and it learns that system on its own —
-discovering the schema, reading the data (read-only), and surfacing help. This
-phase delivers the **learning foundation** plus the only two helping features for
-now: **reminders** and **deadline alerts**. Everything else is built so new
-"skills" plug into the same memory later.
+EON's mind, running **100% in your browser** on the Firebase you already use.
+No PHP, no SQL, no hosting, no cost. He reads your data, learns it, watches your
+deadlines, raises reminders, and stores **his own brain in Firestore**.
 
-> **Where it runs.** This is a PHP module — it needs a PHP runtime to execute. It
-> does **not** run on a static host (e.g. GitHub Pages). Deploy it on your ERP's
-> PHP server (or any PHP host). EON's *own* store defaults to a **SQLite file**,
-> so it works with zero setup and the source DB stays physically separate.
->
-> **It never writes to your system.** EON only ever reads the source (SELECT) and
-> writes exclusively to its own `eon_*` tables / SQLite file.
+> The portable **PHP/SQL** version (generic DB connector, for a future hosted EON
+> that connects to any system) is kept safely at `E:\Imran\Eon\ai-companion\eon-brain`.
+> This folder is the Firebase adapter that fits *this* site.
 
 ---
 
-## The big idea: system-agnostic
-Connecting EON to a new system is **configuration, not code**:
+## How it works
+- **Reads your data** — your whole dataset is one Firestore doc (`opptrack/data`).
+  EON reads it and **auto-discovers** your entities (opportunities, tasks, …),
+  detecting each one's **date/deadline** field and a human **label** — no manual list.
+- **Scans deadlines** — anything inside the warning windows (`[7,3,1,0]` days, plus
+  overdue) becomes an alert with a label, urgency, and a **`pointTo`** link.
+- **Reminders** — you can add manual reminders; deadlines auto-raise them too.
+  Snooze / dismiss / seen all supported, de-duplicated.
+- **Stores his brain in Firestore** — under a separate `eon-brain/brain` doc
+  (never mixed with your data).
+- **Meditation state** — publishes `idle → meditating → reading-section → insight`
+  + progress, for the avatar's meditation animation (next step).
 
-1. **Connector** — a generic PDO connector (SQLite / MySQL / Postgres). Point it
-   at a database in `config/brain.config.php`.
-2. **Schema auto-discovery** — on connect, EON inspects the system and finds every
-   table, its columns, types, relationships, and especially **date columns**. It
-   auto-detects each table's **deadline** column (`due`, `deadline`, `expiry`,
-   `valid_till`, `renewal`, `end_date`, …) and **label** column
-   (`name`/`title`/`reference`). No manual table list.
-3. **Knowledge Store** — a normalized internal memory (`eon_knowledge`) holding
-   what EON learned, independent of the source's structure.
-
-So: **connect EON → he learns the system's all.** Same code, any system.
-
----
-
-## Quick start (with the built-in demo)
-```bash
-cd ai-companion/eon-brain
-
-php bin/seed-demo.php          # makes a throwaway SQLite "source system"
-php bin/meditate.php           # one meditation cycle: learn → scan → raise
-
-# serve the API and poll it
-php -S 127.0.0.1:8801
-curl http://127.0.0.1:8801/api/index.php/state
-curl http://127.0.0.1:8801/api/index.php/alerts
-```
-
-### Connect to YOUR system
-Edit `config/brain.config.php` → `source`:
-```php
-'source' => [
-  'name'     => 'erp',
-  'driver'   => 'mysql',           // sqlite | mysql | pgsql
-  'host'     => '127.0.0.1',
-  'database' => 'epal_erp',
-  'username' => 'readonly_user',   // a READ-ONLY account is recommended
-  'password' => '••••',
-],
-```
-(or set `EON_SOURCE_*` env vars). Then run `php bin/meditate.php`. That's it —
-discovery + learning happen automatically.
-
-### Schedule the meditation cycle (default 15 min)
-```cron
-*/15 * * * *  php /path/to/ai-companion/eon-brain/bin/meditate.php >> /var/log/eon.log 2>&1
-```
+### Owner vs viewer (free-tier rules)
+- **You (owner, signed in):** EON computes and **writes** his brain to Firestore.
+- **Visitors (read-only):** they just **read** the brain you computed. Their browsers
+  never try to write (your Firestore rules are public-read, owner-write).
+- **Runs while the site is open.** With no server, EON meditates when a page is open
+  (throttled to once per interval). Always-on background scanning comes when EON
+  later moves to your paid server.
 
 ---
 
-## How the avatar consumes it
-The avatar **only reads results** — all thinking is inside `eon-brain/`. Use
-`client/brain-client.js`:
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /state` | `state` ∈ `idle / meditating / reading-section / insight` + `progress` 0..1 + `section`. **Drives the meditation visuals.** |
-| `GET /alerts` | active alerts/reminders, urgency-sorted; each has `label`, `urgency`, `dueAt`, **`pointTo`** (where to float and point). |
-| `POST /alerts/{id}/seen` | acknowledge |
-| `POST /alerts/{id}/snooze` | body `{ "minutes": 30 }` |
-| `POST /alerts/{id}/dismiss` | hide (won't reappear) |
-| `POST /reminders` | body `{ title, note?, remind_at, link? }` |
-| `POST /meditate` | run a cycle now (handy to *show* meditation on demand) |
-
-**Meditation mapping (suggested):** poll `/state`; when `meditating`/`reading-section`,
-play a sit-and-glow with light streaming in and mist over `state.section`; when
-`insight`, open his eyes with a spark, show `state.message`, and float him to point
-at the section in `state.pointTo`.
-
-> The 3D avatar code is intentionally **untouched** in this phase. Wiring these
-> results into the meditation animation is the next, separate step.
-
----
-
-## What's inside
+## Files
 ```
 eon-brain/
-├── config/brain.config.php      # connection, windows, interval, overrides
-├── bootstrap.php                # autoload + Brain factory
-├── src/
-│   ├── Connector/               # ConnectorInterface + generic PdoConnector (read-only)
-│   ├── Discovery/SchemaDiscovery.php   # tables/columns/relations + deadline/label detection
-│   ├── Storage/BrainStore.php   # creates ONLY eon_* tables (migrations)
-│   ├── Knowledge/KnowledgeStore.php    # normalized memory + future-skill hook
-│   ├── Learning/Learner.php     # incremental, chunked, read-only learner
-│   ├── Learning/MindState.php   # idle→meditating→reading→insight + progress
-│   ├── Deadlines/DeadlineScanner.php   # windows → de-duplicated alerts + pointTo
-│   ├── Reminders/ReminderEngine.php    # manual + auto, seen/snooze/dismiss
-│   ├── Cycle/MeditationCycle.php       # learn → scan → raise → insight
-│   └── Brain.php                # facade (the single entry point)
-├── api/index.php                # the HTTP routes above
-├── bin/meditate.php             # the scheduled cycle (cron)
-├── bin/seed-demo.php            # demo source so you can see it work
-└── client/brain-client.js       # avatar's consumer
+├── eon-brain.js     # bootstrap: waits for Firebase, starts the brain, window.EonBrain
+├── brain.js         # engine: cycle, deadline scan, reminders, state, Firestore persistence
+├── discovery.js     # auto-discovers entities + date/deadline/label fields from your data
+├── config.js        # windows, interval, owner email, link patterns, overrides
+└── README.md
 ```
-
-EON's own tables: `eon_sources`, `eon_tables` (the map), `eon_knowledge`
-(memory), `eon_alerts`, `eon_reminders`, `eon_state`.
-
----
-
-## Configuration
-All in `config/brain.config.php`:
-- **`source`** — the system to learn (read-only).
-- **`brain`** — EON's own store (default SQLite file).
-- **`windows`** — deadline warning days, default `[7,3,1,0]`.
-- **`interval_seconds`** — meditation cadence (default 900).
-- **`overrides`** — per-table corrections when auto-detection needs a nudge:
-  ```php
-  'overrides' => [
-    'opportunities' => [
-      'deadline_column' => 'deadline',
-      'label_column'    => 'name',
-      'link_pattern'    => 'opportunity-details.html?id={id}',
-    ],
-  ],
-  ```
+It's already embedded on every page:
+`<script type="module" src="./ai-companion/eon-brain/eon-brain.js"></script>`
 
 ---
 
-## Where future helping features attach
-The Knowledge Store is **general-purpose** — every learned row keeps its full
-payload (`payload_json`). New skills (suggestions, mistake-catching, summaries,
-analysis…) should:
-1. **Read** from `KnowledgeStore::records()` / `Brain::recall()` — never re-read
-   the source.
-2. **Write** their own derived outputs into new `eon_*` tables.
-3. Hook into the cycle after `scan` in `Cycle/MeditationCycle.php`.
-
-See the boxed `FUTURE-SKILL HOOK` comment in `Knowledge/KnowledgeStore.php`.
+## The avatar consumes it via `window.EonBrain`
+```js
+window.EonBrain.getState();    // { state, progress, section, message, pointTo }
+window.EonBrain.getAlerts();   // [{ type, label, urgency, dueAt, pointTo, status }]
+window.EonBrain.createReminder({ title, remindAt: '2026-07-01T09:00', link });
+window.EonBrain.snooze(id, 30);  window.EonBrain.dismiss(id);  window.EonBrain.markSeen(id);
+window.EonBrain.meditate();    // run a cycle now (e.g. to show the animation)
+```
+Wiring these into the 3D meditation visuals (sit, glow, light streaming in, float
+over and point at `pointTo`) is the next, separate step — the avatar code is
+untouched for now.
 
 ---
 
-## Safety & scale
-- **Read-only** on the source: only `SELECT`; table/column identifiers are
-  whitelisted from discovery and quoted; all values are bound (no raw SQL).
-- **Own tables only**: migrations create `eon_*` exclusively; the source schema is
-  never altered.
-- **Incremental + chunked**: bounded by the deadline horizon and read in chunks
-  (`chunk_size`), so it scales to large databases.
+## One thing to check in Firebase
+EON writes to a new `eon-brain` collection. Your Firestore security rules already
+allow the owner to write and everyone to read if they use a wildcard like:
+```
+match /{document=**} {
+  allow read: if true;
+  allow write: if request.auth != null && request.auth.token.email == 'me.imran.personal@gmail.com';
+}
+```
+If your rules are per-collection instead, add the same allowance for `eon-brain`.
+
+---
+
+## Configure
+Edit `config.js`: `windows`, `intervalMs`, `linkPatterns` per entity, and
+`overrides` if auto-detection ever needs correcting. To connect a *different*
+Firestore data shape later, this `discovery.js` is the only adapter to adjust.

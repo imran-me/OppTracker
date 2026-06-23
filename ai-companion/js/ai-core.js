@@ -1,9 +1,9 @@
 /* ============================================================
    EON — ai-core.js
-   The "brain": state persistence (PHP → localStorage fallback),
-   speech-bubble messaging, lightweight memory/affection, and the
-   forward-compatible think() hook that will call a real LLM in
-   later roadmap phases. All network calls degrade gracefully.
+   Avatar persistence (Firestore for long-term memory; per-tab session
+   for transient cross-page continuity), speech-bubble messaging,
+   lightweight memory/affection, and a forward-compatible think() hook.
+   EON's deadline/reminder MIND lives separately in eon-brain/.
    ============================================================ */
 
 const SMART_MESSAGES = [
@@ -12,11 +12,11 @@ const SMART_MESSAGES = [
   'I’m right here if you need me.', 'Looking good so far.',
 ];
 
+const OWNER_EMAIL = (typeof window !== 'undefined' && window.OWNER_EMAIL) || 'me.imran.personal@gmail.com';
+
 export class AiCore {
   constructor(ctx) {
     this.ctx = ctx;
-    this.base = ctx.config._base;            // module base URL
-    this.key = this._userKey();
     this.bubble = null;                      // { text, until }
     this._saveTimer = null;
     this.memory = {
@@ -26,39 +26,31 @@ export class AiCore {
     this._lastAmbient = performance.now();
   }
 
-  _userKey() {
-    let k = localStorage.getItem('eon-user-key');
-    if (!k) {
-      k = 'u-' + Math.random().toString(36).slice(2, 10);
-      localStorage.setItem('eon-user-key', k);
-    }
-    return k;
+  // Firebase is loaded globally on every page (firebase-config.js).
+  _fb() { return (typeof window !== 'undefined' && window.firebase && window.firebase.apps?.length) ? window.firebase : null; }
+  _isOwner() {
+    const fb = this._fb(); const u = fb?.auth().currentUser;
+    return !!u && String(u.email || '').toLowerCase() === OWNER_EMAIL.toLowerCase();
   }
+  _avatarDoc() { return this._fb().firestore().collection('eon-brain').doc('avatar'); }
 
-  // -------------------- persistence --------------------
+  // -------------------- persistence (Firebase + per-tab continuity) --------------------
   async loadState() {
-    // 1) Try PHP backend.
+    // long-term MEMORY lives in Firestore (visits / mood / affection)
+    const fb = this._fb();
+    if (fb) {
+      try {
+        const d = await this._avatarDoc().get();
+        if (d.exists) { const s = d.data() || {}; if (s.memory) Object.assign(this.memory, s.memory); }
+      } catch { /* offline — keep defaults */ }
+    }
+    // transient cross-page resume (which pose/spot) is per-tab session state,
+    // not stored data — so it stays in sessionStorage (cheap, no Firestore writes).
     try {
-      const r = await fetch(`${this.base}php/load-state.php?key=${encodeURIComponent(this.key)}`,
-        { cache: 'no-store' });
-      if (r.ok) {
-        const j = await r.json();
-        if (j.found && j.state) { this._apply(j.state); return j.state; }
-      }
-    } catch { /* PHP not available — fall through */ }
-
-    // 2) localStorage fallback.
-    try {
-      const raw = localStorage.getItem('eon-state-' + this.key);
-      if (raw) { const s = JSON.parse(raw); this._apply(s); return s; }
+      const raw = sessionStorage.getItem('eon-live');
+      if (raw) { const live = JSON.parse(raw); return { memory: this.memory, live: live.live, lastSeen: live.lastSeen }; }
     } catch { /* ignore */ }
-    return null;
-  }
-
-  _apply(state) {
-    // Merge persisted memory only; visit counting happens in main on a fresh
-    // visit so page-to-page navigation doesn't inflate the count.
-    if (state.memory) Object.assign(this.memory, state.memory);
+    return (this.memory.visits || this.memory.firstSeen) ? { memory: this.memory } : null;
   }
 
   /** Full snapshot used to resume EON seamlessly across page navigation. */
@@ -80,21 +72,21 @@ export class AiCore {
     };
   }
 
-  /** Debounced save (PHP first, localStorage always as a safety net). */
+  /** Save: transient resume → sessionStorage; long-term memory → Firestore (owner). */
   saveState(immediate = false) {
-    const doSave = async () => {
-      const state = this.collect();
-      try { localStorage.setItem('eon-state-' + this.key, JSON.stringify(state)); } catch {}
-      try {
-        await fetch(`${this.base}php/save-state.php`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: this.key, state }), keepalive: true,
-        });
-      } catch { /* offline / static host — localStorage already holds it */ }
+    const state = this.collect();
+    // per-tab continuity (synchronous, always — survives page navigation)
+    try { sessionStorage.setItem('eon-live', JSON.stringify({ live: state.live, lastSeen: state.lastSeen })); } catch {}
+
+    const persistMemory = async () => {
+      const fb = this._fb();
+      if (!fb || !this._isOwner()) return;     // only the owner writes EON's memory
+      try { await this._avatarDoc().set({ memory: state.memory, updatedAt: new Date().toISOString() }, { merge: true }); }
+      catch { /* offline — sessionStorage already holds continuity */ }
     };
     clearTimeout(this._saveTimer);
-    if (immediate) return doSave();
-    this._saveTimer = setTimeout(doSave, 1500);
+    if (immediate) return persistMemory();
+    this._saveTimer = setTimeout(persistMemory, 1500);
   }
 
   // -------------------- speech --------------------
@@ -126,14 +118,8 @@ export class AiCore {
   }
 
   // -------------------- future LLM hook (Phase 2-6) --------------------
-  async think(message, context = {}) {
-    try {
-      const r = await fetch(`${this.base}api/future-ai-endpoints.php`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ intent: 'chat', message, context }),
-      });
-      if (r.ok) return await r.json();
-    } catch { /* not wired yet */ }
+  // Reserved for later voice/chat; no backend wired in the Firebase build.
+  async think() {
     return { ok: false, reply: 'Still learning — but I’m here. 🌱', emotion: 'curious' };
   }
 }

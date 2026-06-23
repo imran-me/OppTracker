@@ -103,15 +103,7 @@ class Eon {
   }
 
   async _loadConfig() {
-    try {
-      const r = await fetch(`${this._base}config/settings.php`, { cache: 'no-store' });
-      if (r.ok) {
-        const j = await r.json();
-        return { ...DEFAULTS, ...j, idle: { ...DEFAULTS.idle, ...(j.idle || {}) },
-          palette: { ...DEFAULTS.palette, ...(j.palette || {}) },
-          features: { ...DEFAULTS.features, ...(j.features || {}) } };
-      }
-    } catch { /* static host — use DEFAULTS */ }
+    // No PHP backend in the Firebase build — config is the in-code DEFAULTS.
     return structuredClone(DEFAULTS);
   }
 
