@@ -125,12 +125,12 @@ export class EonModel {
     this.eyeL = eye(-1); this.eyeR = eye(1);
     const brow = (side) => { const b = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.022, 12, 24, Math.PI * 0.85), P(C.green)), 0.255 * side, 0.3, 0.64); b.rotation.z = side > 0 ? -0.25 : Math.PI + 0.25; return b; };
     brow(-1); brow(1);
-    this.mSmile = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.032, 14, 28, Math.PI), P(C.mouth, { cc: 0.3 })), 0, -0.22, 0.66); this.mSmile.rotation.z = Math.PI;
+    this.mSmile = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.105, 0.038, 14, 28, Math.PI), P(C.mouth, { cc: 0.3, emissive: C.mouth, ei: 0.85 })), 0, -0.22, 0.66); this.mSmile.rotation.z = Math.PI;
     const mOpen = this.mOpen = new THREE.Group(); mOpen.position.set(0, -0.24, 0.64); head.add(mOpen);
-    add(mOpen, new THREE.Mesh(new THREE.SphereGeometry(0.12, 28, 28), P(C.mouth, { cc: 0.2 })), 0, 0, 0).scale.set(1.1, 0.85, 0.55);
+    add(mOpen, new THREE.Mesh(new THREE.SphereGeometry(0.12, 28, 28), P(C.mouth, { cc: 0.2, emissive: C.mouth, ei: 0.85 })), 0, 0, 0).scale.set(1.1, 0.85, 0.55);
     add(mOpen, new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 20), P(C.tongue, { cc: 0.2 })), 0, -0.045, 0.05).scale.set(1, 0.7, 0.6);
     mOpen.visible = false;
-    this.mO = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.022, 12, 24), P(C.mouth, { cc: 0.2 })), 0, -0.24, 0.66); this.mO.visible = false;
+    this.mO = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.022, 12, 24), P(C.mouth, { cc: 0.2, emissive: C.mouth, ei: 0.85 })), 0, -0.24, 0.66); this.mO.visible = false;
 
     // ---------------- BODY ----------------
     const body = this.body = new THREE.Group(); body.position.y = -0.62; eon.add(body);
