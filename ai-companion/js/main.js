@@ -280,6 +280,18 @@ class Eon {
     if (on && !this.ctx.stayHome && !this.hidden) this.nav.goHome();   // sit in his corner
   }
 
+  /** EON decides to meditate on his own every ~5-10 min (owner, when free). */
+  _selfMeditate() {
+    const B = window.EonBrain;
+    if (!B || typeof B.isOwner !== 'function' || !B.isOwner()) return;
+    if (this._medActive || this.ctx.drag.active || this.hidden || this.ctx.focus || this.ctx.stayHome) return;
+    const now = Date.now();
+    if (!this._nextSelfMed) { this._nextSelfMed = now + 75000; return; }   // first ~75s after load
+    if (now < this._nextSelfMed) return;
+    this._nextSelfMed = now + (5 * 60000 + Math.random() * 5 * 60000);     // then every 5–10 min
+    try { B.meditate(); } catch { /* ignore */ }
+  }
+
   _onInsight(s) {
     this.ctx.meditating = false;
     this.character.setMeditating(false);
@@ -526,6 +538,7 @@ class Eon {
     this.ai.maybeAmbient();
     this._pollBrain(dt);
     this._updateAura(t, dt);
+    this._selfMeditate();
 
     // DOM overlays follow EON
     this._syncOverlays();
