@@ -51,11 +51,12 @@ class Eon {
     this.particles = new ParticleSystem(this.scene, this.config.palette);
     this.character = new CharacterController(this.scene, this.config.palette, {
       withPet: this.config.features.pet,
-      scale: 42,                          // procedural fallback scale
-      // Real 3D model (1.8 MB web build). Remove modelUrl to use procedural EON.
-      modelUrl: `${this._base}assets/models/EPAL_EON_body_ar_v001.glb`,
-      targetPx: 110,                      // on-screen height
-      baseYaw: 0,                         // tweak if his front faces away
+      scale: 42,
+      // ── 3D model loading (disabled for now — using procedural EON) ──
+      // To use the real model later, uncomment modelUrl and set targetPx/baseYaw:
+      // modelUrl: `${this._base}assets/models/EPAL_EON_body_ar_v001.glb`,
+      // targetPx: 110,
+      // baseYaw: 0,
     });
     this.nav = new Navigator({ bounds: () => this._bounds(), speed: 150 });
 
