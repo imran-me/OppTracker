@@ -17,9 +17,9 @@
 import * as THREE from 'three';
 
 const C = {
-  navy: 0x0A2C5B, face: 0x244c92, hood: 0x0E78DC, royal: 0x0E78DC, cyan: 0x1DC7E4,
+  navy: 0x0A2C5B, hood: 0x0E78DC, royal: 0x0E78DC, cyan: 0x1DC7E4,
   green: 0xAAE545, greenSoft: 0xBCEE63, purple: 0x7E6BD9, lightPurple: 0xB2A3F3,
-  white: 0xffffff, mouth: 0x0A1633, tongue: 0x0A1633, soleW: 0xE8ECF0,
+  white: 0xffffff, mouth: 0x1DC7E4, tongue: 0xff6f91, soleW: 0xE8ECF0,
   wood: 0x7a4a26, screen: 0x0E78DC,
 };
 
@@ -86,7 +86,7 @@ export class EonModel {
     // ---------------- HEAD ----------------
     const head = this.head = new THREE.Group(); head.position.y = 0.52; eon.add(head);
     const hood = add(head, new THREE.Mesh(new THREE.SphereGeometry(0.8, 64, 64), P(C.hood, { rough: 0.28, cc: 0.4 })), 0, 0.02, -0.05); hood.scale.set(1.02, 1.04, 0.98);
-    add(head, new THREE.Mesh(new THREE.SphereGeometry(0.66, 64, 64), P(C.face, { rough: 0.44, cc: 0.45, env: 0.5, emissive: 0x18386b, ei: 0.3 })), 0, -0.02, 0.12).scale.set(1.04, 1, 1);
+    add(head, new THREE.Mesh(new THREE.SphereGeometry(0.66, 64, 64), P(0x1f4488, { rough: 0.34, cc: 0.2 })), 0, -0.02, 0.12).scale.set(1.04, 1, 1);
     add(head, new THREE.Mesh(new THREE.TorusGeometry(0.625, 0.06, 24, 64), P(C.green, { rough: 0.3, cc: 0.3 })), 0, -0.02, 0.36).rotation.x = 0.13;
     const string = (x) => { const s = add(head, new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.34, 10), P(C.greenSoft)), x, -0.62, 0.5); s.rotation.x = 0.18; return s; };
     string(-0.16); string(0.16);
@@ -125,19 +125,12 @@ export class EonModel {
     this.eyeL = eye(-1); this.eyeR = eye(1);
     const brow = (side) => { const b = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.022, 12, 24, Math.PI * 0.85), P(C.green)), 0.255 * side, 0.3, 0.64); b.rotation.z = side > 0 ? -0.25 : Math.PI + 0.25; return b; };
     brow(-1); brow(1);
-    // ---- expressive glowing mouth (cyan, reads clearly on the dark face) ----
-    const mMat = () => new THREE.MeshPhysicalMaterial({ color: C.cyan, emissive: C.cyan, emissiveIntensity: 0.75, roughness: 0.2, clearcoat: 0.6, envMapIntensity: 0.3 });
-    const mouths = this.mouths = {};
-    mouths.smile = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 14, 28, Math.PI), mMat()), 0, -0.22, 0.66); mouths.smile.rotation.z = Math.PI;
-    mouths.grin = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.145, 0.035, 14, 32, Math.PI), mMat()), 0, -0.2, 0.655); mouths.grin.rotation.z = Math.PI; mouths.grin.visible = false;
-    mouths.frown = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 14, 28, Math.PI), mMat()), 0, -0.17, 0.66); mouths.frown.visible = false;
-    mouths.flat = add(head, new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.2, 10), mMat()), 0, -0.22, 0.66); mouths.flat.rotation.z = Math.PI / 2; mouths.flat.visible = false;
-    mouths.o = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.026, 12, 24), mMat()), 0, -0.23, 0.66); mouths.o.visible = false;
-    const open = mouths.open = new THREE.Group(); open.position.set(0, -0.25, 0.63); head.add(open);
-    add(open, new THREE.Mesh(new THREE.SphereGeometry(0.115, 28, 28), P(0x07142e, { cc: 0.2 })), 0, 0, 0).scale.set(1.05, 0.95, 0.5);   // dark interior
-    add(open, new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.028, 14, 30), mMat()), 0, 0, 0.03).scale.set(1.05, 0.95, 1);              // glowing rim
-    add(open, new THREE.Mesh(new THREE.SphereGeometry(0.06, 18, 18), P(0xff6f91, { rough: 0.5 })), 0, -0.05, 0.06).scale.set(1, 0.7, 0.6); // tongue
-    open.visible = false;
+    this.mSmile = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.032, 14, 28, Math.PI), P(C.mouth, { cc: 0.3 })), 0, -0.22, 0.66); this.mSmile.rotation.z = Math.PI;
+    const mOpen = this.mOpen = new THREE.Group(); mOpen.position.set(0, -0.24, 0.64); head.add(mOpen);
+    add(mOpen, new THREE.Mesh(new THREE.SphereGeometry(0.12, 28, 28), P(C.mouth, { cc: 0.2 })), 0, 0, 0).scale.set(1.1, 0.85, 0.55);
+    add(mOpen, new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 20), P(C.tongue, { cc: 0.2 })), 0, -0.045, 0.05).scale.set(1, 0.7, 0.6);
+    mOpen.visible = false;
+    this.mO = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.022, 12, 24), P(C.mouth, { cc: 0.2 })), 0, -0.24, 0.66); this.mO.visible = false;
 
     // ---------------- BODY ----------------
     const body = this.body = new THREE.Group(); body.position.y = -0.62; eon.add(body);
@@ -237,15 +230,13 @@ export class EonModel {
       wink:      { eL: 'open', eR: 'happy', mouth: 'smile', tilt: 0.04, hx: 0 },
       curious:   { eL: 'open', eR: 'open', mouth: 'o', tilt: 0.22, hx: 0 },
       excited:   { eL: 'happy', eR: 'happy', mouth: 'open', tilt: 0, hx: 0 },
-      thinking:  { eL: 'open', eR: 'open', mouth: 'flat', tilt: 0.2, hx: 0.12, bubble: true },
+      thinking:  { eL: 'open', eR: 'open', mouth: 'smile', tilt: 0.2, hx: 0.12, bubble: true, mscale: 0.8 },
       sleep:     { eL: 'closed', eR: 'closed', mouth: 'smile', tilt: 0.22, hx: 0.42, cap: true, zzz: true, bed: true, mscale: 0.7 },
       walk:      { eL: 'open', eR: 'open', mouth: 'smile', tilt: 0, hx: 0 },
       tea:       { eL: 'open', eR: 'open', mouth: 'smile', tilt: 0.05, hx: 0.34, prop: 'tea', lidBase: 0.4 },
       read:      { eL: 'open', eR: 'open', mouth: 'smile', tilt: 0.04, hx: 0.32, prop: 'book', lidBase: 0.15 },
-      work:      { eL: 'open', eR: 'open', mouth: 'flat', tilt: 0, hx: 0.26, prop: 'work' },
-      celebrate: { eL: 'happy', eR: 'happy', mouth: 'laugh', tilt: 0, hx: -0.05, confetti: true },
-      laugh:     { eL: 'happy', eR: 'happy', mouth: 'laugh', tilt: -0.06, hx: -0.08 },
-      sad:       { eL: 'open', eR: 'open', mouth: 'frown', tilt: 0.12, hx: 0.16 },
+      work:      { eL: 'open', eR: 'open', mouth: 'smile', tilt: 0, hx: 0.26, prop: 'work' },
+      celebrate: { eL: 'happy', eR: 'happy', mouth: 'open', tilt: 0, hx: -0.05, confetti: true },
     };
   }
 
@@ -260,8 +251,6 @@ export class EonModel {
       case 'celebrate': return [-0.1, 0, -2.5, -0.25, -0.1, 0, 2.5, -0.25];
       case 'excited':   return [0, 0, -1.9 - w9 * 0.25, -0.3, 0, 0, 1.9 + w9 * 0.25, -0.3];
       case 'thinking':  return [0.1, 0, -0.45, 0.12, -1.05, 0.30, -0.95, -0.75];
-      case 'laugh':     return [0, 0, -1.7 - Math.sin(t * 9) * 0.2, -0.3, 0, 0, 1.7 + Math.sin(t * 9) * 0.2, -0.3];
-      case 'sad':       return [0.2, 0, -0.32, 0.25, 0.2, 0, 0.32, 0.25];
       default:          return [0.1, 0, -0.45, 0.12, 0.1, 0, 0.45, 0.12];
     }
   }
@@ -287,14 +276,6 @@ export class EonModel {
     E.ball.rotation.y = gx * 0.42; E.ball.rotation.x = -gy * 0.34;
     let ps = E.pupil.scale.x; ps += (dilT - ps) * 0.12; E.pupil.scale.setScalar(ps);
   }
-  _setMouth(mode, t, msc) {
-    const M = this.mouths;
-    for (const k in M) M[k].visible = false;
-    if (mode === 'laugh') { M.open.visible = true; const p = 1 + Math.abs(Math.sin(t * 12)) * 0.3; M.open.scale.set(p, p * 1.15, 1); return; }
-    if (mode === 'open')  { M.open.visible = true; const p = 1 + Math.sin(t * 8) * 0.08; M.open.scale.set(p, p, 1); return; }
-    const m = M[mode] || M.smile; m.visible = true;
-    if (mode === 'smile' || mode === 'grin') { m.scale.x += (msc - m.scale.x) * 0.15; m.scale.y += (msc - m.scale.y) * 0.15; }
-  }
   _lerpArm(arm, sx, sy, sz, ex, k) {
     arm.shoulder.rotation.x += (sx - arm.shoulder.rotation.x) * k;
     arm.shoulder.rotation.y += (sy - arm.shoulder.rotation.y) * k;
@@ -319,7 +300,6 @@ export class EonModel {
 
     const slp = (this.state === 'sleep');
     const hop = (this.state === 'celebrate') ? Math.abs(Math.sin(t * 4)) * 0.12
-              : (this.state === 'laugh') ? Math.abs(Math.sin(t * 11)) * 0.05
               : (this.state === 'walk') ? Math.abs(Math.sin(t * 6)) * 0.05 : 0;
     eon.position.y = (slp ? 0.06 : 0.16) + Math.sin(t * 1.6) * (slp ? 0 : 0.05) + hop;
 
@@ -367,8 +347,11 @@ export class EonModel {
     this._setEye(this.eyeL, cfg.eL, close, gx, gy, dilT);
     this._setEye(this.eyeR, cfg.eR, close, gx, gy, dilT);
 
-    // mouth (expressive)
-    this._setMouth(cfg.mouth, t, cfg.mscale || 1);
+    // mouth
+    const mm = cfg.mouth, msc = cfg.mscale || 1;
+    this.mSmile.visible = (mm === 'smile'); this.mOpen.visible = (mm === 'open'); this.mO.visible = (mm === 'o');
+    if (mm === 'smile') { this.mSmile.scale.x += (msc - this.mSmile.scale.x) * 0.15; this.mSmile.scale.y += (msc - this.mSmile.scale.y) * 0.15; }
+    if (mm === 'open') { const pls = 1 + Math.sin(t * 8) * 0.08; this.mOpen.scale.set(pls, pls, 1); }
 
     // props
     this.cap.visible = !!cfg.cap; this.think.visible = !!cfg.bubble; this.bed.visible = !!cfg.bed;
