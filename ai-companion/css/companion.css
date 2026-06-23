@@ -37,16 +37,14 @@
   display: block;
 }
 
-/* Invisible circular hit-area that follows EON so clicks register on him. */
+/* Marker that follows EON's head. Kept pointer-events:none so EON NEVER blocks
+   the app while roaming over content — clicks on him are detected by proximity
+   in event-tracker.js instead. */
 #eon-hit {
   position: absolute;
-  width: 90px;
-  height: 110px;
-  transform: translate(-50%, -50%);
-  pointer-events: auto;
-  cursor: pointer;
-  border-radius: 50%;
-  /* debug: outline: 1px dashed red; */
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 /* Soft contact shadow under EON (separate from the 3D scene for crispness). */

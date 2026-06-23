@@ -30,13 +30,14 @@ export class EventTracker {
       character.lookAt(screenToLook(e.clientX, e.clientY));
     });
 
-    // ---- Click anywhere: turn toward it & watch ----
+    // ---- Click anywhere: poke EON if it's near him, else just watch ----
+    // The overlay never blocks the page, so we detect "clicked EON" by distance.
     this._on(window, 'click', (e) => {
       activity.notifyActivity();
-      // turn to face the click
       const eonScreen = project(character.headAnchor);
-      character.face(e.clientX > eonScreen.x ? 1 : -1);
-      if (!this._isEon(e.target)) emotion.react('curious', { priority: 1, speak: false });
+      const dist = Math.hypot(e.clientX - eonScreen.x, e.clientY - eonScreen.y);
+      if (dist < 55) { this._pokeEon(); return; }       // clicked on EON
+      character.face(e.clientX > eonScreen.x ? 1 : -1);  // just glance toward it
     });
 
     // ---- Typing: walk near input, watch, tilt head ----
@@ -46,7 +47,9 @@ export class EventTracker {
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
         if (!this.ctx.stayHome) {                 // stay put when home-locked
           const r = el.getBoundingClientRect();
-          nav.goTo(this.ctx.screenXToWorld(r.left + r.width / 2));
+          // walk right up beside the field (just to its left, at its height)
+          const w = this.ctx.screenToWorld(r.left, r.top + r.height / 2);
+          nav.goTo(w.x - 40, w.y);
         }
         character.setState('think');
         clearTimeout(this._typingTimer);
@@ -75,10 +78,6 @@ export class EventTracker {
 
     // ---- Watch the app for success / error notifications (toasts) ----
     this._watchNotifications();
-
-    // ---- Click directly on EON: random reaction ----
-    const hit = document.getElementById('eon-hit');
-    if (hit) hit.addEventListener('click', () => this._pokeEon());
   }
 
   _isEon(node) {

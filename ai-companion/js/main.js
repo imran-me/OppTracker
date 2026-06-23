@@ -67,14 +67,15 @@ class Eon {
       activity: this.activity,
       project:        (o) => this._project(o),
       screenToLook:   (x, y) => this._screenToLook(x, y),
+      screenToWorld:  (x, y) => this._screenToWorld(x, y),
       screenXToWorld: (x) => x - this.W / 2,
     });
 
     this.home.mount(this.layer);
 
-    // ---- restore memory, then make an entrance ----
-    await this.ai.loadState();
-    this._entrance();
+    // ---- restore memory + live state, then resume or greet ----
+    const saved = await this.ai.loadState();
+    this._restoreOrEnter(saved);
 
     this.tracker.start();
     this._bindLifecycle();
@@ -217,7 +218,11 @@ class Eon {
   }
 
   _bounds() {
-    return { minX: -this.W / 2 + 60, maxX: this.W / 2 - 60, groundY: -this.H / 2 + 80 };
+    // Full-screen roam box (EON floats, so the whole vertical band is fair game).
+    return {
+      minX: -this.W / 2 + 60, maxX: this.W / 2 - 60,
+      minY: -this.H / 2 + 70, maxY: this.H / 2 - 90,
+    };
   }
 
   // -------------------- helpers --------------------
@@ -236,11 +241,17 @@ class Eon {
     );
   }
 
+  /** Screen pixel (clientX/Y) → world coords (pixel-mapped ortho space). */
+  _screenToWorld(cx, cy) {
+    return { x: cx - this.W / 2, y: this.H / 2 - cy };
+  }
+
   _entrance() {
     const b = this._bounds();
-    this.character.setPosition(b.minX - 120, b.groundY);
-    this.nav.setX(b.minX - 120);
-    this.nav.goTo(b.minX + (b.maxX - b.minX) * 0.35);
+    const startY = b.minY + (b.maxY - b.minY) * 0.22;
+    this.character.setPosition(b.minX - 120, startY);
+    this.nav.set(b.minX - 120, startY);
+    this.nav.goTo(b.minX + (b.maxX - b.minX) * 0.3, startY);
     this.character.setState('walk');
     // wave hello once arrived
     this.activity._whenArrived(() => {
@@ -249,16 +260,58 @@ class Eon {
     });
   }
 
+  /**
+   * Decide between resuming a continuous session (page navigation) and
+   * greeting a fresh visitor. EON only replays the walk-in/wave when there's
+   * been a real gap; clicking between pages resumes his exact state.
+   */
+  _restoreOrEnter(saved) {
+    const CONTINUITY = 60000; // ms — within this, treat as the same session
+    const live = saved && saved.live;
+    const gap = saved && saved.lastSeen ? Date.now() - saved.lastSeen : Infinity;
+
+    if (live && gap >= 0 && gap < CONTINUITY) {
+      // ---- resume where he left off ----
+      const b = this._bounds();
+      let x = (live.pos && live.pos.x) || 0;
+      let y = (live.pos && typeof live.pos.y === 'number') ? live.pos.y : b.minY;
+      x = Math.max(b.minX, Math.min(b.maxX, x));
+      y = Math.max(b.minY, Math.min(b.maxY, y));
+      this.character.setPosition(x, y);
+      this.nav.set(x, y);
+
+      // resume the idle clock so the home/sleep ladder keeps progressing
+      this.activity.lastActive = performance.now() - ((live.idleElapsed || 0) + gap);
+      this.activity.phase = live.phase || 'active';
+
+      if (live.stayHome) this._setStayHome(true);
+
+      if (live.phase === 'sleeping') {
+        this.character.setState('sleep');
+        this.home?.show(true); this.home?.setSleeping(true);
+      } else {
+        const s = (live.charState && !['walk', 'run'].includes(live.charState))
+          ? live.charState : 'idle';
+        this.character.setState(s);
+      }
+    } else {
+      // ---- fresh visit: count it and greet ----
+      this.ai.memory.visits = (this.ai.memory.visits || 0) + 1;
+      if (!this.ai.memory.firstSeen) this.ai.memory.firstSeen = new Date().toISOString();
+      this._entrance();
+    }
+  }
+
   // -------------------- main loop --------------------
   _loop() {
     this._raf = requestAnimationFrame(() => this._loop());
     const dt = Math.min(this.clock.getDelta(), 0.05);  // clamp after tab-away
     const t = this.clock.elapsedTime;
 
-    // navigation → position
+    // navigation → position (free 2-D)
     const moving = this.nav.update(dt);
     this.character.root.position.x = this.nav.x;
-    this.character.root.position.y = this._bounds().groundY;
+    this.character.root.position.y = this.nav.y;
     if (moving) this.character.face(this.nav.facing);
     this.activity.onNavTick();
 
@@ -286,11 +339,14 @@ class Eon {
   }
 
   _syncOverlays() {
-    // floor shadow at EON's feet (pixel-mapped from world X)
-    const base = { x: this.character.root.position.x + this.W / 2 };
-    this.shadowEl.style.left = base.x + 'px';
-    this.shadowEl.style.top = (this.H - 12) + 'px';
-    this.shadowEl.style.transform = 'translate(-50%,-50%)';
+    // contact shadow tracks EON's feet in 2-D; it shrinks/fades as he floats up
+    const sx = this.character.root.position.x + this.W / 2;
+    const feetY = this.H / 2 - this.character.root.position.y;
+    const height = (feetY) / this.H;               // 0 top → 1 bottom
+    this.shadowEl.style.left = sx + 'px';
+    this.shadowEl.style.top = feetY + 'px';
+    this.shadowEl.style.transform = `translate(-50%,-50%) scale(${0.55 + height * 0.6})`;
+    this.shadowEl.style.opacity = String(0.35 + height * 0.45);
 
     // hit area over the body
     const head = this._project(this.character.headAnchor);
