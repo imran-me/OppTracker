@@ -4,3 +4,6 @@ assets/.state/
 # Hi-res model kept local only (web uses the _ar_ build)
 assets/models/*_lo_*.glb
 assets/models/EON_erp_embed.html
+
+# Model binaries kept local (EON is currently code-built)
+assets/models/*.glb
