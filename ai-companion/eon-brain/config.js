@@ -9,6 +9,9 @@ export const BRAIN_CONFIG = {
   // ── Where YOUR data lives (read-only). The whole dataset is one doc. ──
   sourceCollection: 'opptrack',
   sourceDoc: 'data',
+  // The doc wraps the dataset under this field (OppTrack saves { store: {...} }).
+  // Set to '' if your entities sit at the top level of the doc.
+  sourceRoot: 'store',
 
   // ── Where EON stores HIS brain (separate area; owner-only write). ──
   brainCollection: 'eon-brain',
@@ -24,7 +27,7 @@ export const BRAIN_CONFIG = {
   // One meditation cycle cadence (ms) while the site is open.
   intervalMs: 15 * 60 * 1000,
   // brief pause between sections so the avatar can "read" each one
-  meditationPauseMs: 250,
+  meditationPauseMs: 450,
   // how long the insight lingers after a cycle (ms)
   insightLingerMs: 90 * 1000,
 

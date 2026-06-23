@@ -56,8 +56,12 @@ export class Brain {
       this._setState('meditating', 0);
 
       const snap = await this._sourceRef().get();
-      const data = snap.exists ? snap.data() : {};
+      const doc = snap.exists ? (snap.data() || {}) : {};
+      // OppTrack wraps the dataset under `store`; unwrap if configured.
+      const data = (this.cfg.sourceRoot && doc[this.cfg.sourceRoot] && typeof doc[this.cfg.sourceRoot] === 'object')
+        ? doc[this.cfg.sourceRoot] : doc;
       const entities = discover(data, this.cfg.overrides);
+      console.info('[EON brain] meditating — entities found:', Object.keys(entities));
 
       const records = [];
       const keys = Object.keys(entities);
@@ -75,6 +79,8 @@ export class Brain {
       const top = this.feed[0];
       if (top) this._setInsight(top); else this._setState('idle', 1);
 
+      console.info(`[EON brain] learned ${records.length} records, ${alerts.length} deadline(s), feed ${this.feed.length}.`,
+        top ? `Top: ${top.label} (${top.urgency})` : 'no alerts in window');
       await this._persist();
     } catch (e) {
       console.warn('[EON brain] cycle failed:', e);
@@ -193,7 +199,11 @@ export class Brain {
   }
   getAlerts() { return this.feed; }
 
-  async meditate() { await this.cycle(); return { alerts: this.feed.length }; }
+  async meditate() {
+    if (!this.isOwner()) { console.warn('[EON brain] meditate() ignored — not signed in as owner.'); return { alerts: 0, owner: false }; }
+    await this.cycle();
+    return { alerts: this.feed.length, owner: true };
+  }
 
   async createReminder({ title, note, remindAt, link }) {
     if (!this.isOwner()) throw new Error('Sign in as owner to add reminders.');
