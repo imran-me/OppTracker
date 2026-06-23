@@ -6,36 +6,23 @@
    the pathfinding Navigator.
    ============================================================ */
 
-// dur = [min, max] seconds he stays absorbed in the activity (longer = calmer).
 const RANDOM_LIFE = [
-  { state: 'drinkTea',   atHome: true,  weight: 4, dur: [14, 24], bubble: 'Tea break. 🍵' },
-  { state: 'read',       atHome: true,  weight: 4, dur: [18, 30] },
-  { state: 'work',       atHome: true,  weight: 3, dur: [14, 24] },
-  { state: 'dance',      atHome: false, weight: 1, dur: [5, 8],   bubble: '🎶' },
-  { state: 'stretch',    atHome: false, weight: 2, dur: [3, 5] },
-  { state: 'brushTeeth', atHome: true,  weight: 1, dur: [5, 8] },
-  { state: 'think',      atHome: false, weight: 2, dur: [6, 10] },
+  { state: 'drinkTea',   atHome: true,  weight: 3, bubble: 'Tea break. 🍵' },
+  { state: 'read',       atHome: true,  weight: 3 },
+  { state: 'work',       atHome: true,  weight: 2 },
+  { state: 'dance',      atHome: false, weight: 1, bubble: '🎶' },
+  { state: 'stretch',    atHome: false, weight: 2 },
+  { state: 'brushTeeth', atHome: true,  weight: 1 },
+  { state: 'think',      atHome: false, weight: 2 },
 ];
 
 export class ActivityEngine {
   constructor(ctx) {
     this.ctx = ctx;
     this.lastActive = performance.now();
-    this.nextDecision = performance.now() + 9000;  // settle after the entrance
+    this.lastLifeTick = performance.now();
     this.phase = 'active';   // active | home | relaxing | sleeping
     this.busyUntil = 0;      // don't interrupt a chosen activity early
-  }
-
-  /** A relaxed destination biased to the edges + lower area, so EON mostly
-      keeps to the sides and rarely strolls across the user's content. */
-  _goRoam() {
-    const nav = this.ctx.nav, b = nav.bounds();
-    const span = b.maxX - b.minX;
-    const x = Math.random() < 0.5
-      ? b.minX + Math.random() * span * 0.32          // left edge band
-      : b.maxX - Math.random() * span * 0.32;         // right edge band
-    const y = b.minY + Math.random() * (b.maxY - b.minY) * 0.5;   // lower half
-    nav.goTo(x, y);
   }
 
   /** Called by the event-tracker on ANY user interaction. */
@@ -105,24 +92,18 @@ export class ActivityEngine {
       return;
     }
 
-    // ---- autonomous life while active & not busy (relaxed pacing) ----
-    if (this.phase === 'active' && !busy && now > this.nextDecision) {
-      const roll = Math.random();
-      if (roll < 0.6) {
-        // settle into an activity and stay absorbed in it for a good while
+    // ---- random life while active & not busy ----
+    if (this.phase === 'active' && !busy &&
+        now - this.lastLifeTick > this.ctx.config.lifeTick) {
+      this.lastLifeTick = now;
+      if (Math.random() < 0.7) {
         const act = this._pickLife();
-        const dur = (act.dur[0] + Math.random() * (act.dur[1] - act.dur[0])) * 1000;
         if (act.atHome) { nav.goHome(); this._whenArrived(() => character.setState(act.state)); }
-        else { this._goRoam(); this._whenArrived(() => character.setState(act.state)); }
-        if (act.bubble && Math.random() < 0.55) ai?.speak(act.bubble);
-        this.busyUntil = now + dur + 4500;                               // + walking buffer
-        this.nextDecision = this.busyUntil + 10000 + Math.random() * 25000; // rest, then reconsider
-      } else if (roll < 0.72) {
-        this._goRoam();                                                  // occasional quiet stroll
-        this.nextDecision = now + 35000 + Math.random() * 40000;
+        else { nav.wander(); this._whenArrived(() => character.setState(act.state)); }
+        if (act.bubble) ai?.speak(act.bubble);
+        this.busyUntil = now + 6000;
       } else {
-        character.setState('idle');                                     // often just chill in place
-        this.nextDecision = now + 30000 + Math.random() * 45000;
+        nav.wander(); // just take a stroll
       }
     }
 
