@@ -56,17 +56,26 @@ export class AiCore {
   }
 
   _apply(state) {
+    // Merge persisted memory only; visit counting happens in main on a fresh
+    // visit so page-to-page navigation doesn't inflate the count.
     if (state.memory) Object.assign(this.memory, state.memory);
-    this.memory.visits = (this.memory.visits || 0) + 1;
-    if (!this.memory.firstSeen) this.memory.firstSeen = new Date().toISOString();
   }
 
+  /** Full snapshot used to resume EON seamlessly across page navigation. */
   collect() {
-    const { nav, emotion } = this.ctx;
+    const { nav, emotion, activity, character } = this.ctx;
     return {
       memory: this.memory,
-      position: { x: nav?.x ?? 0 },
-      emotion: emotion?.current ?? 'happy',
+      live: {
+        emotion: emotion?.current ?? 'happy',
+        phase: activity?.phase ?? 'active',
+        // ms of idleness at save time, so the next page continues the ladder
+        idleElapsed: activity ? Math.max(0, performance.now() - activity.lastActive) : 0,
+        stayHome: !!this.ctx.stayHome,
+        pos: { x: nav?.x ?? 0, y: nav?.y ?? 0 },
+        charState: character?.state ?? 'idle',
+      },
+      lastSeen: Date.now(),
       savedAt: new Date().toISOString(),
     };
   }

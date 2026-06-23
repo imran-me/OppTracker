@@ -1,71 +1,69 @@
 /* ============================================================
    EON — pathfinding.js
-   EON lives on a 1-D "floor" line along the bottom of the screen,
-   so navigation is horizontal steering with smooth arrival. This
-   module owns target selection (wander / go-home / follow cursor)
-   and the easing toward a target. Kept separate so a richer 2-D
-   nav-mesh can replace it later without touching the controller.
+   2-D free-roam navigation. EON can move to ANY point on screen
+   (left/right, up/down, diagonal) with smooth arrival — he's a
+   digital being, so floating is fine. Kept separate so a richer
+   nav-mesh / obstacle avoidance can replace it later without
+   touching the controller.
    ============================================================ */
 
 export class Navigator {
   /**
    * @param {object} opts
-   *   bounds: () => ({minX, maxX, groundY})  world-space floor extents
-   *   speed:  walk speed in world units / second
+   *   bounds: () => ({minX,maxX,minY,maxY})  world-space roam box
+   *   speed:  units / second
    */
   constructor(opts) {
     this.bounds = opts.bounds;
-    this.speed = opts.speed ?? 140;
-    this.x = 0;            // current position
-    this.targetX = 0;      // desired position
-    this.arriveEps = 3;    // "close enough" threshold
+    this.speed = opts.speed ?? 150;
+    this.x = 0; this.y = 0;        // current position
+    this.tx = 0; this.ty = 0;      // target
+    this.arriveEps = 4;            // "close enough"
     this.moving = false;
-    this.facing = 1;       // 1 = right, -1 = left
+    this.facing = 1;               // 1 right, -1 left (for sprite flip)
   }
 
-  setX(x) { this.x = x; this.targetX = x; }
+  set(x, y) { this.x = x; this.y = y; this.tx = x; this.ty = y; this.moving = false; }
 
-  /** Send EON to an absolute world X. */
-  goTo(x) {
+  _clamp(x, y) {
     const b = this.bounds();
-    this.targetX = Math.max(b.minX, Math.min(b.maxX, x));
-    this.moving = Math.abs(this.targetX - this.x) > this.arriveEps;
-    if (this.moving) this.facing = this.targetX > this.x ? 1 : -1;
+    return [Math.max(b.minX, Math.min(b.maxX, x)),
+            Math.max(b.minY, Math.min(b.maxY, y))];
   }
 
-  /** Pick a random reachable spot to stroll to. */
+  /** Head to an absolute world point. */
+  goTo(x, y) {
+    [this.tx, this.ty] = this._clamp(x, y);
+    this.moving = this._dist() > this.arriveEps;
+    if (Math.abs(this.tx - this.x) > 2) this.facing = this.tx > this.x ? 1 : -1;
+  }
+
+  /** Random reachable spot anywhere in the roam box. */
   wander() {
     const b = this.bounds();
-    const span = b.maxX - b.minX;
-    this.goTo(b.minX + 0.15 * span + Math.random() * 0.7 * span);
+    this.goTo(b.minX + Math.random() * (b.maxX - b.minX),
+              b.minY + Math.random() * (b.maxY - b.minY));
   }
 
-  /** Walk to the home corner (right side). */
+  /** The home corner (bottom-right, where the house sits). */
   goHome() {
     const b = this.bounds();
-    this.goTo(b.maxX - 30);
+    this.goTo(b.maxX - 50, b.minY + 36);
   }
 
-  atTarget() {
-    return Math.abs(this.targetX - this.x) <= this.arriveEps;
-  }
+  _dist() { return Math.hypot(this.tx - this.x, this.ty - this.y); }
+  atTarget() { return this._dist() <= this.arriveEps; }
 
-  /**
-   * Step toward target. Returns true while actively walking so the
-   * controller knows to play the walk animation.
-   * @param {number} dt seconds
-   */
+  /** Step toward target. Returns true while actively moving. */
   update(dt) {
     if (this.atTarget()) { this.moving = false; return false; }
-    const dir = Math.sign(this.targetX - this.x);
-    this.facing = dir;
+    const dx = this.tx - this.x, dy = this.ty - this.y;
+    const d = Math.hypot(dx, dy);
+    if (Math.abs(dx) > 2) this.facing = dx > 0 ? 1 : -1;
     const step = this.speed * dt;
-    if (Math.abs(this.targetX - this.x) <= step) {
-      this.x = this.targetX;
-      this.moving = false;
-      return false;
-    }
-    this.x += dir * step;
+    if (d <= step) { this.x = this.tx; this.y = this.ty; this.moving = false; return false; }
+    this.x += (dx / d) * step;
+    this.y += (dy / d) * step;
     this.moving = true;
     return true;
   }
