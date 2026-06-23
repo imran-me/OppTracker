@@ -262,11 +262,22 @@ class Eon {
     this.nav.set(b.minX - 120, startY);
     this.nav.goTo(b.minX + (b.maxX - b.minX) * 0.3, startY);
     this.character.setState('walk');
-    // wave hello once arrived
+    // wave hello once arrived, with a time-of-day greeting
     this.activity._whenArrived(() => {
       this.emotion.react('waving', { priority: 2 });
-      if (this.ai.memory.visits > 1) this.ai.speak('Welcome back!');
+      this.ai.speak(this._greeting());
     });
+  }
+
+  /** Time-of-day greeting (morning / afternoon / evening / late-night). */
+  _greeting() {
+    const h = new Date().getHours();
+    const back = this.ai.memory.visits > 1;
+    if (h < 5)  return back ? 'Up late again? 🌙' : 'Burning the midnight oil? 🌙';
+    if (h < 12) return back ? 'Good morning! ☀️' : 'Morning! Let’s do this. ☀️';
+    if (h < 17) return 'Good afternoon! 🌤️';
+    if (h < 21) return back ? 'Evening — welcome back! 🌆' : 'Good evening! 🌆';
+    return 'Working late? I’m here. 🌙';
   }
 
   /**
