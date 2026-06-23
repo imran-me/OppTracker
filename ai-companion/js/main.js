@@ -16,6 +16,7 @@ import { ActivityEngine }     from './activity-engine.js';
 import { EventTracker }       from './event-tracker.js';
 import { AiCore }             from './ai-core.js';
 import { HomeSystem }         from './home-system.js';
+import { Personality, ARCHETYPES } from './personality.js';
 
 // Front-end mirror of config/settings.php so EON works with no backend.
 const DEFAULTS = {
@@ -41,6 +42,7 @@ class Eon {
 
     this.config = await this._loadConfig();
     this.config._base = this._base;
+    this.personality = new Personality();   // before _buildDom (panel needs it)
 
     this._buildDom();
     this._buildScene();
@@ -69,6 +71,11 @@ class Eon {
     // fill ctx with everything + helpers
     Object.assign(ctx, {
       stayHome: false,
+      followMode: true,                 // Follow mode: he watches your typing
+      focus: false,                     // Focus/DND: shrink + silent
+      activityLevel: 0.5,               // calm ↔ lively
+      drag: { active: false, x: 0, y: 0 },
+      personality: this.personality,
       THREE, scene: this.scene, particles: this.particles, character: this.character,
       nav: this.nav, ai: this.ai, emotion: this.emotion, home: this.home,
       activity: this.activity,
@@ -116,7 +123,16 @@ class Eon {
       <div id="eon-floor-shadow"></div>
       <div id="eon-hit"></div>
       <div class="eon-bubble" id="eon-bubble"></div>
+      <div id="eon-panel" class="eon-panel">
+        <div class="eon-pan-h">Personality</div>
+        <div class="eon-pan-row" id="eon-arche"></div>
+        <div class="eon-pan-h">Mode</div>
+        <div class="eon-pan-row" id="eon-modes"></div>
+        <div class="eon-pan-h">Energy <span id="eon-energy-v"></span></div>
+        <input type="range" id="eon-energy" min="0" max="100" value="50" class="eon-range">
+      </div>
       <div id="eon-controls">
+        <button class="eon-chip" id="eon-settings" title="EON settings">⚙</button>
         <button class="eon-chip" id="eon-home-btn" title="Send EON home to sit">🏠</button>
         <button class="eon-chip" id="eon-mute" title="Hide EON’s messages">💬</button>
         <button class="eon-chip" id="eon-power" title="Hide EON">✕</button>
@@ -143,6 +159,55 @@ class Eon {
 
     // ✕ hide — hide EON but keep a bring-back button (toggle)
     layer.querySelector('#eon-power').onclick = () => this._setHidden(!this.hidden);
+
+    this._buildPanel();
+  }
+
+  /** Settings popover: personality, mode, energy. */
+  _buildPanel() {
+    const panel = this.layer.querySelector('#eon-panel');
+    this.layer.querySelector('#eon-settings').onclick = () => panel.classList.toggle('show');
+
+    // personality archetypes
+    const arche = this.layer.querySelector('#eon-arche');
+    arche.innerHTML = Object.entries(ARCHETYPES).map(([k, v]) =>
+      `<button class="eon-pill" data-a="${k}">${v.name}</button>`).join('');
+    const syncArche = () => arche.querySelectorAll('button').forEach((b) =>
+      b.classList.toggle('on', b.dataset.a === this.personality.archetype));
+    arche.onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      this.personality.setArchetype(b.dataset.a); syncArche();
+      this.ai.speak(this.personality.line('greet'));
+    };
+    syncArche();
+
+    // modes
+    const modes = this.layer.querySelector('#eon-modes');
+    const MODES = [['follow', 'Follow'], ['roam', 'Roam'], ['focus', 'Focus'], ['home', 'Home']];
+    modes.innerHTML = MODES.map(([k, l]) => `<button class="eon-pill" data-m="${k}">${l}</button>`).join('');
+    modes.onclick = (e) => { const b = e.target.closest('button'); if (b) this._setMode(b.dataset.m); };
+    this._syncModes = () => modes.querySelectorAll('button').forEach((b) =>
+      b.classList.toggle('on', b.dataset.m === this._mode));
+    this._mode = 'follow'; this._syncModes();
+
+    // energy / activity level
+    const energy = this.layer.querySelector('#eon-energy');
+    const energyV = this.layer.querySelector('#eon-energy-v');
+    const showE = () => { energyV.textContent = energy.value < 34 ? '· calm' : energy.value > 66 ? '· lively' : '· balanced'; };
+    energy.oninput = () => { this.ctx.activityLevel = energy.value / 100; showE(); };
+    showE();
+  }
+
+  /** Switch behaviour mode: follow / roam / focus / home. */
+  _setMode(m) {
+    this._mode = m;
+    this.ctx.focus = (m === 'focus');
+    this.ctx.followMode = (m === 'follow');
+    if (m === 'home') { if (!this.ctx.stayHome) this._setStayHome(true); }
+    else if (this.ctx.stayHome) { this._setStayHome(false); }
+    // Focus/DND: shrink + go quiet
+    this.character.root.scale.setScalar(this.ctx.focus ? 0.62 : 1);
+    if (this._syncModes) this._syncModes();
   }
 
   /** Send EON home and lock him there (sitting), or release him to roam. */
@@ -269,15 +334,19 @@ class Eon {
     });
   }
 
-  /** Time-of-day greeting (morning / afternoon / evening / late-night). */
+  /** Greeting: occasionally Bangla, occasionally personality-flavored,
+      otherwise time-of-day (with a seasonal touch). */
   _greeting() {
-    const h = new Date().getHours();
+    const d = new Date(), h = d.getHours(), m = d.getMonth();
     const back = this.ai.memory.visits > 1;
-    if (h < 5)  return back ? 'Up late again? 🌙' : 'Burning the midnight oil? 🌙';
-    if (h < 12) return back ? 'Good morning! ☀️' : 'Morning! Let’s do this. ☀️';
-    if (h < 17) return 'Good afternoon! 🌤️';
-    if (h < 21) return back ? 'Evening — welcome back! 🌆' : 'Good evening! 🌆';
-    return 'Working late? I’m here. 🌙';
+    if (Math.random() < 0.25) return h < 12 ? 'Shubho Shokal! 🌅' : 'Assalamu Alaikum 👋';
+    if (this.personality && Math.random() < 0.4) return this.personality.line('greet');
+    const season = (m === 11 || m <= 1) ? ' ❄️' : (m >= 2 && m <= 4) ? ' 🌸' : '';
+    if (h < 5)  return 'Working late? I’m here. 🌙';
+    if (h < 12) return (back ? 'Good morning! ☀️' : 'Morning! Let’s do this. ☀️') + season;
+    if (h < 17) return 'Good afternoon! 🌤️' + season;
+    if (h < 21) return (back ? 'Evening — welcome back! 🌆' : 'Good evening! 🌆');
+    return 'Working late? Don’t forget to rest. 🌙';
   }
 
   /**
@@ -327,6 +396,19 @@ class Eon {
     this._raf = requestAnimationFrame(() => this._loop());
     const dt = Math.min(this.clock.getDelta(), 0.05);  // clamp after tab-away
     const t = this.clock.elapsedTime;
+    this.personality.decay(dt);
+
+    // being dragged: snap to the cursor, flail, skip normal nav/activity
+    if (this.ctx.drag.active) {
+      this.nav.set(this.ctx.drag.x, this.ctx.drag.y);
+      this.character.root.position.x = this.nav.x;
+      this.character.root.position.y = this.nav.y;
+      this.character.update(dt, t, this.ctx);
+      this.particles.update(dt);
+      this._syncOverlays();
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
 
     // navigation → position (free 2-D)
     const moving = this.nav.update(dt);

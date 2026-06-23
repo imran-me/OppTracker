@@ -509,6 +509,7 @@ export class CharacterController {
         particles: ctx && ctx.particles,
         speed: nav ? nav.speedN : 0,
         vx: nav ? Math.max(-1, Math.min(1, nav.vx / nav.maxSpeed)) : 0,
+        held: !!(ctx && ctx.drag && ctx.drag.active),
       });
       const dur = this._oneShotDuration(this.state);
       if (dur && this.stateTime >= dur) {

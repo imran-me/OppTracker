@@ -100,6 +100,13 @@ export class ActivityEngine {
       if (character.state === 'sleep') character.setState('wakeUp');
     }
 
+    // Being dragged → main loop positions him; pause the life loop.
+    if (this.ctx.drag && this.ctx.drag.active) return;
+    // Focus / DND mode → stay put, calm and out of the way.
+    if (this.ctx.focus) return;
+    // Sulking after a drop → a few quiet things in place, then sleep.
+    if (this._sulk) { this._sulkLife(now); return; }
+
     // Don't reshuffle while mid-activity or while walking somewhere.
     const busy = now < this.busyUntil || nav.moving;
 
@@ -129,9 +136,10 @@ export class ActivityEngine {
       return;
     }
 
-    // ---- random life while active & not busy ----
+    // ---- random life while active & not busy (pace scaled by activity level) ----
+    const lifeTick = this.ctx.config.lifeTick * (1.5 - (this.ctx.activityLevel ?? 0.5));
     if (this.phase === 'active' && !busy &&
-        now - this.lastLifeTick > this.ctx.config.lifeTick) {
+        now - this.lastLifeTick > lifeTick) {
       this.lastLifeTick = now;
       if (Math.random() < 0.7) {
         const act = this._pickLife();
@@ -144,11 +152,45 @@ export class ActivityEngine {
       }
     }
 
+    // Jealousy: ignored too long → sulk and try to get your attention.
+    const pers = this.ctx.personality;
+    if (this.phase === 'active' && !busy && pers && pers.ignoredFor() > 150000 &&
+        now - (this._lastJealous || 0) > 60000) {
+      this._lastJealous = now;
+      character.setState('confused');
+      ai?.speak(pers.line('jealous'));
+      this.ctx.particles?.think(character._worldHead(0.2, 0.6));
+    }
+
     // Hide the home once EON wanders away while active.
     if (this.phase === 'active' && home && nav.x < nav.bounds().maxX - 120) {
       home.setSleeping(false);
       home.show(false);
     }
+  }
+
+  /** Dropped after a drag → sulk in place, then nod off. */
+  startSulk(now = performance.now()) {
+    this._sulk = true; this._sulkSleeping = false; this._sulkActs = 0;
+    this._sulkUntil = now + 3500 + Math.random() * 3500;
+    this.ctx.character.setState('idle');
+  }
+
+  /** Wake from sulk/sleep and resume normal life. */
+  wake(now = performance.now()) {
+    this._sulk = false; this._sulkSleeping = false; this.phase = 'active'; this.lastActive = now;
+  }
+
+  _sulkLife(now) {
+    const { nav, character } = this.ctx;
+    if (this._sulkSleeping) return;
+    if (nav.moving) return;
+    if (now < (this._sulkUntil || 0)) return;
+    if ((this._sulkActs || 0) >= 3) { this._sulkSleeping = true; character.setState('sleep'); return; }
+    const ACTS = ['stretch', 'think', 'idle', 'brushTeeth', 'read'];
+    character.setState(ACTS[Math.floor(Math.random() * ACTS.length)]);
+    this._sulkActs = (this._sulkActs || 0) + 1;
+    this._sulkUntil = now + 6000 + Math.random() * 8000;
   }
 
   /** Run cb once the navigator reaches its current target. */
