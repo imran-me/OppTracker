@@ -43,7 +43,7 @@ $EON_CONFIG = [
 
     // Toggle subsystems without touching code.
     'features' => [
-        'pet'        => true,
+        'pet'        => false,
         'home'       => true,
         'speech'     => true,
         'particles'  => true,
