@@ -1,0 +1,4 @@
+# EON's private local store + any demo source DB (regenerate with bin/seed-demo.php)
+storage/*.sqlite
+storage/*.sqlite-*
+storage/*.db
