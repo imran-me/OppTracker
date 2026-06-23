@@ -26,7 +26,7 @@ const DEFAULTS = {
     ocean: '#1f6dff', blue: '#2f8bff', cyan: '#28c7d8', lime: '#7ed957',
     navy: '#10225e', violet: '#7b54e0', purple: '#b08ff0', white: '#eef4ff',
   },
-  features: { pet: false, home: false, speech: true, particles: true, dayNight: true, sound: false },
+  features: { pet: false, home: true, speech: true, particles: true, dayNight: true, sound: false },
 };
 
 class Eon {
@@ -145,16 +145,18 @@ class Eon {
     layer.querySelector('#eon-power').onclick = () => this._setHidden(!this.hidden);
   }
 
-  /** Keep EON in the corner (he still lives his own life there), or free him. */
+  /** Send EON home and lock him there (sitting), or release him to roam. */
   _setStayHome(on) {
     this.ctx.stayHome = on;
     const btn = this.layer.querySelector('#eon-home-btn');
     btn.classList.toggle('active', on);
-    btn.title = on ? 'Let EON roam everywhere' : 'Send EON to the corner';
+    btn.title = on ? 'Let EON roam freely' : 'Send EON home to sit';
     if (on) {
+      this.home?.show(true);
+      this.home?.setActive(true);
       this.nav.goHome();
       this.activity._whenArrived(() => this.character.setState('drinkTea'));
-      this.ai?.speak('I’ll hang out here. 🌿');
+      this.ai?.speak('Cozy here. 🍵');
     }
   }
 
