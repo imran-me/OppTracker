@@ -12,6 +12,10 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
   <!-- Centralized stylesheet -->
   <link href="./assets/css/style.css" rel="stylesheet">
+  <!-- EON · AI Companion styles (isolated module) -->
+  <link href="./ai-companion/css/companion.css" rel="stylesheet">
+  <link href="./ai-companion/css/home.css" rel="stylesheet">
+  <link href="./ai-companion/css/animations.css" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="./assets/img/favicon.svg">
   <title>Projects · OppTrack</title>
 </head>
@@ -46,5 +50,11 @@
   <script src="./assets/js/drive.js"></script>
   <script src="./assets/js/security.js"></script>
   <script src="./assets/js/app.js"></script>
+
+  <!-- ===== EON · AI Companion (isolated module) — remove these 2 blocks to remove EON ===== -->
+  <script type="importmap">
+  { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+  </script>
+  <script type="module" src="./ai-companion/js/main.js"></script>
 </body>
 </html>
