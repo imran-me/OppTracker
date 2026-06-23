@@ -104,6 +104,8 @@ export class ActivityEngine {
     if (this.ctx.drag && this.ctx.drag.active) return;
     // Focus / DND mode → stay put, calm and out of the way.
     if (this.ctx.focus) return;
+    // Meditating → he's absorbing data; don't wander.
+    if (this.ctx.meditating) return;
     // Sulking after a drop → a few quiet things in place, then sleep.
     if (this._sulk) { this._sulkLife(now); return; }
 

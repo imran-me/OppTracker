@@ -130,6 +130,16 @@ export class ParticleSystem {
     });
   }
 
+  /** A glowing mote that streams INTO EON (meditation: absorbing data). */
+  lightStream(center) {
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 70 + Math.random() * 70;
+    const start = center.clone().add(new THREE.Vector3(Math.cos(ang) * dist, Math.sin(ang) * dist * 0.7 + 24, 0));
+    const vel = center.clone().sub(start).multiplyScalar(1.5);   // converge on EON
+    const col = Math.random() < 0.5 ? this.palette.lime : this.palette.cyan;
+    this._spawn(circleTex(col), { pos: start, size: 7 + Math.random() * 6, life: 0.85, vel, grow: -6 });
+  }
+
   /** Any emoji/char floating up (generic). */
   emote(ch, pos) {
     this._spawn(glyphTex(ch, '#ffffff'), {
