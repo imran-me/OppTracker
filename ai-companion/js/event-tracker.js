@@ -40,36 +40,17 @@ export class EventTracker {
       character.face(e.clientX > eonScreen.x ? 1 : -1);  // just glance toward it
     });
 
-    // ---- Typing: walk near input, watch, tilt head ----
-    this._on(window, 'input', (e) => {
-      activity.notifyActivity();
-      const el = e.target;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
-        if (!this.ctx.stayHome) {                 // stay put when home-locked
-          const r = el.getBoundingClientRect();
-          // walk right up beside the field (just to its left, at its height)
-          const w = this.ctx.screenToWorld(r.left, r.top + r.height / 2);
-          nav.goTo(w.x - 40, w.y);
-        }
-        character.setState('think');
-        clearTimeout(this._typingTimer);
-        this._typingTimer = setTimeout(() => {
-          if (character.state === 'think') character.setState('idle');
-        }, 1500);
-      }
-    });
+    // ---- Typing: EON does NOT follow your work; just notes activity ----
+    this._on(window, 'input', () => activity.notifyActivity());
 
-    // ---- Form submit: happy jump + celebration ----
+    // ---- Form submit: a quick shared celebration (he notices wins) ----
     this._on(window, 'submit', () => {
       activity.notifyActivity();
       emotion.react('celebrating', { priority: 3 });
     });
 
-    // ---- Scroll: stroll alongside the page ----
-    this._on(window, 'scroll', () => {
-      activity.notifyActivity();
-      if (!this.ctx.stayHome && Math.random() < 0.25) nav.wander();
-    });
+    // ---- Scroll: just note activity (he keeps living his own life) ----
+    this._on(window, 'scroll', () => activity.notifyActivity());
 
     // ---- Tab focus / blur ----
     this._on(document, 'visibilitychange', () => {
