@@ -73,6 +73,7 @@ class Eon {
       stayHome: false,
       followMode: true,                 // Follow mode: he watches your typing
       focus: false,                     // Focus/DND: shrink + silent
+      meditating: false,                // brain-driven: absorbing data
       activityLevel: 0.5,               // calm ↔ lively
       drag: { active: false, x: 0, y: 0 },
       personality: this.personality,
@@ -125,6 +126,7 @@ class Eon {
         <input type="range" id="eon-energy" min="0" max="100" value="50" class="eon-range">
         <div class="eon-pan-h">Size</div>
         <input type="range" id="eon-size" min="55" max="175" value="100" class="eon-range">
+        <button class="eon-pill" id="eon-meditate" style="width:100%;margin-top:9px">🧘 Meditate now</button>
       </div>
       <div id="eon-controls">
         <button class="eon-chip" id="eon-settings" title="EON settings">⚙</button>
@@ -192,6 +194,10 @@ class Eon {
     energy.oninput = () => { this.ctx.activityLevel = energy.value / 100; showE(); };
     showE();
 
+    // meditate-now (owner-only inside the brain) — show the meditation visuals on demand
+    const med = this.layer.querySelector('#eon-meditate');
+    if (med) med.onclick = () => { try { window.EonBrain?.meditate?.(); } catch {} };
+
     // size (applied for real once the character exists; see boot)
     const size = this.layer.querySelector('#eon-size');
     const savedSize = parseFloat(localStorage.getItem('eon-size'));
@@ -205,6 +211,69 @@ class Eon {
     this._userScale = scale;
     try { localStorage.setItem('eon-size', String(scale)); } catch {}
     if (this.character) this.character.root.scale.setScalar(scale * (this.ctx.focus ? 0.62 : 1));
+  }
+
+  // ---------------- brain-driven meditation visuals ----------------
+  _buildAura() {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grd.addColorStop(0, 'rgba(126,217,87,0.9)');
+    grd.addColorStop(0.4, 'rgba(40,199,216,0.35)');
+    grd.addColorStop(1, 'rgba(40,199,216,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+    const tex = new THREE.CanvasTexture(c);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+    this.aura = new THREE.Sprite(mat); this.aura.scale.setScalar(150); this.aura.renderOrder = -1;
+    this.scene.add(this.aura);
+  }
+
+  _updateAura(t, dt) {
+    if (!this.aura) return;
+    const r = this.character.root.position;
+    this.aura.position.set(r.x, r.y + 46, -6);
+    const target = this.ctx.meditating ? (0.45 + 0.3 * Math.sin(t * 3)) : 0;
+    this.aura.material.opacity += (target - this.aura.material.opacity) * 0.08;
+    this.aura.scale.setScalar(this.ctx.meditating ? 170 + Math.sin(t * 2) * 18 : 150);
+    if (this.ctx.meditating && ((t * 5) % 1) < dt * 5) {
+      this.particles.lightStream(this.character._worldHead(0, 0.1));
+    }
+  }
+
+  /** Poll the brain (owner-only) and reflect its lifecycle in the avatar. */
+  _pollBrain(dt) {
+    this._brainT = (this._brainT || 0) + dt;
+    if (this._brainT < 0.4) return;              // getState() is in-memory; cheap
+    this._brainT = 0;
+    const B = window.EonBrain;
+    // Owner-only: visitors must never see private deadline reminders.
+    if (!B || typeof B.isOwner !== 'function' || !B.isOwner()) { this._setMeditation(false); return; }
+    let s; try { s = B.getState(); } catch { return; }
+    const st = s && s.state;
+    if (st === 'meditating' || st === 'reading-section') {
+      this._setMeditation(true);
+    } else if (st === 'insight') {
+      if (this._medActive) this._onInsight(s);   // fire once on the transition
+      this._setMeditation(false);
+    } else {
+      this._setMeditation(false);
+    }
+  }
+
+  _setMeditation(on) {
+    if (this._medActive === on) return;
+    this._medActive = on;
+    this.ctx.meditating = on;
+    this.character.setMeditating(on);
+    if (on && !this.ctx.stayHome && !this.hidden) this.nav.goHome();   // sit in his corner
+  }
+
+  _onInsight(s) {
+    this.ctx.meditating = false;
+    this.character.setMeditating(false);
+    this.character.playEmote('point');                                 // eyes open, points
+    for (let i = 0; i < 8; i++) this.particles.emote('✨', this.character._worldHead((Math.random() - 0.5) * 0.6, 0.7));
+    if (s && s.message) this.ai.speak(s.message, 6500);
   }
 
   /** Switch behaviour mode: follow / roam / focus / home. */
@@ -289,6 +358,7 @@ class Eon {
     fill.position.set(400, 120, 300);
     this.scene.add(fill);
 
+    this._buildAura();
     addEventListener('resize', () => this._onResize(), { passive: true });
   }
 
@@ -442,6 +512,8 @@ class Eon {
     this.particles.update(dt);
     this.home.update();
     this.ai.maybeAmbient();
+    this._pollBrain(dt);
+    this._updateAura(t, dt);
 
     // DOM overlays follow EON
     this._syncOverlays();

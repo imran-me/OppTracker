@@ -34,6 +34,7 @@ const EMOTE_DEF = {
   kick:  { dur: 1.3, face: { eL: 'happy', eR: 'happy' } },
   jump:  { dur: 1.1, face: { mouth: 'open' } },
   cheer: { dur: 2.6, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
+  point: { dur: 2.4, face: { mouth: 'smile' } },
 };
 
 export class EonModel {
@@ -415,6 +416,11 @@ export class EonModel {
         const wp = new THREE.Vector3(); this.headAnchor.getWorldPosition(wp); particles.emote('🎵', wp);
       }
     }
+
+    // meditation pose wins over everything (but not the point emote on insight)
+    if (this._meditating && !(this._emote && this._emote.name === 'point')) {
+      this._applyMeditation(t);
+    }
   }
 
   /** Trigger a full-body emote by name. */
@@ -471,6 +477,23 @@ export class EonModel {
         eon.position.y = base + Math.abs(Math.sin(t * 7)) * 0.24;
         aL.shoulder.rotation.set(-0.3, 0, 1.9); aR.shoulder.rotation.set(-0.3, 0, -1.9);
         break;
+      case 'point':
+        eon.position.y = base + Math.sin(t * 2) * 0.02;
+        aR.shoulder.rotation.set(-1.35, 0, -0.25); aR.elbow.rotation.x = -0.1;   // arm extended, pointing
+        break;
     }
+  }
+
+  /** Sustained meditation pose (seated, hands in lap, eyes closed, gentle float). */
+  setMeditating(on) { this._meditating = !!on; }
+
+  _applyMeditation(t) {
+    const eon = this.eon;
+    eon.position.y = 0.10 + Math.sin(t * 1.1) * 0.045;
+    eon.rotation.z = Math.sin(t * 0.8) * 0.02;
+    this.legL.rotation.x = 1.45; this.legR.rotation.x = 1.45;                 // folded under
+    this.armL.shoulder.rotation.set(0.55, 0, 0.65); this.armL.elbow.rotation.x = 0.7;
+    this.armR.shoulder.rotation.set(0.55, 0, -0.65); this.armR.elbow.rotation.x = 0.7;
+    this._setEye(this.eyeL, 'open', 1, 0, 0, 1); this._setEye(this.eyeR, 'open', 1, 0, 0, 1); // eyes closed
   }
 }
