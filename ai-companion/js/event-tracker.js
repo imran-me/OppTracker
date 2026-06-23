@@ -30,14 +30,17 @@ export class EventTracker {
       character.lookAt(screenToLook(e.clientX, e.clientY));
     });
 
-    // ---- Click anywhere: poke EON if it's near him, else just watch ----
-    // The overlay never blocks the page, so we detect "clicked EON" by distance.
+    // ---- Click: react by the body part you tapped, else just glance ----
+    // Overlay never blocks the page, so we detect "clicked EON" geometrically.
     this._on(window, 'click', (e) => {
       activity.notifyActivity();
-      const eonScreen = project(character.headAnchor);
-      const dist = Math.hypot(e.clientX - eonScreen.x, e.clientY - eonScreen.y);
-      if (dist < 55) { this._pokeEon(); return; }       // clicked on EON
-      character.face(e.clientX > eonScreen.x ? 1 : -1);  // just glance toward it
+      const head = project(character.headAnchor);    // top of head
+      const feet = project(character.root);          // feet
+      const cx = head.x, span = Math.max(24, feet.y - head.y);
+      const onEon = Math.abs(e.clientX - cx) < span * 0.45 &&
+                    e.clientY > head.y - 16 && e.clientY < feet.y + 16;
+      if (onEon) { this._pokeEon(e.clientY, head.y, feet.y); return; }
+      character.face(e.clientX > cx ? 1 : -1);        // glance toward the click
     });
 
     // ---- Typing: walk near input, watch, tilt head ----
@@ -84,14 +87,36 @@ export class EventTracker {
     return node && node.closest && node.closest('#eon-layer');
   }
 
-  _pokeEon() {
-    const { emotion, character, activity, ai, particles } = this.ctx;
-    activity.notifyActivity();
-    const reactions = ['waving', 'excited', 'happy', 'proud', 'thinking', 'celebrating'];
-    const pick = reactions[Math.floor(Math.random() * reactions.length)];
-    if (pick === 'happy') character.setState('dance');
-    else emotion.react(pick, { priority: 2 });
-    particles?.heart(character._worldHead(0, 0.7));
+  _pokeEon(clickY, headY, feetY) {
+    const { emotion, character, ai, particles } = this.ctx;
+    const now = performance.now();
+
+    // Rapid clicking → dizzy / playfully annoyed.
+    this._clicks = (this._clicks || []).filter((tm) => now - tm < 1200);
+    this._clicks.push(now);
+    if (this._clicks.length >= 4) {
+      this._clicks = [];
+      emotion.react('confused', { priority: 3 });
+      particles?.think(character._worldHead(0.2, 0.6));
+      ai?.bumpAffection();
+      return;
+    }
+
+    // Tapped while sleeping → groggy half-wake, then dozes off again.
+    if (character.state === 'sleep') { character.setState('wakeUp'); ai?.bumpAffection(); return; }
+
+    // Which body part? 0 = top of head … 1 = feet.
+    const span = Math.max(24, feetY - headY);
+    const frac = (clickY - headY) / span;
+    if (frac > 0.7) {                         // legs / feet → break into a dance
+      character.setState('dance');
+    } else if (frac > 0.45) {                 // belly → ticklish laugh + confetti
+      emotion.react('celebrating', { priority: 2, speak: false });
+    } else {                                  // head / face → giggle or shy wink
+      if (Math.random() < 0.5) character.setState('wink');
+      else emotion.react('waving', { priority: 2, speak: false });
+    }
+    particles?.heart(character._worldHead(0, 0.65));
     ai?.bumpAffection();
   }
 
