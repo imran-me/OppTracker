@@ -100,6 +100,7 @@ export class AiCore {
   // -------------------- speech --------------------
   speak(text, ttl = 3200) {
     if (!this.ctx.config.features.speech) return;
+    if (this.ctx.stayHome) return;        // home-locked: stay quiet, no bubbles
     this.bubble = { text, until: performance.now() + ttl };
   }
 

@@ -51,6 +51,32 @@ export class ActivityEngine {
     }
   }
 
+  /** Quiet home-corner life: a few random activities, then settle to sleep. */
+  _homeLife(now) {
+    const { nav, character } = this.ctx;
+    this.phase = 'home';
+    if (this._homeSleeping) return;             // already asleep — stay down
+    if (nav.moving) return;                     // walking to a corner spot
+    if (now < (this._homeUntil || 0)) return;   // still absorbed in an activity
+
+    // After a few activities, lie down and stay asleep.
+    if ((this._homeActs || 0) >= 4) {
+      this._homeSleeping = true;
+      nav.goHome();
+      this._whenArrived(() => character.setState('sleep'));
+      return;
+    }
+
+    // Pick a quiet activity, done within the corner (no speech bubbles).
+    const HOME_ACTS = ['drinkTea', 'read', 'work', 'brushTeeth', 'stretch', 'think', 'idle'];
+    const s = HOME_ACTS[Math.floor(Math.random() * HOME_ACTS.length)];
+    this._homeActs = (this._homeActs || 0) + 1;
+    const b = nav.bounds(), cx = b.maxX - 70, cy = b.minY + 40;
+    nav.goTo(cx + (Math.random() - 0.5) * 120, cy + (Math.random() - 0.5) * 70);
+    this._whenArrived(() => character.setState(s));
+    this._homeUntil = now + 8000 + Math.random() * 12000;
+  }
+
   _pickLife() {
     const total = RANDOM_LIFE.reduce((s, a) => s + a.weight, 0);
     let r = Math.random() * total;
@@ -63,8 +89,16 @@ export class ActivityEngine {
     const since = now - this.lastActive;
     const { character, nav, ai, home, emotion } = this.ctx;
 
-    // Home-lock: EON sits at home and never wanders or climbs the idle ladder.
-    if (this.ctx.stayHome) { this.phase = 'home'; return; }
+    // Home-lock: EON lives a quiet life in his corner (no messages), then sleeps.
+    if (this.ctx.stayHome) {
+      if (!this._inHome) { this._inHome = true; this._homeActs = 1; this._homeSleeping = false; this._homeUntil = now + 12000; }
+      this._homeLife(now);
+      return;
+    }
+    if (this._inHome) {                    // just released from home-lock
+      this._inHome = false; this.phase = 'active'; this.lastActive = now;
+      if (character.state === 'sleep') character.setState('wakeUp');
+    }
 
     // Don't reshuffle while mid-activity or while walking somewhere.
     const busy = now < this.busyUntil || nav.moving;
