@@ -27,8 +27,11 @@ export class ActivityEngine {
 
   /** Called by the event-tracker on ANY user interaction. */
   notifyActivity(now = performance.now()) {
-    const wasAway = this.phase !== 'active';
     this.lastActive = now;
+    // Home-locked: he's parked on purpose — don't re-greet on every scroll/click
+    // (that was making his speech bubble flicker).
+    if (this.ctx.stayHome) { this.phase = 'home'; return; }
+    const wasAway = this.phase !== 'active';
 
     if (wasAway) {
       // Wake + greet sequence.
