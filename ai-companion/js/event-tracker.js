@@ -188,21 +188,21 @@ export class EventTracker {
     // tapped while sleeping → groggy
     if (character.state === 'sleep') { character.setState('wakeUp'); emote('🥱'); return; }
 
+    // Each body part triggers a full-body emote animation (+ an emoji).
     const L = side < -0.3, R = side > 0.3, C = !L && !R;
-    if (frac < 0.12) {                              // 🌱 leaf sprout → grows, curious
-      character.setState('curious'); emote('🌱');
-    } else if (frac < 0.40) {                       // head
-      if (C) { character.setState('wink'); emote('😳'); }            // face → shy wink/blush
-      else if (L) { react('excited'); emote('🎵'); }                 // left headphone → sings
-      else { character.setState('thinking'); emote('🤔'); }          // right headphone → thinks
-    } else if (frac < 0.62) {                       // torso / arms
-      if (C) { emotion.react('celebrating', { priority: 2, speak: false }); emote('😄'); } // belly → ticklish laugh
-      else if (L) { react('excited'); emote('🤚'); }                 // left arm → high-five
-      else { emotion.react('waving', { priority: 2, speak: false }); emote('👋'); } // right arm → wave
-    } else {                                        // legs / feet
-      if (L) { character.setState('dance'); emote('🎶'); }           // LEFT leg → dance
-      else if (R) { react('excited'); emote('🦵'); }                 // RIGHT leg → kick/hop (different!)
-      else { react('excited'); emote('⬆️'); }                        // feet → jump
+    if (frac < 0.12)        { character.playEmote('spin');  emote('🌀'); }          // 🌱 leaf → spin
+    else if (frac < 0.40) {                                                          // head
+      if (C)      { character.playEmote('wave');  emote('👋'); }                     // face → waves hi
+      else if (L) { character.playEmote('sing');  emote('🎵'); }                     // left headphone → sings
+      else        { character.playEmote('think'); emote('🤔'); }                     // right headphone → thinks
+    } else if (frac < 0.62) {                                                         // torso / arms
+      if (C)      { character.playEmote('cheer'); emote('😄'); }                     // belly → ticklish cheer
+      else if (L) { character.playEmote('jump');  emote('🤚'); }                     // left arm → high-five
+      else        { character.playEmote('wave');  emote('👋'); }                     // right arm → wave
+    } else {                                                                          // legs / feet
+      if (L)      { character.playEmote('dance'); emote('🎶'); }                     // LEFT leg → dance
+      else if (R) { character.playEmote('kick');  emote('🦵'); }                     // RIGHT leg → kick
+      else        { character.playEmote('jump');  emote('⬆️'); }                     // feet → jump
     }
     particles?.heart(character._worldHead(0, 0.6));
     ai?.bumpAffection();

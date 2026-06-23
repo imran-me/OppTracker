@@ -23,6 +23,19 @@ const C = {
   wood: 0x7a4a26, screen: 0x0E78DC,
 };
 
+// Full-body emotes (PUBG/Free-Fire style). dur = seconds; face = expression
+// override; the body motion itself lives in EonModel._runEmote().
+const EMOTE_DEF = {
+  spin:  { dur: 1.3, face: { eL: 'happy', eR: 'happy' } },
+  dance: { dur: 3.6, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
+  sing:  { dur: 4.0, face: { mouth: 'open', eL: 'happy', eR: 'happy' } },
+  think: { dur: 3.0, face: { mouth: 'smile', tilt: 0.18, hx: 0.16 } },
+  wave:  { dur: 2.2, face: { mouth: 'smile' } },
+  kick:  { dur: 1.3, face: { eL: 'happy', eR: 'happy' } },
+  jump:  { dur: 1.1, face: { mouth: 'open' } },
+  cheer: { dur: 2.6, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
+};
+
 export class EonModel {
   constructor(renderer) {
     this.renderer = renderer;
@@ -293,7 +306,9 @@ export class EonModel {
   // ---------- per-frame ----------
   update(dt, t, opts = {}) {
     const eon = this.eon, head = this.head, sprout = this.sprout;
-    const cfg = this.CFG[this.state] || this.CFG.happy;
+    if (this._emote) { this._emote.t += dt; if (this._emote.t >= this._emote.dur) this._emote = null; }
+    const cfg0 = this.CFG[this.state] || this.CFG.happy;
+    const cfg = (this._emote && this._emote.face) ? { ...cfg0, ...this._emote.face } : cfg0;
     const facing = opts.facing || 1;
     const ptrX = opts.lookX || 0, ptrY = opts.lookY || 0;
     const particles = opts.particles || null;
@@ -391,6 +406,71 @@ export class EonModel {
       const wp = new THREE.Vector3(); this.headAnchor.getWorldPosition(wp);
       if (Math.random() < dt * 1.0) particles.zzz(wp);
       if (Math.random() < dt * 0.5) particles.dream(wp);
+    }
+
+    // active full-body emote overrides the body for its duration
+    if (this._emote) {
+      this._runEmote(this._emote, t);
+      if (this._emote.name === 'sing' && particles && Math.random() < dt * 2.5) {
+        const wp = new THREE.Vector3(); this.headAnchor.getWorldPosition(wp); particles.emote('🎵', wp);
+      }
+    }
+  }
+
+  /** Trigger a full-body emote by name. */
+  playEmote(name) {
+    const E = EMOTE_DEF[name]; if (!E) return;
+    this._emote = { name, dur: E.dur, t: 0, face: E.face };
+  }
+
+  /** Drive the body for the active emote (overrides arm/leg/body pose). */
+  _runEmote(em, t) {
+    const eon = this.eon, ep = Math.min(1, em.t / em.dur), base = 0.16;
+    const aL = this.armL, aR = this.armR, lL = this.legL, lR = this.legR;
+    switch (em.name) {
+      case 'spin':
+        eon.position.y = base + Math.sin(ep * Math.PI) * 0.16;
+        eon.rotation.y = this.turn + (ep * ep * (3 - 2 * ep)) * Math.PI * 4;   // 2 eased spins
+        aL.shoulder.rotation.set(0, 0, 1.5); aR.shoulder.rotation.set(0, 0, -1.5);
+        break;
+      case 'dance':
+        eon.position.y = base + Math.abs(Math.sin(t * 6)) * 0.12;
+        eon.rotation.z = Math.sin(t * 6) * 0.18;
+        aL.shoulder.rotation.set(0, 0, 0.7 + Math.sin(t * 6) * 0.8); aL.elbow.rotation.x = 0.3;
+        aR.shoulder.rotation.set(0, 0, -0.7 - Math.sin(t * 6) * 0.8); aR.elbow.rotation.x = 0.3;
+        lL.rotation.x = Math.sin(t * 6) * 0.2; lR.rotation.x = -Math.sin(t * 6) * 0.2;
+        break;
+      case 'sing':
+        eon.position.y = base + Math.abs(Math.sin(t * 4)) * 0.05;
+        eon.rotation.z = Math.sin(t * 3) * 0.10;
+        aR.shoulder.rotation.set(-1.3, 0, -0.45); aR.elbow.rotation.x = -1.5;     // mic to mouth
+        aL.shoulder.rotation.set(0, 0, 0.4 + Math.sin(t * 4) * 0.4);
+        break;
+      case 'think':
+        eon.position.y = base + Math.sin(t * 1.6) * 0.03;
+        aR.shoulder.rotation.set(-1.1, 0, -0.85); aR.elbow.rotation.x = -1.25;    // hand to chin
+        break;
+      case 'wave':
+        eon.position.y = base + Math.sin(t * 3) * 0.03;
+        aR.shoulder.rotation.set(-0.3, 0, -1.9 + Math.sin(t * 12) * 0.35); aR.elbow.rotation.x = -0.35;
+        break;
+      case 'kick': {
+        const k = Math.sin(Math.min(1, ep * 2) * Math.PI);
+        eon.position.y = base + 0.05 * k; eon.rotation.z = -0.12 * k;
+        lR.rotation.x = -1.2 * k; aL.shoulder.rotation.set(0, 0, 1.2); aR.shoulder.rotation.set(0, 0, -0.6);
+        break;
+      }
+      case 'jump': {
+        const j = ep < 0.25 ? -0.12 * (ep / 0.25) : Math.sin((ep - 0.25) / 0.75 * Math.PI) * 0.45;
+        eon.position.y = base + j;
+        aL.shoulder.rotation.set(0, 0, 1.6); aR.shoulder.rotation.set(0, 0, -1.6);
+        lL.rotation.x = ep < 0.25 ? 0.7 : -0.3; lR.rotation.x = ep < 0.25 ? 0.7 : -0.3;
+        break;
+      }
+      case 'cheer':
+        eon.position.y = base + Math.abs(Math.sin(t * 7)) * 0.24;
+        aL.shoulder.rotation.set(-0.3, 0, 1.9); aR.shoulder.rotation.set(-0.3, 0, -1.9);
+        break;
     }
   }
 }
