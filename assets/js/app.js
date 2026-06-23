@@ -1377,9 +1377,13 @@ function initAchievements() {
   const draw = () => {
     const items = DB.getAll('achievements');
     if (!items.length) { host.innerHTML = emptyState('trophy', 'No achievements yet', 'Showcase competitions, awards, certifications and leadership roles.', 'Add achievement', () => openEntityModal('achievements', null, draw), true); return; }
+    const photoBadge = (item) => {
+      const np = collectImages(item).length, nf = collectFiles(item).length;
+      return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
+    };
     host.innerHTML = `<div class="gal-grid">${items.map(a => `
-      <div class="gal-card">
-        <div class="gc-media">${a.image ? `<img src="${escapeHtml(a.image)}" alt="${escapeHtml(a.title)}">` : `<i class="bi bi-${typeIcon(a.category) || 'trophy-fill'}"></i>`}${a.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+      <div class="gal-card pf-clickable" data-detail="achievements:${a.id}">
+        <div class="gc-media">${mediaCollage(a, typeIcon(a.category) || 'trophy-fill')}${photoBadge(a)}${a.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
         <div class="gc-body">
           <div class="d-flex align-items-center gap-2 mb-1"><span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || 'Achievement')}</span><small class="text-faint num ms-auto">${fmtDate(a.date)}</small></div>
           <b>${escapeHtml(a.title)}</b>
@@ -1391,6 +1395,7 @@ function initAchievements() {
           </div>
         </div>
       </div>`).join('')}</div>`;
+    host.onclick = portfolioDetailDelegate;
   };
   document.getElementById('achAdd').onclick = () => openEntityModal('achievements', null, draw);
   draw();
@@ -1403,7 +1408,7 @@ function initContacts() {
     const items = DB.getAll('contacts');
     if (!items.length) { host.innerHTML = emptyState('person-rolodex', 'No contacts yet', 'Keep professors, mentors, alumni and industry contacts in one place.', 'Add contact', () => openEntityModal('contacts', null, draw), true); return; }
     host.innerHTML = `<div class="gal-grid">${items.map(c => `
-      <div class="card card-pad">
+      <div class="card card-pad card-glow">
         <div class="d-flex align-items-center gap-3 mb-2">
           <div class="av" style="width:46px;height:46px;border-radius:12px;background:var(--primary-soft);color:var(--primary-700);display:grid;place-items:center;font-weight:700;font-family:var(--font-display)">${initials(c.name)}</div>
           <div class="min-w-0"><b style="font-size:14.5px">${escapeHtml(c.name)}</b><div class="text-soft" style="font-size:12.5px">${escapeHtml(c.designation || '')}${c.organization ? ' · ' + escapeHtml(c.organization) : ''}</div></div>
@@ -1431,7 +1436,7 @@ function initResearch() {
     const items = DB.getAll('research');
     if (!items.length) { host.innerHTML = emptyState('lightbulb', 'No research ideas yet', 'Capture problem statements, literature notes and references.', 'Add research idea', () => openEntityModal('research', null, draw), true); return; }
     host.innerHTML = `<div class="stack-16">${items.map(r => `
-      <div class="card card-pad">
+      <div class="card card-pad card-glow">
         <div class="d-flex align-items-start gap-2">
           <span class="stat-ico t-blue"><i class="bi bi-lightbulb-fill"></i></span>
           <div class="flex-grow-1">
@@ -1460,7 +1465,7 @@ function initProjects() {
     const items = DB.getAll('projects');
     if (!items.length) { host.innerHTML = emptyState('diagram-3', 'No projects yet', 'Track project ideas and active builds with their tech stack.', 'Add project', () => openEntityModal('projects', null, draw), true); return; }
     host.innerHTML = `<div class="gal-grid">${items.map(p => `
-      <div class="card card-pad">
+      <div class="card card-pad card-glow">
         <div class="d-flex align-items-center gap-2 mb-2"><span class="chip t-${statusTone(p.status)}"><span class="dot"></span>${escapeHtml(p.status || 'Idea')}</span>${p.category ? `<span class="chip chip-outline">${escapeHtml(p.category)}</span>` : ''}${p.featured ? '<span class="chip t-amber" title="Shown on portfolio"><i class="bi bi-star-fill"></i></span>' : ''}</div>
         <b style="font-size:15px;display:block">${escapeHtml(p.name)}</b>
         ${p.subtitle ? `<small class="text-soft d-block" style="font-size:12px">${escapeHtml(p.subtitle)}</small>` : ''}
@@ -1550,7 +1555,7 @@ function initProfile() {
   document.getElementById('pfName').textContent = p.name;
   document.getElementById('pfHeadline').textContent = p.headline || '';
   document.getElementById('pfBio').textContent = p.bio || '';
-  document.getElementById('pfPhoto').innerHTML = p.photo ? `<img src="${escapeHtml(p.photo)}" alt="${escapeHtml(p.name)}">` : initials(p.name);
+  document.getElementById('pfPhoto').innerHTML = p.photo ? `<img src="${escapeHtml(imgSrc(p.photo))}" alt="${escapeHtml(p.name)}">` : initials(p.name);
   document.getElementById('pfMeta').innerHTML = `${escapeHtml(p.degree || '')}${p.university ? ' · ' + escapeHtml(p.university) : ''}`;
   const eyebrowEl = document.querySelector('.pf-hero .eyebrow');
   if (eyebrowEl) eyebrowEl.textContent = p.eyebrow || 'Digital CV & Portfolio';
@@ -1640,7 +1645,7 @@ function initProfile() {
   // showcase: achievements
   document.getElementById('pfAchievements').innerHTML = featured(DB.getAll('achievements'), 6).map(a => `
     <div class="gal-card pf-clickable" data-detail="achievements:${a.id}">
-      <div class="gc-media">${a.image ? `<img src="${escapeHtml(a.image)}" alt="">` : `<i class="bi bi-trophy-fill"></i>`}${photoBadge(a)}${cardTools('achievements', a.id)}</div>
+      <div class="gc-media">${mediaCollage(a, 'trophy-fill')}${photoBadge(a)}${cardTools('achievements', a.id)}</div>
       <div class="gc-body"><span class="chip t-${statusTone(a.category)} mb-2 d-inline-flex">${escapeHtml(a.category || '')}</span><b>${escapeHtml(a.title)}</b><p>${escapeHtml(a.description || '')}</p></div>
     </div>`).join('') || '<p class="text-soft">No achievements to show yet.</p>';
 
@@ -1648,7 +1653,9 @@ function initProfile() {
   const winsEl = document.getElementById('pfWins');
   if (winsEl) { const w = featured(wins); winsEl.innerHTML = w.length ? w.map(o => `
     <div class="pf-win pf-clickable" data-detail="opportunities:${o.id}">
-      <span class="pf-win-ico t-green"><i class="bi bi-${typeIcon(o.type)}"></i></span>
+      ${collectImages(o).length
+        ? `<span class="pf-win-ico pf-win-thumb"><img src="${escapeHtml(imgSrc(collectImages(o)[0]))}" loading="lazy" alt=""></span>`
+        : `<span class="pf-win-ico t-green"><i class="bi bi-${typeIcon(o.type)}"></i></span>`}
       <div class="flex-grow-1">
         <b>${escapeHtml(o.name)}</b>
         <small>${escapeHtml(o.organizer || '')}${o.country ? ' · ' + escapeHtml(o.country) : ''}</small>
@@ -1665,24 +1672,25 @@ function initProfile() {
   const ordered = featured([...projects].sort((a, b) =>
     (a.status === 'Completed' ? 1 : 0) - (b.status === 'Completed' ? 1 : 0)));
   document.getElementById('pfProjects').innerHTML = ordered.map(pr => {
-    const cover = coverOf(pr);
-    return `<div class="card card-pad pf-editable pf-clickable" data-detail="projects:${pr.id}">
+    const hasImg = collectImages(pr).length;
+    return `<div class="card card-pad card-glow pf-editable pf-clickable" data-detail="projects:${pr.id}">
       ${cardTools('projects', pr.id)}
-      ${cover ? `<div class="pf-card-media"><img src="${escapeHtml(cover)}" alt="">${photoBadge(pr)}</div>` : ''}
+      ${hasImg ? `<div class="pf-card-media">${mediaCollage(pr, 'diagram-3-fill')}${photoBadge(pr)}</div>` : ''}
       <span class="chip t-${statusTone(pr.status)} mb-2 d-inline-flex"><span class="dot"></span>${escapeHtml(pr.status || '')}</span>
       <b style="display:block;font-size:15px">${escapeHtml(pr.name)}</b>
       ${pr.subtitle ? `<small class="text-soft d-block mb-1" style="font-size:12.5px">${escapeHtml(pr.subtitle)}</small>` : ''}
       <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(pr.abstract || pr.description || '')}</p>
       ${pr.technologies ? `<div style="font-size:12px" class="text-soft"><i class="bi bi-cpu me-1"></i>${escapeHtml(pr.technologies)}</div>` : ''}
-      <div class="pf-card-cta"><span><i class="bi bi-eye me-1"></i>View details</span>${!cover ? photoBadge(pr) : ''}</div>
+      <div class="pf-card-cta"><span><i class="bi bi-eye me-1"></i>View details</span>${!hasImg ? photoBadge(pr) : ''}</div>
     </div>`;
   }).join('') || '<p class="text-soft">No projects to show yet.</p>';
 
   // research
   const resEl = document.getElementById('pfResearch');
   if (resEl) { const rs = featured(research); resEl.innerHTML = rs.length ? rs.map(r => `
-    <div class="card card-pad pf-editable pf-clickable" data-detail="research:${r.id}">
+    <div class="card card-pad card-glow pf-editable pf-clickable" data-detail="research:${r.id}">
       ${cardTools('research', r.id)}
+      ${collectImages(r).length ? `<div class="pf-card-media">${mediaCollage(r, 'lightbulb-fill')}${photoBadge(r)}</div>` : ''}
       <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
         <span class="stat-ico t-blue"><i class="bi bi-lightbulb-fill"></i></span>
         <b style="font-size:15px">${escapeHtml(r.title)}</b>
@@ -1708,7 +1716,7 @@ function initProfile() {
     <div class="pf-ref">
       <div class="pf-ref-quote"><i class="bi bi-quote"></i>${escapeHtml(r.quote || '')}</div>
       <div class="pf-ref-who">
-        <div class="pf-ref-av">${r.photo ? `<img src="${escapeHtml(r.photo)}" alt="${escapeHtml(r.name)}">` : initials(r.name)}</div>
+        <div class="pf-ref-av">${r.photo ? `<img src="${escapeHtml(imgSrc(r.photo))}" alt="${escapeHtml(r.name)}">` : initials(r.name)}</div>
         <div class="min-w-0">
           <b>${escapeHtml(r.name)}</b>
           <small>${escapeHtml(r.position || '')}${r.institute ? ' · ' + escapeHtml(r.institute) : ''}</small>
@@ -2032,6 +2040,39 @@ function collectImages(item) {
 /* Uploaded files attached to an item. */
 function collectFiles(item) { return Array.isArray(item.files) ? item.files : []; }
 
+/* Normalize an image URL so it actually renders inside an <img src>.
+   - Uploaded photos (data: URLs) and ordinary direct links pass through.
+   - Google Drive "share" links (…/file/d/<id>/view, open?id=<id>, uc?id=<id>)
+     are NOT directly embeddable, so they are rewritten to Drive's thumbnail
+     endpoint which serves the actual image bytes. Set the file's sharing to
+     "Anyone with the link" for this to work. */
+function imgSrc(url) {
+  if (typeof url !== 'string' || !url) return url || '';
+  if (url.startsWith('data:')) return url;
+  if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
+    const m = url.match(/\/d\/([\w-]+)/) || url.match(/[?&]id=([\w-]+)/);
+    if (m) return `https://drive.google.com/thumbnail?id=${m[1]}&sz=w1600`;
+  }
+  return url;
+}
+
+/* A photo collage for a card's media area.
+   Shows 1, 2 or 3 image tiles depending on how many images the item carries;
+   4+ images still show 3 tiles, with a "+N" overlay on the last one to hint
+   that more are revealed in the detail view. Falls back to a single centered
+   icon when the item has no images at all. */
+function mediaCollage(item, fallbackIcon) {
+  const imgs = collectImages(item);
+  if (!imgs.length) return `<i class="bi bi-${fallbackIcon}"></i>`;
+  const shown = imgs.slice(0, 3);
+  const extra = imgs.length - shown.length;
+  const tiles = shown.map((src, i) =>
+    `<span class="cc-tile"><img src="${escapeHtml(imgSrc(src))}" loading="lazy" alt="">${
+      (extra && i === shown.length - 1) ? `<span class="cc-more">+${extra}</span>` : ''
+    }</span>`).join('');
+  return `<div class="cc-collage cc-${shown.length}">${tiles}</div>`;
+}
+
 /* A downloadable file card for an uploaded file (data URL). */
 function fileCardHtml(f) {
   const ext = (f.name || '').includes('.') ? (f.name.split('.').pop() || '').toUpperCase() : '';
@@ -2048,7 +2089,7 @@ function renderContentBlocks(blocks) {
     if (b.type === 'text')    return b.text ? `<p class="cb-p">${escapeHtml(b.text)}</p>` : '';
     if (b.type === 'code')    return b.code ? `<div class="cb-code"><div class="cb-code-bar"><i class="bi bi-code-slash me-1"></i>${escapeHtml(b.lang || 'code')}</div><pre><code>${escapeHtml(b.code)}</code></pre></div>` : '';
     if (b.type === 'image') {
-      return b.src ? `<figure class="cb-img"><img src="${escapeHtml(b.src)}" alt="${escapeHtml(b.caption || '')}" loading="lazy" data-zoom="${escapeHtml(b.src)}">${b.caption ? `<figcaption>${escapeHtml(b.caption)}</figcaption>` : ''}</figure>` : '';
+      return b.src ? `<figure class="cb-img"><img src="${escapeHtml(imgSrc(b.src))}" alt="${escapeHtml(b.caption || '')}" loading="lazy" data-zoom="${escapeHtml(imgSrc(b.src))}">${b.caption ? `<figcaption>${escapeHtml(b.caption)}</figcaption>` : ''}</figure>` : '';
     }
     if (b.type === 'file') {
       const href = b.data || b.url; if (!href) return '';
@@ -2100,7 +2141,7 @@ function openPortfolioDetail(entity, id) {
 
   const section = (title, inner) => `<div class="pf-detail-section"><div class="section-title">${title}</div>${inner}</div>`;
   const galleryHtml = rest.length
-    ? section('Gallery', `<div class="pf-detail-gallery">${rest.map((src, i) => `<button type="button" class="pf-thumb" data-i="${i + 1}"><img src="${escapeHtml(src)}" loading="lazy" alt=""></button>`).join('')}</div>`)
+    ? section('Gallery', `<div class="pf-detail-gallery">${rest.map((src, i) => `<button type="button" class="pf-thumb" data-i="${i + 1}"><img src="${escapeHtml(imgSrc(src))}" loading="lazy" alt=""></button>`).join('')}</div>`)
     : '';
   const filesHtml = files.length ? section('Files', `<div class="pf-files">${files.map(fileCardHtml).join('')}</div>`) : '';
   const contribHtml = contributors.length
@@ -2113,7 +2154,7 @@ function openPortfolioDetail(entity, id) {
   wrap.innerHTML = `
   <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"><div class="modal-content pf-detail">
     <button type="button" class="btn-close pf-detail-x" data-bs-dismiss="modal" aria-label="Close"></button>
-    ${hero ? `<button type="button" class="pf-hero-img" data-i="0"><img src="${escapeHtml(hero)}" alt="${escapeHtml(titleOf)}"><span class="pf-hero-zoom"><i class="bi bi-arrows-fullscreen"></i></span></button>` : ''}
+    ${hero ? `<button type="button" class="pf-hero-img" data-i="0"><img src="${escapeHtml(imgSrc(hero))}" alt="${escapeHtml(titleOf)}"><span class="pf-hero-zoom"><i class="bi bi-arrows-fullscreen"></i></span></button>` : ''}
     <div class="modal-body pf-detail-body">
       <div class="pf-detail-head">
         <span class="stat-ico"><i class="bi bi-${icon}"></i></span>
@@ -2187,7 +2228,7 @@ function openLightbox(photos, index) {
     box.innerHTML = `
       <button class="lb-close" aria-label="Close"><i class="bi bi-x-lg"></i></button>
       ${photos.length > 1 ? `<button class="lb-nav lb-prev" aria-label="Previous"><i class="bi bi-chevron-left"></i></button>` : ''}
-      <img src="${escapeHtml(photos[i])}" alt="Photo ${i + 1}">
+      <img src="${escapeHtml(imgSrc(photos[i]))}" alt="Photo ${i + 1}">
       ${photos.length > 1 ? `<button class="lb-nav lb-next" aria-label="Next"><i class="bi bi-chevron-right"></i></button>` : ''}
       ${photos.length > 1 ? `<div class="lb-count">${i + 1} / ${photos.length}</div>` : ''}`;
     box.querySelector('.lb-close').onclick = (e) => { e.stopPropagation(); close(); };
@@ -2259,7 +2300,7 @@ function openContentStudio(entity, id, afterSave) {
     if (b.type === 'text') return `<textarea data-bf="text" rows="3" placeholder="Write text… (line breaks are kept)">${escapeHtml(b.text || '')}</textarea>`;
     if (b.type === 'code') return `<input data-bf="lang" placeholder="Language (e.g. python)" value="${escapeHtml(b.lang || '')}"><textarea data-bf="code" rows="5" class="img-list mt-2" placeholder="Paste code…">${escapeHtml(b.code || '')}</textarea>`;
     if (b.type === 'image') return `
-      ${b.src ? `<div class="cs-prev"><img src="${escapeHtml(b.src)}" alt=""></div>` : ''}
+      ${b.src ? `<div class="cs-prev"><img src="${escapeHtml(imgSrc(b.src))}" alt=""></div>` : ''}
       <input type="file" data-file accept="image/*" class="file-input">
       <input data-bf="src" class="mt-2" placeholder="…or paste an image URL" value="${escapeHtml(b.src && b.src.startsWith('data:') ? '' : (b.src || ''))}">
       <input data-bf="caption" class="mt-2" placeholder="Caption (optional)" value="${escapeHtml(b.caption || '')}">`;
