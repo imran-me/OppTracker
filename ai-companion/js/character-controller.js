@@ -6,6 +6,7 @@
        setState(name), lookAt(vec2), update(dt,t), setBadgeGlow(x)
    ============================================================ */
 import * as THREE from 'three';
+import { EonModel } from './eon-model.js';
 
 // GLTFLoader is imported lazily inside _loadModel so a CDN failure can fall
 // back to the procedural EON instead of breaking the whole module.
@@ -37,17 +38,62 @@ export class CharacterController {
     this.onStateEnd = null;          // optional one-shot callback
     this.ready = false;              // true once a body exists
     this.rigless = false;            // true when driving a static (un-rigged) GLB
+    this.detailed = false;           // true when driving the detailed EonModel
+    this.renderer = opts.renderer || null;
 
-    if (opts.modelUrl) {
-      // Real 3D model: whole-body animation (no skeleton in the mesh).
+    if (opts.detailed && this.renderer) {
+      // Detailed, high-fidelity EON (matches the EPAL reference).
+      try { this._buildDetailed(); }
+      catch (e) { console.warn('[EON] detailed build failed — procedural fallback.', e); this._build(); this.ready = true; }
+    } else if (opts.modelUrl) {
+      // Real 3D model file: whole-body animation (no skeleton in the mesh).
       this._setupRigless();
       this._loadModel(opts.modelUrl);
     } else {
-      // Procedural EON: per-limb rig.
+      // Simple procedural EON: per-limb rig.
       this._build();
       this.ready = true;
       if (opts.withPet) this._buildPet();
     }
+  }
+
+  // ---------------------------------------------------------------
+  // Detailed-model mode — wrap EonModel in nav groups, scale to size,
+  // and drop its feet onto the navigation point.
+  // ---------------------------------------------------------------
+  _buildDetailed() {
+    this.modelObj = new EonModel(this.renderer);
+    this.root = new THREE.Group();
+    this.scaler = new THREE.Group();
+    this.lift = new THREE.Group();             // shifts feet to the group origin
+    this.root.add(this.scaler);
+    this.scaler.add(this.lift);
+    this.lift.add(this.modelObj.eon);
+
+    // Measure standing height from head+body only (props excluded).
+    this.modelObj.eon.updateWorldMatrix(true, true);
+    const box = new THREE.Box3();
+    box.expandByObject(this.modelObj.head);
+    box.expandByObject(this.modelObj.body);
+    const height = (box.max.y - box.min.y) || 3;
+    this.scaler.scale.setScalar(this.targetPx / height);
+    this.lift.position.y = -box.min.y;          // feet → origin
+
+    this.scene.add(this.root);
+    if (this.modelObj.env) this.scene.environment = this.modelObj.env;
+    this.headAnchor = this.modelObj.headAnchor;
+    this.detailed = true;
+    this.ready = true;
+  }
+
+  /** Map companion state names → EonModel CFG states. */
+  _mapState(s) {
+    return ({
+      idle: 'happy', walk: 'walk', run: 'walk', wave: 'wave', think: 'thinking',
+      drinkTea: 'tea', read: 'read', work: 'work', celebrate: 'celebrate', sleep: 'sleep',
+      excited: 'excited', curious: 'curious', confused: 'curious', proud: 'happy',
+      stretch: 'excited', brushTeeth: 'happy', wakeUp: 'happy', dance: 'excited', sit: 'happy',
+    })[s] || 'happy';
   }
 
   // ---------------------------------------------------------------
@@ -350,6 +396,7 @@ export class CharacterController {
     this.state = name;
     this.stateTime = 0;
     this.onStateEnd = onEnd;
+    if (this.detailed && this.modelObj) this.modelObj.setState(this._mapState(name));
   }
 
   /** Normalised cursor direction relative to EON (-1..1 each axis). */
@@ -452,6 +499,22 @@ export class CharacterController {
   // ---------------------------------------------------------------
   update(dt, t, ctx) {
     if (!this.ready) return;                              // body not built yet
+
+    if (this.detailed) {
+      this.stateTime += dt;
+      this.modelObj.update(dt, t, {
+        lookX: this.look.x, lookY: this.look.y, facing: this.facing,
+        particles: ctx && ctx.particles,
+      });
+      const dur = this._oneShotDuration(this.state);
+      if (dur && this.stateTime >= dur) {
+        const cb = this.onStateEnd; this.onStateEnd = null;
+        this.setState('idle');
+        if (cb) cb();
+      }
+      return;
+    }
+
     if (this.rigless) return this._updateRigless(dt, t, ctx);
 
     this.stateTime += dt;

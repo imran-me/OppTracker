@@ -50,13 +50,13 @@ class Eon {
 
     this.particles = new ParticleSystem(this.scene, this.config.palette);
     this.character = new CharacterController(this.scene, this.config.palette, {
+      detailed: true,                     // high-fidelity EON (matches EPAL art)
+      renderer: this.renderer,            // needed for the studio env map
+      targetPx: 132,                      // on-screen height
+      scale: 42,                          // procedural fallback scale
       withPet: this.config.features.pet,
-      scale: 42,
-      // ── 3D model loading (disabled for now — using procedural EON) ──
-      // To use the real model later, uncomment modelUrl and set targetPx/baseYaw:
-      // modelUrl: `${this._base}assets/models/EPAL_EON_body_ar_v001.glb`,
-      // targetPx: 110,
-      // baseYaw: 0,
+      // To use a finished GLB later instead: set detailed:false and
+      // modelUrl: `${this._base}assets/models/eon.glb`, targetPx, baseYaw.
     });
     this.nav = new Navigator({ bounds: () => this._bounds(), speed: 150 });
 
@@ -198,20 +198,22 @@ class Eon {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(this.W, this.H, false);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;   // soft, filmic plastic look
+    this.renderer.toneMappingExposure = 0.98;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(
       -this.W / 2, this.W / 2, this.H / 2, -this.H / 2, -2000, 2000);
     this.camera.position.z = 1000;
 
-    // soft, friendly lighting
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(-200, 400, 600);
+    // soft studio lighting (env map for reflections is set by the model build)
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xb6c4e6, 0.5));
+    const key = new THREE.DirectionalLight(0xffffff, 1.15);
+    key.position.set(-320, 500, 600);
     this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0x7b54e0, 0.5); // violet rim
-    rim.position.set(300, 100, -400);
-    this.scene.add(rim);
+    const fill = new THREE.DirectionalLight(0xc9d8ff, 0.32);
+    fill.position.set(400, 120, 300);
+    this.scene.add(fill);
 
     addEventListener('resize', () => this._onResize(), { passive: true });
   }
