@@ -99,29 +99,35 @@
 /* ---------------- Control chip (mute / settings) ---------------- */
 #eon-controls {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
+  right: 12px;
+  bottom: 12px;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   pointer-events: auto;
-  z-index: 3;
+  z-index: 4;                 /* above the home backdrop */
 }
 .eon-chip {
-  width: 34px;
-  height: 34px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, .9);
+  border: 1px solid rgba(31, 109, 255, .18);
+  background: rgba(255, 255, 255, .92);
   color: var(--eon-ocean);
-  box-shadow: var(--eon-shadow);
+  box-shadow: 0 4px 12px rgba(16, 24, 40, .16);
   display: grid;
   place-items: center;
   cursor: pointer;
-  font-size: 15px;
-  transition: transform .15s, background .15s;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  transition: transform .15s, background .15s, color .15s;
   backdrop-filter: blur(6px);
 }
 .eon-chip:hover { transform: translateY(-2px); background: #fff; }
+/* "on" state for toggle buttons (home-lock, messages) */
+.eon-chip.active { background: var(--eon-ocean); color: #fff; border-color: var(--eon-ocean); }
+/* When EON is hidden, the lone bring-back button gets a gentle pulse. */
+.eon-chip.bring-back { background: var(--eon-lime); color: var(--eon-navy); border-color: var(--eon-lime); }
 
 /* Respect users who prefer less motion: dim, don't animate wildly. */
 @media (prefers-reduced-motion: reduce) {

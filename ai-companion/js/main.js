@@ -38,7 +38,6 @@ class Eon {
 
   async boot() {
     if (document.getElementById('eon-layer')) return;          // already running
-    if (localStorage.getItem('eon-disabled') === '1') return;  // user turned EON off
 
     this.config = await this._loadConfig();
     this.config._base = this._base;
@@ -62,6 +61,7 @@ class Eon {
 
     // fill ctx with everything + helpers
     Object.assign(ctx, {
+      stayHome: false,
       THREE, scene: this.scene, particles: this.particles, character: this.character,
       nav: this.nav, ai: this.ai, emotion: this.emotion, home: this.home,
       activity: this.activity,
@@ -81,6 +81,9 @@ class Eon {
 
     this.clock = new THREE.Clock();
     this._loop();
+
+    // Restore "hidden" preference (start EON away, with a bring-back button).
+    if (localStorage.getItem('eon-hidden') === '1') this._setHidden(true);
   }
 
   async _loadConfig() {
@@ -106,7 +109,8 @@ class Eon {
       <div id="eon-hit"></div>
       <div class="eon-bubble" id="eon-bubble"></div>
       <div id="eon-controls">
-        <button class="eon-chip" id="eon-mute" title="Mute EON’s messages">💬</button>
+        <button class="eon-chip" id="eon-home-btn" title="Send EON home to sit">🏠</button>
+        <button class="eon-chip" id="eon-mute" title="Hide EON’s messages">💬</button>
         <button class="eon-chip" id="eon-power" title="Hide EON">✕</button>
       </div>`;
     document.body.appendChild(layer);
@@ -116,14 +120,65 @@ class Eon {
     this.shadowEl = layer.querySelector('#eon-floor-shadow');
     this.hitEl = layer.querySelector('#eon-hit');
 
-    layer.querySelector('#eon-mute').onclick = () => {
+    // 💬 messages — toggle speech bubbles on/off
+    const muteBtn = layer.querySelector('#eon-mute');
+    muteBtn.onclick = () => {
       this.config.features.speech = !this.config.features.speech;
-      this.bubbleEl.classList.remove('show');
+      muteBtn.classList.toggle('active', this.config.features.speech === false);
+      muteBtn.title = this.config.features.speech ? 'Hide EON’s messages' : 'Show EON’s messages';
+      if (!this.config.features.speech) this.bubbleEl.classList.remove('show');
     };
-    layer.querySelector('#eon-power').onclick = () => {
-      localStorage.setItem('eon-disabled', '1');
-      this.destroy();
-    };
+
+    // 🏠 home — send EON home to sit, and keep him there (toggle)
+    const homeBtn = layer.querySelector('#eon-home-btn');
+    homeBtn.onclick = () => this._setStayHome(!this.ctx.stayHome);
+
+    // ✕ hide — hide EON but keep a bring-back button (toggle)
+    layer.querySelector('#eon-power').onclick = () => this._setHidden(!this.hidden);
+  }
+
+  /** Send EON home and lock him there (sitting), or release him to roam. */
+  _setStayHome(on) {
+    this.ctx.stayHome = on;
+    const btn = this.layer.querySelector('#eon-home-btn');
+    btn.classList.toggle('active', on);
+    btn.title = on ? 'Let EON roam freely' : 'Send EON home to sit';
+    if (on) {
+      this.home?.show(true);
+      this.home?.setActive(true);
+      this.nav.goHome();
+      this.activity._whenArrived(() => this.character.setState('drinkTea'));
+      this.ai?.speak('Cozy here. 🍵');
+    }
+  }
+
+  /** Hide EON entirely (pausing the render loop) but leave a bring-back button. */
+  _setHidden(hidden) {
+    this.hidden = hidden;
+    localStorage.setItem('eon-hidden', hidden ? '1' : '0');
+    const vis = hidden ? 'none' : '';
+
+    this.canvas.style.display = vis;
+    this.shadowEl.style.display = vis;
+    this.hitEl.style.display = vis;
+    if (hidden) this.bubbleEl.classList.remove('show');
+    const homeEl = this.layer.querySelector('#eon-home');
+    if (homeEl) homeEl.style.display = vis;
+
+    // hide the other chips while EON is away; the ✕ becomes a bring-back 🙂
+    this.layer.querySelector('#eon-mute').style.display = vis;
+    this.layer.querySelector('#eon-home-btn').style.display = vis;
+    const power = this.layer.querySelector('#eon-power');
+    power.textContent = hidden ? '🙂' : '✕';
+    power.title = hidden ? 'Bring EON back' : 'Hide EON';
+    power.classList.toggle('bring-back', hidden);
+
+    if (hidden) {
+      cancelAnimationFrame(this._raf);
+    } else {
+      this.clock.start();          // reset delta so EON doesn't jump
+      this._loop();
+    }
   }
 
   // -------------------- Three.js --------------------
