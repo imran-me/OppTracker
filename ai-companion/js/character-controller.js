@@ -502,9 +502,12 @@ export class CharacterController {
 
     if (this.detailed) {
       this.stateTime += dt;
+      const nav = ctx && ctx.nav;
       this.modelObj.update(dt, t, {
         lookX: this.look.x, lookY: this.look.y, facing: this.facing,
         particles: ctx && ctx.particles,
+        speed: nav ? nav.speedN : 0,
+        vx: nav ? Math.max(-1, Math.min(1, nav.vx / nav.maxSpeed)) : 0,
       });
       const dur = this._oneShotDuration(this.state);
       if (dur && this.stateTime >= dur) {
