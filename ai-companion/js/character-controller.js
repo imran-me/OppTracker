@@ -91,8 +91,9 @@ export class CharacterController {
     return ({
       idle: 'happy', walk: 'walk', run: 'walk', wave: 'wave', think: 'thinking',
       drinkTea: 'tea', read: 'read', work: 'work', celebrate: 'celebrate', sleep: 'sleep',
-      excited: 'excited', curious: 'curious', confused: 'curious', proud: 'happy',
-      stretch: 'excited', brushTeeth: 'happy', wakeUp: 'happy', dance: 'excited', sit: 'happy',
+      excited: 'excited', curious: 'curious', confused: 'sad', proud: 'happy',
+      stretch: 'excited', brushTeeth: 'happy', wakeUp: 'happy', dance: 'excited',
+      sit: 'happy', laugh: 'laugh',
     })[s] || 'happy';
   }
 
@@ -411,7 +412,7 @@ export class CharacterController {
   /** True for one-shot states that should auto-return to idle. */
   _oneShotDuration(s) {
     return ({ wave: 2.2, celebrate: 2.6, think: 2.8, stretch: 2.0,
-              wakeUp: 2.4, dance: 3.2, brushTeeth: 2.6 })[s] || 0;
+              wakeUp: 2.4, brushTeeth: 2.6, confused: 2.4 })[s] || 0;
   }
 
   // ---------------------------------------------------------------
