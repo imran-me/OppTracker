@@ -33,7 +33,9 @@ async function waitForFirebase(timeoutMs = 15000) {
     const brain = new Brain(BRAIN_CONFIG);
     window.EonBrain = brain;
     await brain.start();
+    console.info('%c[EON brain] ready.', 'color:#7ed957;font-weight:700',
+      'Run EonBrain.status() to inspect. owner =', brain.isOwner());
   } catch (e) {
-    console.warn('[EON brain] failed to start:', e);
+    console.error('[EON brain] failed to start:', e);
   }
 })();

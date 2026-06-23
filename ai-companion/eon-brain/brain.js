@@ -205,6 +205,21 @@ export class Brain {
     return { alerts: this.feed.length, owner: true };
   }
 
+  /** Diagnostics — run EonBrain.status() in the console. */
+  status() {
+    let owner = false; try { owner = this.isOwner(); } catch {}
+    return {
+      owner,
+      ownerEmail: this.cfg.ownerEmail,
+      signedInAs: (() => { try { return this._auth().currentUser?.email || null; } catch { return null; } })(),
+      lastCycleAt: this._memory?.lastCycleAt || null,
+      entities: this._memory?.entities || [],
+      learned: this._memory?.learned || 0,
+      alerts: this.feed.length,
+      top: this.feed[0]?.label || null,
+    };
+  }
+
   async createReminder({ title, note, remindAt, link }) {
     if (!this.isOwner()) throw new Error('Sign in as owner to add reminders.');
     await this._loadStore();

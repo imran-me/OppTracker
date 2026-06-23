@@ -194,9 +194,21 @@ class Eon {
     energy.oninput = () => { this.ctx.activityLevel = energy.value / 100; showE(); };
     showE();
 
-    // meditate-now (owner-only inside the brain) — show the meditation visuals on demand
+    // meditate-now — runs a cycle and reports what EON found (visible feedback)
     const med = this.layer.querySelector('#eon-meditate');
-    if (med) med.onclick = () => { try { window.EonBrain?.meditate?.(); } catch {} };
+    if (med) med.onclick = async () => {
+      const B = window.EonBrain;
+      if (!B) { this.ai.speak('My brain is still loading… try again in a sec.', 4000); return; }
+      if (typeof B.isOwner !== 'function' || !B.isOwner()) { this.ai.speak('Sign in as owner first 🔒', 4000); return; }
+      this.ai.speak('Meditating… reading your data 🧘', 4000);
+      try {
+        await B.meditate();
+        const a = B.getAlerts() || [];
+        const m = B.status ? B.status() : null;
+        if (a.length) this.ai.speak(`I read ${m?.learned ?? '?'} records. Nearest deadline: ${a[0].label}`, 7000);
+        else this.ai.speak(`Read ${m?.learned ?? 0} records — no deadlines nearby. 🌿`, 6000);
+      } catch (e) { this.ai.speak('I had trouble reading (check console).', 5000); console.warn(e); }
+    };
 
     // size (applied for real once the character exists; see boot)
     const size = this.layer.querySelector('#eon-size');
