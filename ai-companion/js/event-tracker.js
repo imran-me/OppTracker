@@ -56,6 +56,7 @@ export class EventTracker {
           clearTimeout(this._press.lp);
           this._press.dragging = true;
           this.ctx.drag.active = true;
+          window.getSelection()?.removeAllRanges();   // clear any stray selection
           character.setState('curious');
         }
       }
@@ -71,19 +72,27 @@ export class EventTracker {
       }
     }, { passive: true, capture: false });
 
+    // Block text selection while interacting with EON.
+    this._on(window, 'selectstart', (e) => {
+      if (this.ctx.drag.active || this._press) e.preventDefault();
+    }, { passive: false, capture: true });
+
     // ---- Mouse down on EON: begin press (→ long-press or drag) ----
     this._on(window, 'mousedown', (e) => {
       const h = this._hit(e.clientX, e.clientY);
       if (!h.on) return;
+      e.preventDefault();                          // don't start a text selection
+      document.body.style.userSelect = 'none';
       this._press = { x: e.clientX, y: e.clientY, dragging: false };
       // long-press (held still) → curl up to sleep
       this._press.lp = setTimeout(() => {
         if (this._press && !this._press.dragging) { character.setState('sleep'); this._suppressClick = true; }
       }, 700);
-    }, { passive: true, capture: false });
+    }, { passive: false, capture: false });
 
     // ---- Mouse up: end drag → drop + sulk ----
     this._on(window, 'mouseup', () => {
+      document.body.style.userSelect = '';
       if (this._press) clearTimeout(this._press.lp);
       if (this._press && this._press.dragging) {
         this.ctx.drag.active = false;
@@ -94,11 +103,15 @@ export class EventTracker {
       this._press = null;
     }, { passive: true, capture: false });
 
-    // ---- Double-click EON: wake / snap out of sulk ----
+    // ---- Double-click EON: release him → wake + resume roaming ----
     this._on(window, 'dblclick', (e) => {
-      if (this._hit(e.clientX, e.clientY).on) {
+      const h = this._hit(e.clientX, e.clientY);
+      const near = h.on || Math.abs(e.clientX - h.head.x) < (h.feet.y - h.head.y) * 0.6;
+      if (near) {
+        this._suppressClick = true;
         activity.wake();
         character.setState('wakeUp', () => emotion.react('waving', { priority: 2, speak: false }));
+        this.ctx.particles?.emote('👋', character._worldHead(0, 0.7));
       }
     }, { passive: true, capture: false });
 
@@ -107,7 +120,11 @@ export class EventTracker {
       activity.notifyActivity();
       if (this._suppressClick) { this._suppressClick = false; return; }
       const h = this._hit(e.clientX, e.clientY);
-      if (h.on) { this._pokeEon(h.frac); return; }
+      if (h.on) {
+        const half = Math.max(20, h.feet.y - h.head.y) * 0.45;
+        this._pokeEon(h.frac, (e.clientX - h.head.x) / half);   // side: -1 left … +1 right
+        return;
+      }
       character.face(e.clientX > h.head.x ? 1 : -1);
     });
 
@@ -151,32 +168,43 @@ export class EventTracker {
     this._watchNotifications();
   }
 
-  _pokeEon(frac) {
+  _pokeEon(frac, side = 0) {
     const { emotion, character, ai, particles, personality } = this.ctx;
     const now = performance.now();
     personality?.nudge(2);
+    const emote = (ch) => particles?.emote(ch, character._worldHead(0, 0.7));
+    const react = (e) => emotion.react(e, { priority: 2, speak: false });
 
-    // secret: 50 clicks in a row → hidden party
+    // secret: 50 clicks → hidden party
     if (++this._secret >= 50) {
-      this._secret = 0;
-      emotion.react('celebrating', { priority: 3 });
-      for (let i = 0; i < 6; i++) particles?.heart(character._worldHead((Math.random() - 0.5), 0.7));
+      this._secret = 0; emotion.react('celebrating', { priority: 3 });
+      for (let i = 0; i < 6; i++) particles?.heart(character._worldHead(Math.random() - 0.5, 0.7));
       ai?.speak('🎉 You found my secret! 🎉');
       return;
     }
-
-    // rapid clicking → dizzy / playfully annoyed
+    // rapid clicking → dizzy
     this._clicks = this._clicks.filter((tm) => now - tm < 1200); this._clicks.push(now);
-    if (this._clicks.length >= 4) { this._clicks = []; emotion.react('confused', { priority: 3 }); particles?.think(character._worldHead(0.2, 0.6)); return; }
+    if (this._clicks.length >= 5) { this._clicks = []; emotion.react('confused', { priority: 3 }); emote('💫'); return; }
+    // tapped while sleeping → groggy
+    if (character.state === 'sleep') { character.setState('wakeUp'); emote('🥱'); return; }
 
-    // tapped while sleeping → groggy half-wake
-    if (character.state === 'sleep') { character.setState('wakeUp'); return; }
-
-    if (frac > 0.7) character.setState('dance');                                   // legs/feet → dance
-    else if (frac > 0.45) emotion.react('celebrating', { priority: 2, speak: false }); // belly → tickle
-    else { if (Math.random() < 0.5) character.setState('wink'); else emotion.react('waving', { priority: 2, speak: false }); } // head/face
-
-    particles?.heart(character._worldHead(0, 0.65));
+    const L = side < -0.3, R = side > 0.3, C = !L && !R;
+    if (frac < 0.12) {                              // 🌱 leaf sprout → grows, curious
+      character.setState('curious'); emote('🌱');
+    } else if (frac < 0.40) {                       // head
+      if (C) { character.setState('wink'); emote('😳'); }            // face → shy wink/blush
+      else if (L) { react('excited'); emote('🎵'); }                 // left headphone → sings
+      else { character.setState('thinking'); emote('🤔'); }          // right headphone → thinks
+    } else if (frac < 0.62) {                       // torso / arms
+      if (C) { emotion.react('celebrating', { priority: 2, speak: false }); emote('😄'); } // belly → ticklish laugh
+      else if (L) { react('excited'); emote('🤚'); }                 // left arm → high-five
+      else { emotion.react('waving', { priority: 2, speak: false }); emote('👋'); } // right arm → wave
+    } else {                                        // legs / feet
+      if (L) { character.setState('dance'); emote('🎶'); }           // LEFT leg → dance
+      else if (R) { react('excited'); emote('🦵'); }                 // RIGHT leg → kick/hop (different!)
+      else { react('excited'); emote('⬆️'); }                        // feet → jump
+    }
+    particles?.heart(character._worldHead(0, 0.6));
     ai?.bumpAffection();
   }
 

@@ -176,9 +176,11 @@ export class ActivityEngine {
     this.ctx.character.setState('idle');
   }
 
-  /** Wake from sulk/sleep and resume normal life. */
+  /** Wake from sulk/sleep and resume normal roaming life. */
   wake(now = performance.now()) {
-    this._sulk = false; this._sulkSleeping = false; this.phase = 'active'; this.lastActive = now;
+    this._sulk = false; this._sulkSleeping = false;
+    this.phase = 'active'; this.lastActive = now;
+    this.busyUntil = 0; this.lastLifeTick = now - this.ctx.config.lifeTick + 2000; // resume soon
   }
 
   _sulkLife(now) {
