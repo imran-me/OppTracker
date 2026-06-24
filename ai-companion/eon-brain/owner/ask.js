@@ -69,6 +69,13 @@ export class AskEon {
     const now = Date.now();
     const days = (iso) => Math.floor((Date.parse(iso) - now) / 86400000);
 
+    if (/\bremind me\b|don'?t let me forget|set (a )?reminder/.test(nq)) return this._remind(q);
+    if (/forget|forgetting|loose ?ends?|losing track|slipping|fell through|follow[- ]?up|\bstale\b|neglect/.test(nq)) {
+      const le = this.cb.looseEnds();
+      if (!le.length) return { speak: "You're on top of everything — nothing slipping. ✨" };
+      const detail = le.map((x) => `• ${x.label} — ${x.reason}`).join('\n');
+      return { speak: `${le.length} thing${le.length > 1 ? 's' : ''} you might be losing track of:`, detail, items: le };
+    }
     if (/\bplan\b|what should i do|where (to|do i) start|prioriti|my day|to-?do list|organi[sz]e/.test(nq)) {
       const { items, overload } = this.cb.plan();
       if (!items.length) return { speak: "Nothing scheduled — you're clear. 🌿" };
@@ -136,6 +143,28 @@ export class AskEon {
     return { speak: this._help(keys) };
   }
 
+  _remind(q) {
+    let task = q.replace(/.*?(remind me( to| about)?|don'?t let me forget( to)?|set a reminder( to| about)?)\s*/i, '').trim();
+    const parsed = this._parseWhen(task);
+    task = (parsed.task || task).replace(/[?.!]+$/, '').trim();
+    if (!task) return { speak: 'Sure — what should I remind you about?' };
+    const when = parsed.date || new Date(Date.now() + 86400000);
+    try { const r = window.EonBrain?.createReminder?.({ title: task, remindAt: when.toISOString() }); if (r && r.catch) r.catch(() => {}); }
+    catch { return { speak: 'Sign in as owner and I’ll set reminders. 🔒' }; }
+    return { speak: `Done — I'll remind you to "${task}" on ${this._date(when.toISOString())}. ⏰` };
+  }
+  _parseWhen(text) {
+    let task = text, date = null, m;
+    if (/\btomorrow\b/i.test(text)) { const d = new Date(); d.setDate(d.getDate() + 1); date = d; task = task.replace(/\btomorrow\b/i, ''); }
+    else if (/\btonight\b|\btoday\b/i.test(text)) { date = new Date(); task = task.replace(/\btonight\b|\btoday\b/i, ''); }
+    else if (/next week/i.test(text)) { const d = new Date(); d.setDate(d.getDate() + 7); date = d; task = task.replace(/next week/i, ''); }
+    else if ((m = text.match(/in (\d+) days?/i))) { const d = new Date(); d.setDate(d.getDate() + parseInt(m[1], 10)); date = d; task = task.replace(m[0], ''); }
+    else if ((m = text.match(/on (\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?)/i))) { const tt = Date.parse(m[1]); if (!Number.isNaN(tt)) { date = new Date(tt); task = task.replace(m[0], ''); } }
+    else { const wm = text.toLowerCase().match(/\b(?:on |next )?(sun|mon|tue|wed|thu|fri|sat)[a-z]*/); if (wm) { const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']; const idx = days.indexOf(wm[1]); if (idx >= 0) { const d = new Date(); let add = (idx - d.getDay() + 7) % 7; if (add === 0) add = 7; d.setDate(d.getDate() + add); date = d; task = task.replace(wm[0], ''); } } }
+    task = task.replace(/^(to|about)\s+/i, '').trim();
+    return { date, task };
+  }
+
   _list(items, lead) {
     if (!items.length) return { speak: `Nothing there — ${lead.replace(/^\d+\s*/, '')}. 🌿` };
     const detail = items.slice(0, 8).map((r) => `• ${r.label}${r.deadlineAt ? ` — ${this._date(r.deadlineAt)}` : ''}`).join('\n');
@@ -201,7 +230,7 @@ export class AskEon {
     p.innerHTML = `
       <div class="ea-h">💬 Ask EON <span class="ea-x" title="Close">✕</span></div>
       <div class="ea-in"><input type="text" placeholder="e.g. what's due this week?" /><button class="ea-go">Ask</button></div>
-      <div class="ea-ex">Try: plan my day · what's due this week · overdue · how many tasks · find &lt;name&gt; · total amount · problems</div>
+      <div class="ea-ex">Try: what am I forgetting · remind me to call X tomorrow · plan my day · what's due · overdue · find &lt;name&gt; · total amount</div>
       <div class="ea-a"></div>
       <button class="ea-keep">🎒 Keep these in the backpack</button>`;
     document.body.appendChild(p);

@@ -115,6 +115,58 @@ export class CompanionBrain {
     return out.slice(0, 12);
   }
 
+  // ---- loose ends: what the owner is likely forgetting / losing track of ----
+  looseEnds({ max = 10 } = {}) {
+    const b = this.brain();
+    const data = (() => { try { return b?.getData?.() || {}; } catch { return {}; } })();
+    const ents = (() => { try { return b?.getEntities?.() || {}; } catch { return {}; } })();
+    const recs = (() => { try { return b?.getRecords?.() || []; } catch { return []; } })();
+    const now = Date.now();
+    const DONE = /done|complete|closed|won|accept|success|approved|paid|submitted|finished|archiv|reject/i;
+    const out = [];
+
+    // deadline-based: overdue-and-still-open, due today / tomorrow
+    for (const r of recs) {
+      if (!r.deadlineAt || Number.isNaN(Date.parse(r.deadlineAt))) continue;
+      const status = String(r.payload?.status || r.payload?.stage || r.payload?.state || '');
+      const done = DONE.test(status);
+      const days = Math.floor((Date.parse(r.deadlineAt) - now) / 86400000);
+      if (days < 0 && !done) out.push(this._le(r, `overdue ${-days}d, still ${status || 'open'}`, 5 + Math.min(20, -days) * 0.1));
+      else if (days === 0 && !done) out.push(this._le(r, 'due today', 4.5));
+      else if (days === 1 && !done) out.push(this._le(r, 'due tomorrow', 3.4));
+    }
+
+    // stale: a created/added/updated date long in the past, not finished
+    for (const [entity, arr] of Object.entries(data)) {
+      if (!Array.isArray(arr) || !arr.length) continue;
+      const desc = ents[entity] || {};
+      const sf = this._staleField(arr, desc.deadlineField);
+      if (!sf) continue;
+      for (const rec of arr) {
+        if (!rec || typeof rec !== 'object') continue;
+        if (DONE.test(String(rec.status || rec.stage || ''))) continue;
+        const t = Date.parse(rec[sf]); if (Number.isNaN(t)) continue;
+        const ageD = Math.floor((now - t) / 86400000);
+        if (ageD < 21) continue;
+        const label = (desc.labelField && rec[desc.labelField]) ? String(rec[desc.labelField]) : (rec.name || rec.title || `${entity} #${rec.id ?? '?'}`);
+        if (out.some((o) => o.entity === entity && o.label === label)) continue;
+        out.push({ entity, recordId: rec.id, label, reason: `untouched ~${ageD}d`, dueAt: null, pointTo: this._pointTo(entity, rec.id), score: 2 + Math.min(2, ageD / 60) });
+      }
+    }
+    return out.sort((a, b) => b.score - a.score).slice(0, max);
+  }
+  _le(r, reason, score) { return { entity: r.entity, recordId: r.id, label: r.label, reason, dueAt: r.deadlineAt, pointTo: this._pointTo(r.entity, r.id), score }; }
+  _staleField(arr, exclude) {
+    const fields = [...new Set(arr.slice(0, 20).flatMap((r) => (r && typeof r === 'object') ? Object.keys(r) : []))];
+    const pref = ['updatedat', 'updated', 'modified', 'lastedit', 'createdat', 'created', 'added', 'dateadded', 'logged'];
+    for (const p of pref) { const f = fields.find((x) => x !== exclude && x.toLowerCase().replace(/[^a-z]/g, '').includes(p)); if (f) return f; }
+    return null;
+  }
+  _pointTo(entity, id) {
+    const map = { opportunities: `opportunity-details.html?id=${encodeURIComponent(id)}` };
+    return map[entity] || `${entity}.html`;
+  }
+
   /** Human one-liner for the board. */
   _line(f) {
     const L = (f.label || `${f.entity} item`).trim();
