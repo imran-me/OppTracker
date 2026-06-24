@@ -549,8 +549,12 @@ export class HypeMan {
     if (!this.promptEl || !this.promptEl.classList.contains('show')) return;
     try {
       const h = this.ctx.project(this.ctx.character.headAnchor);
+      const cardH = this.promptEl.getBoundingClientRect().height || 90;
+      // card is transl(-50%,-100%): its BOTTOM sits at `top`, so it floats above
+      // the head. Clamp so the whole card stays on-screen and never covers him.
+      const top = Math.max(cardH + 8, Math.min(innerHeight - 8, h.y - 22));
       this.promptEl.style.left = Math.max(140, Math.min(innerWidth - 140, h.x)) + 'px';
-      this.promptEl.style.top = Math.max(90, h.y - 26) + 'px';
+      this.promptEl.style.top = top + 'px';
     } catch {}
   }
 

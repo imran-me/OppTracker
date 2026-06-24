@@ -398,11 +398,18 @@ class Eon {
   }
 
   _bounds() {
-    // Full-screen roam box (EON floats, so the whole vertical band is fair game).
-    return {
-      minX: -this.W / 2 + 60, maxX: this.W / 2 - 60,
-      minY: -this.H / 2 + 70, maxY: this.H / 2 - 90,
-    };
+    // EON's nav point is his FEET; his body rises ~targetPx above it, with a
+    // speech bubble above that. Reserve real headroom so his head — and his
+    // message — never clip off the top/edges of the window.
+    const W = this.W, H = this.H;
+    const scale = (this._userScale || 1) * (this.ctx && this.ctx.focus ? 0.62 : 1);
+    const bodyPx = (this.character && this.character.targetPx ? this.character.targetPx : 132) * scale;
+    const topRoom = Math.min(bodyPx + 78, H * 0.6);     // body height + bubble room (capped on short screens)
+    const sideRoom = Math.max(64, bodyPx * 0.42);       // half body width, so he doesn't clip the sides
+    const minY = -H / 2 + Math.min(80, H * 0.12);       // feet stay above the bottom
+    let maxY = H / 2 - topRoom;
+    if (maxY < minY + 40) maxY = minY + 40;             // tiny-screen guard
+    return { minX: -W / 2 + sideRoom, maxX: W / 2 - sideRoom, minY, maxY };
   }
 
   // -------------------- helpers --------------------
@@ -569,8 +576,8 @@ class Eon {
     const b = this.ai.bubble;
     if (b && performance.now() < b.until && this.config.features.speech) {
       if (this.bubbleEl.textContent !== b.text) this.bubbleEl.textContent = b.text;
-      this.bubbleEl.style.left = head.x + 'px';
-      this.bubbleEl.style.top = (head.y - 14) + 'px';
+      this.bubbleEl.style.left = Math.max(120, Math.min(this.W - 120, head.x)) + 'px';
+      this.bubbleEl.style.top = Math.max(58, head.y - 16) + 'px';   // never off the top
       this.bubbleEl.classList.add('show');
     } else {
       this.bubbleEl.classList.remove('show');
