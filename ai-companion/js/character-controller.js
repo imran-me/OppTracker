@@ -415,6 +415,9 @@ export class CharacterController {
   /** Sustained meditation pose on/off (detailed model only). */
   setMeditating(on) { if (this.detailed && this.modelObj) this.modelObj.setMeditating(on); }
 
+  /** Cover his eyes (while a password is typed) on/off. */
+  setCoverEyes(on) { if (this.detailed && this.modelObj) this.modelObj.setCoverEyes(on); }
+
   /** True for one-shot states that should auto-return to idle. */
   _oneShotDuration(s) {
     return ({ wave: 2.2, celebrate: 2.6, think: 2.8, stretch: 2.0,
