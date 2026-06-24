@@ -144,13 +144,13 @@ const SCROLL_MATCH = '.pf-section, .pf-hero, .gal-grid, .stat-card';
 const CARD_SEL = '.gal-grid > *, .stack-16 > *, .dt tbody tr, .pf-timeline > *';
 
 // decision-brain timing
-const SPEAK_MIN_GAP = 6500;   // min ms between any two spoken moments
-const SPEAK_PER_MIN = 7;      // hard cap on speak-ups per minute
+const SPEAK_MIN_GAP = 2600;   // min ms between any two spoken moments
+const SPEAK_PER_MIN = 14;     // hard cap on speak-ups per minute
 const HOOK_MIN_GAP  = 30000;  // min ms between "wanna see?" offers
-const REARM_MS      = 35000;  // same element can delight again after this
+const REARM_MS      = 30000;  // same element can delight again after this
 const REACT_MS      = 2700;
 const WALK_MAX_MS   = 4500;
-const DWELL_MS      = 380;    // hover this long before it counts as interest
+const DWELL_MS      = 130;    // hover this long before it counts as interest (snappy)
 const SCAN_V        = 1100;   // px/s scroll above this = scanning → stay quiet
 const MAX_QUEUE     = 3;
 
@@ -264,10 +264,13 @@ export class HypeMan {
       if (now >= this.phaseUntil) this._finish(now);
       return;
     }
-    if (this.phase === 'walk') {
+    if (this.phase === 'walk') {                          // guided lead: walk there, land on arrival
       const p = this._navTarget(this.active);
       if (p) this.ctx.nav.goTo(p.x, p.y);
-      if (this.ctx.nav.atTarget() || now >= this.phaseUntil) this._react(now);
+      if (this.ctx.nav.atTarget() || now >= this.phaseUntil) {
+        this._fireReaction(now);
+        this.phase = 'react'; this.phaseUntil = now + REACT_MS;
+      }
       return;
     }
 
@@ -287,23 +290,33 @@ export class HypeMan {
     if (!this._eligible(rec, now) || !this._inViewport(rec.el)) return;
     if (this.sig.scrollV > SCAN_V) return;                 // they're scanning, not reading
     if (!this._canSpeak(now)) return;                      // frequency budget
-    const rel = (RELEVANCE[rec.context] ?? 0.4) * (0.6 + this.sig.engage * 0.8);
-    if (Math.random() > rel) return;                       // restraint: skip low-value moments
+    // A deliberate hover = explicit attention → always respond. Restraint
+    // (relevance roll) only applies to passive scroll-into-view moments.
+    if (!rec.hover) {
+      const rel = (RELEVANCE[rec.context] ?? 0.4) * (0.6 + this.sig.engage * 0.8);
+      if (Math.random() > rel) return;
+    }
     this._begin(rec, now);
   }
 
   _begin(rec, now) {
-    this.active = rec; this.phase = 'walk';
-    this.phaseUntil = now + WALK_MAX_MS;
-    this.ctx.hypeBusy = true;
-  }
-  _react(now) {
-    const rec = this.active; if (!rec) { this._finish(now); return; }
+    this.active = rec; this.ctx.hypeBusy = true;
+    if (rec.force) {                                  // guided lead → walk there first, land on arrival
+      this.phase = 'walk'; this.phaseUntil = now + WALK_MAX_MS;
+      return;
+    }
+    // Perceptive reaction → respond NOW (while the moment is fresh), then amble over.
+    this._fireReaction(now);
+    const p = this._navTarget(rec); if (p) this.ctx.nav.goTo(p.x, p.y);
     this.phase = 'react'; this.phaseUntil = now + REACT_MS;
+  }
+
+  /** Fire the emote + line + flourish for the active record, immediately. */
+  _fireReaction(now) {
+    const rec = this.active; if (!rec) return;
     this.reactedAt.set(this._key(rec), now); this._save('eon-hyped', this.reactedAt);
     this._noteSpoke(now);
     this.ownerName = ownerFirstName(document.getElementById('pfName')?.textContent) || OWNER.name;
-
     this._facePoint(rec.el);
     const R = REACTIONS[rec.context] || REACTIONS.generic;
     const emote = rec.emote || R.emotes[(Math.random() * R.emotes.length) | 0];
