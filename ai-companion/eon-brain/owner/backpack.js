@@ -67,7 +67,7 @@ export class Backpack {
   /** Light refresh from the main loop (owner gating + chip). */
   update() {
     const show = this._owner() && this.pockets.length > 0;
-    if (this._chip) this._chip.style.display = show ? 'flex' : 'none';
+    if (this._chip) this._chip.style.display = show ? 'inline-flex' : 'none';
     if (!this._owner() && this._open) this._togglePanel(false);
   }
 
@@ -267,12 +267,13 @@ export class Backpack {
     if (document.getElementById('eon-bag-style')) return;
     const s = document.createElement('style'); s.id = 'eon-bag-style';
     s.textContent = `
-      #eon-bag{position:fixed;right:16px;bottom:118px;z-index:2147483600;display:none;align-items:center;gap:6px;
-        background:#10225e;color:#fff;border:0;border-radius:20px;padding:7px 12px;cursor:pointer;
-        box-shadow:0 8px 22px rgba(16,34,94,.3);font:700 13px system-ui}
-      #eon-bag:hover{background:#1a3170}
-      #eon-bag .eb-n{background:#7ed957;color:#10225e;border-radius:10px;padding:0 7px;font-size:12px}
-      #eon-pockets{position:fixed;right:16px;bottom:158px;z-index:2147483600;width:300px;max-width:calc(100vw - 32px);
+      #eon-bag{position:relative;display:none;width:26px;height:26px;border-radius:50%;padding:0;cursor:pointer;
+        border:1px solid rgba(31,109,255,.18);background:rgba(255,255,255,.92);color:#1f6dff;line-height:1;font-size:13px;
+        box-shadow:0 4px 12px rgba(16,24,40,.16);align-items:center;justify-content:center;transition:transform .15s,background .15s}
+      #eon-bag:hover{background:#fff;transform:translateY(-2px)}
+      #eon-bag .eb-n{position:absolute;top:-5px;right:-6px;background:#7ed957;color:#10225e;border-radius:9px;
+        min-width:15px;height:15px;padding:0 3px;font:700 9px/15px system-ui;text-align:center}
+      #eon-pockets{position:fixed;right:16px;bottom:50px;z-index:2147483600;width:300px;max-width:calc(100vw - 32px);
         max-height:60vh;overflow:auto;background:#fff;color:#10225e;border-radius:14px;border:1.5px solid #1f6dff33;
         box-shadow:0 16px 44px rgba(16,34,94,.26);opacity:0;transform:translateY(8px);pointer-events:none;
         transition:opacity .18s ease,transform .18s ease;font:500 13px system-ui}
@@ -316,7 +317,7 @@ export class Backpack {
     b.innerHTML = `🎒 <span class="eb-n">0</span>`;
     b.title = 'EON’s backpack — what he’s carrying';
     b.onclick = (e) => { e.stopPropagation(); this._togglePanel(); };
-    document.body.appendChild(b);
+    (document.getElementById('eon-controls') || document.body).appendChild(b);
     this._chip = b; this._chipN = b.querySelector('.eb-n');
   }
   _buildPanel() {

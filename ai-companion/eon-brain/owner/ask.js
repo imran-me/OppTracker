@@ -38,7 +38,7 @@ export class AskEon {
 
   update() {
     const show = this._owner();
-    if (this._chip) this._chip.style.display = show ? 'flex' : 'none';
+    if (this._chip) this._chip.style.display = show ? 'inline-flex' : 'none';
     if (!show && this._open) this._toggle(false);
   }
 
@@ -168,11 +168,11 @@ export class AskEon {
     if (document.getElementById('eon-ask-style')) return;
     const s = document.createElement('style'); s.id = 'eon-ask-style';
     s.textContent = `
-      #eon-ask-chip{position:fixed;right:16px;bottom:160px;z-index:2147483600;display:none;align-items:center;gap:6px;
-        background:#1f6dff;color:#fff;border:0;border-radius:20px;padding:7px 13px;cursor:pointer;
-        box-shadow:0 8px 22px rgba(31,109,255,.34);font:700 13px system-ui}
-      #eon-ask-chip:hover{background:#1559d8}
-      #eon-ask{position:fixed;right:16px;bottom:200px;z-index:2147483600;width:320px;max-width:calc(100vw - 32px);
+      #eon-ask-chip{position:relative;display:none;align-items:center;gap:5px;height:26px;white-space:nowrap;
+        background:#1f6dff;color:#fff;border:0;border-radius:14px;padding:0 11px;cursor:pointer;line-height:1;
+        box-shadow:0 4px 12px rgba(31,109,255,.3);font:700 12px system-ui;transition:transform .15s,background .15s}
+      #eon-ask-chip:hover{background:#1559d8;transform:translateY(-2px)}
+      #eon-ask{position:fixed;right:16px;bottom:50px;z-index:2147483600;width:320px;max-width:calc(100vw - 32px);
         background:#fff;color:#10225e;border-radius:14px;border:1.5px solid #1f6dff33;box-shadow:0 16px 44px rgba(16,34,94,.26);
         opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .18s,transform .18s;font:500 13px system-ui;overflow:hidden}
       #eon-ask.show{opacity:1;transform:none;pointer-events:auto}
@@ -193,7 +193,7 @@ export class AskEon {
     const b = document.createElement('button'); b.id = 'eon-ask-chip';
     b.innerHTML = '💬 Ask EON'; b.title = 'Ask EON about your data';
     b.onclick = (e) => { e.stopPropagation(); this._toggle(); };
-    document.body.appendChild(b); this._chip = b;
+    (document.getElementById('eon-controls') || document.body).appendChild(b); this._chip = b;
   }
   _buildPanel() {
     if (document.getElementById('eon-ask')) { this._panel = document.getElementById('eon-ask'); return; }
