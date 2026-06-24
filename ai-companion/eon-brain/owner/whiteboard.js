@@ -119,6 +119,15 @@ export class OwnerCompanion {
     this._next();
   }
 
+  /** Public: escort to a given item (used by the proactive nudger). */
+  escortTo(item) {
+    if (!this.cb.isOwner() || !item || this.esc) return;
+    if (!item.line) item.line = `Here it is${item.reason ? ` — ${item.reason}` : ''}.`;
+    this._present(false);
+    this._hideBoard();
+    this._escort(item);
+  }
+
   // ---------------- escort ----------------
   _escort(item) {
     this.ctx.hypeBusy = true;
