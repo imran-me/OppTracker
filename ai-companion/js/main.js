@@ -23,6 +23,7 @@ import { AskEon }             from '../eon-brain/owner/ask.js';
 import { Motivation }         from '../eon-brain/owner/motivation.js';
 import { Nudger }             from '../eon-brain/owner/nudger.js';
 import { Resume }             from '../eon-brain/owner/resume.js';
+import { DenEngine }          from './den-engine.js';
 import { Personality, ARCHETYPES } from './personality.js';
 
 // Front-end mirror of config/settings.php so EON works with no backend.
@@ -374,23 +375,22 @@ class Eon {
   }
 
   // -------------------- the 3D den (optional, settings → House) --------------------
-  /** Isolated den iframe (its own three.js) — never touches the avatar. */
+  /** Dedicated den engine (own scene + a real EON inside). Never touches the avatar. */
   _buildDen() {
-    if (document.getElementById('eon-den-frame')) { this.denEl = document.getElementById('eon-den-frame'); return; }
-    const st = document.createElement('style');
-    st.textContent = `
-      #eon-den-frame{position:fixed;right:0;bottom:0;width:520px;height:420px;border:0;background:transparent;
-        pointer-events:none;z-index:2147482000;opacity:0;transform-origin:bottom right;transition:opacity .45s ease;}
-      #eon-den-frame.show{opacity:1;}
-      body.eon-house-on #eon-home{display:none !important;}
-      .eon-pan-grp{font:800 10px system-ui;letter-spacing:.6px;text-transform:uppercase;color:#9aa6c2;
-        margin:13px 0 3px;padding-top:9px;border-top:1px solid rgba(31,109,255,.13);}
-      .eon-pan-grp:first-child{border-top:0;padding-top:0;margin-top:2px;}`;
-    document.head.appendChild(st);
-    const f = document.createElement('iframe');
-    f.id = 'eon-den-frame'; f.src = `${this._base}assets/eon-den.html`;
-    f.setAttribute('scrolling', 'no'); f.setAttribute('tabindex', '-1'); f.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(f); this.denEl = f;
+    if (!document.getElementById('eon-house-style')) {
+      const st = document.createElement('style'); st.id = 'eon-house-style';
+      st.textContent = `
+        body.eon-house-on #eon-home{display:none !important;}
+        body.eon-in-house #eon-canvas,body.eon-in-house #eon-floor-shadow,body.eon-in-house #eon-hit,body.eon-in-house #eon-bubble{opacity:0 !important;pointer-events:none !important;}
+        .eon-pan-grp{font:800 10px system-ui;letter-spacing:.6px;text-transform:uppercase;color:#9aa6c2;margin:13px 0 3px;padding-top:9px;border-top:1px solid rgba(31,109,255,.13);}
+        .eon-pan-grp:first-child{border-top:0;padding-top:0;margin-top:2px;}`;
+      document.head.appendChild(st);
+    }
+    this.den = new DenEngine(); this.den.start();
+    // track activity so we know when he's "home" (idle) vs out on the page
+    this._lastUserAt = performance.now();
+    const bump = () => { this._lastUserAt = performance.now(); };
+    ['pointermove', 'pointerdown', 'keydown', 'wheel'].forEach((ev) => addEventListener(ev, bump, { passive: true }));
   }
 
   _wireHouse() {
@@ -404,39 +404,34 @@ class Eon {
       sizeEl.oninput = () => this._setHouseSize(sizeEl.value / 100);
       this._setHouseSize(this._houseScale, true);
     }
-    // while the house is on, "home" becomes the den — his normal idle life happens there
-    if (this.nav && !this._origGoHome) {
-      this._origGoHome = this.nav.goHome.bind(this.nav);
-      this.nav.goHome = () => {
-        if (this._houseOn) { const c = this._houseCenterWorld(); if (c) { this.nav.goTo(c.x, c.y); return; } }
-        this._origGoHome();
-      };
-    }
     this._setHouse(localStorage.getItem('eon-house') === '1', true);   // restore
   }
 
   _setHouse(on, silent) {
     this._houseOn = !!on;
     document.body.classList.toggle('eon-house-on', this._houseOn);
-    this.denEl?.classList.toggle('show', this._houseOn);
+    this.den?.show(this._houseOn);
     const btn = this.layer.querySelector('#eon-house-toggle');
     if (btn) { btn.textContent = `House: ${this._houseOn ? 'On' : 'Off'}`; btn.classList.toggle('on', this._houseOn); }
     try { localStorage.setItem('eon-house', this._houseOn ? '1' : '0'); } catch {}
-    this.home?.show(false);                                  // the den replaces the flat home backdrop
-    if (this._houseOn && !silent) { try { this.nav.goHome(); } catch {} this.ai?.speak('Ooh — my den! 🏠', 3000); }
+    if (!this._houseOn) this._exitHouse();                  // house off → fully normal EON
+    if (this._houseOn && !silent) this.ai?.speak('Ooh — my den! 🏠', 3000);
   }
   _setHouseSize(scale, silent) {
     this._houseScale = scale;
-    if (this.denEl) this.denEl.style.transform = `scale(${scale})`;
+    this.den?.setSize(scale);
     if (!silent) { try { localStorage.setItem('eon-house-size', String(scale)); } catch {} }
   }
-  /** Roughly the middle of the room, in EON's screen-world coords. */
-  _houseCenterWorld() {
-    if (!this.denEl) return null;
-    const r = this.denEl.getBoundingClientRect();
-    if (!r.width) return null;
-    return this._screenToWorld(r.left + r.width * 0.5, r.top + r.height * 0.6);
+
+  /** House on: idle → EON is home (in the den); activity → out on the page. */
+  _houseTick() {
+    if (!this._houseOn || !this.den || this.ctx.drag?.active) { if (this._inHouse) this._exitHouse(); return; }
+    const idle = performance.now() - (this._lastUserAt || 0);
+    if (!this._inHouse && idle > 18000) this._enterHouse();
+    else if (this._inHouse && idle < 800) this._exitHouse();
   }
+  _enterHouse() { this._inHouse = true; document.body.classList.add('eon-in-house'); this.den?.setActive(true); }
+  _exitHouse() { if (!this._inHouse) return; this._inHouse = false; document.body.classList.remove('eon-in-house'); this.den?.setActive(false); }
 
   /** Hide EON entirely (pausing the render loop) but leave a bring-back button. */
   _setHidden(hidden) {
@@ -665,6 +660,7 @@ class Eon {
     try { this.motiv?.update(); } catch (e) { /* motivation must never break the loop */ }
     try { this.nudger?.update(); } catch (e) { /* nudger must never break the loop */ }
     try { this.resume?.update(); } catch (e) { /* resume must never break the loop */ }
+    try { this._houseTick(); } catch (e) { /* house must never break the loop */ }
 
     // DOM overlays follow EON
     this._syncOverlays();
