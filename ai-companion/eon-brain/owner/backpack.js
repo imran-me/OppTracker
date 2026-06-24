@@ -93,12 +93,64 @@ export class Backpack {
 
   // ---------------- paste ----------------
   _paste(p) {
-    const ok = this._pasteInto(this.lastField, p.text);
-    try { this.ctx.character.playEmote('point'); } catch {}
-    this._sparkle('✨');
-    if (ok) { try { this.ctx.ai?.speak('There you go! ✨', 2400); } catch {} }
-    else { try { this.ctx.ai?.speak('Copied it for you — paste anywhere. 📋', 3000); } catch {} }
     this._togglePanel(false);
+    const el = this._validField(this.lastField);
+    if (el) {
+      this._pourAnimation(p.text, el);                 // letters arc out of his bag…
+      setTimeout(() => {                               // …then the text lands in the field
+        this._pasteInto(el, p.text);
+        try { this.ctx.character.playEmote('point'); } catch {}
+        try { this.ctx.ai?.speak('There you go! ✨', 2200); } catch {}
+      }, 360);
+    } else {
+      this._pasteInto(null, p.text);                   // no field → clipboard
+      try { this.ctx.character.playEmote('point'); } catch {}
+      try { this.ctx.ai?.speak('Copied it for you — paste anywhere. 📋', 3000); } catch {}
+    }
+  }
+
+  _validField(el) {
+    return (el && el.isConnected && (el.matches?.('input, textarea') || el.isContentEditable)) ? el : null;
+  }
+
+  /** Soft little letters that fly out of EON's backpack and arc into the field. */
+  _pourAnimation(text, el) {
+    try {
+      const start = this._bagPoint();
+      const r = el.getBoundingClientRect();
+      const end = { x: r.left + 14, y: r.top + Math.min(18, r.height / 2) };
+      const chars = String(text).replace(/\s+/g, ' ').trim().slice(0, 14).split('');
+      if (!chars.length || !start) return;
+      const arc = Math.max(90, Math.min(230, Math.abs(end.x - start.x) * 0.32 + 100));   // how high it loops
+      const cx = (start.x + end.x) / 2, cy = Math.min(start.y, end.y) - arc;             // control point above
+      chars.forEach((ch, i) => {
+        if (ch === ' ') return;
+        const span = document.createElement('span');
+        span.className = 'eon-pour'; span.textContent = ch;
+        span.style.left = start.x + 'px'; span.style.top = start.y + 'px';
+        document.body.appendChild(span);
+        const frames = [];
+        for (let s = 0; s <= 1.0001; s += 0.2) {
+          const m = 1 - s;
+          const x = m * m * start.x + 2 * m * s * cx + s * s * end.x;
+          const y = m * m * start.y + 2 * m * s * cy + s * s * end.y;
+          frames.push({
+            transform: `translate(${x - start.x}px, ${y - start.y}px) scale(${s > 0.85 ? 0.55 : 1}) rotate(${i % 2 ? 10 : -8}deg)`,
+            opacity: s < 0.08 ? 0 : (s > 0.9 ? 0 : 0.85),
+          });
+        }
+        const anim = span.animate(frames, { duration: 700, delay: i * 52, easing: 'cubic-bezier(.45,.02,.5,1)', fill: 'forwards' });
+        const kill = () => span.remove();
+        anim.onfinish = kill;
+        setTimeout(kill, 700 + i * 52 + 500);            // safety cleanup
+      });
+    } catch {}
+  }
+
+  /** Screen point of his backpack (behind his body). */
+  _bagPoint() {
+    try { const h = this.ctx.project(this.ctx.character.headAnchor); return { x: h.x - 6, y: h.y + 46 }; }
+    catch { return null; }
   }
   _pasteInto(el, text) {
     try {
@@ -162,6 +214,10 @@ export class Backpack {
       #eon-pockets .ep-h{display:flex;align-items:center;padding:10px 12px;background:#10225e;color:#fff;font-weight:700;font-size:12.5px;position:sticky;top:0}
       #eon-pockets .ep-clear{margin-left:auto;cursor:pointer;opacity:.8;font-size:11px;font-weight:600}
       #eon-pockets .ep-clear:hover{opacity:1}
+      #eon-pockets .ep-close{margin-left:12px;cursor:pointer;opacity:.8;font-size:14px;line-height:1}
+      #eon-pockets .ep-close:hover{opacity:1}
+      .eon-pour{position:fixed;z-index:2147483640;font:600 12px/1 system-ui,sans-serif;
+        color:rgba(20,24,40,.6);pointer-events:none;will-change:transform,opacity;text-shadow:0 1px 1px rgba(255,255,255,.5)}
       #eon-pockets .ep-row{display:flex;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid #eef1f7}
       #eon-pockets .ep-txt{flex:1;min-width:0;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#16203a;font-weight:600}
       #eon-pockets .ep-row:hover .ep-txt{color:#1f6dff}
@@ -183,10 +239,11 @@ export class Backpack {
   _buildPanel() {
     if (document.getElementById('eon-pockets')) { this._panel = document.getElementById('eon-pockets'); return; }
     const p = document.createElement('div'); p.id = 'eon-pockets';
-    p.innerHTML = `<div class="ep-h">🎒 Backpack <span class="ep-clear">Clear</span></div><div class="ep-list"></div>`;
+    p.innerHTML = `<div class="ep-h">🎒 Backpack <span class="ep-clear">Clear</span><span class="ep-close" title="Close">✕</span></div><div class="ep-list"></div>`;
     document.body.appendChild(p);
     this._panel = p; this._list = p.querySelector('.ep-list');
     p.querySelector('.ep-clear').onclick = (e) => { e.stopPropagation(); this._clear(); };
+    p.querySelector('.ep-close').onclick = (e) => { e.stopPropagation(); this._togglePanel(false); };
   }
   _togglePanel(force) {
     this._open = (force === undefined) ? !this._open : force;
