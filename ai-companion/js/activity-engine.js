@@ -106,6 +106,8 @@ export class ActivityEngine {
     if (this.ctx.focus) return;
     // Meditating → he's absorbing data; don't wander.
     if (this.ctx.meditating) return;
+    // Hype-man is presenting the owner → let it drive nav; don't wander off.
+    if (this.ctx.hypeBusy) return;
     // Sulking after a drop → a few quiet things in place, then sleep.
     if (this._sulk) { this._sulkLife(now); return; }
 
