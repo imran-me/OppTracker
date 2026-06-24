@@ -113,37 +113,89 @@ export class Backpack {
     return (el && el.isConnected && (el.matches?.('input, textarea') || el.isContentEditable)) ? el : null;
   }
 
-  /** Soft little letters that fly out of EON's backpack and arc into the field. */
+  /** Letters burst out of his bag, fan + swirl on a smooth spline, and funnel
+      into the field — a lively loop even when he's standing right next to it. */
   _pourAnimation(text, el) {
     try {
       const start = this._bagPoint();
       const r = el.getBoundingClientRect();
-      const end = { x: r.left + 14, y: r.top + Math.min(18, r.height / 2) };
+      const end = { x: r.left + 14 + Math.random() * 8, y: r.top + Math.min(18, r.height / 2) };
       const chars = String(text).replace(/\s+/g, ' ').trim().slice(0, 14).split('');
       if (!chars.length || !start) return;
-      const arc = Math.max(90, Math.min(230, Math.abs(end.x - start.x) * 0.32 + 100));   // how high it loops
-      const cx = (start.x + end.x) / 2, cy = Math.min(start.y, end.y) - arc;             // control point above
+      const dist = Math.hypot(end.x - start.x, end.y - start.y);
+      const lift = Math.max(160, dist * 0.5 + 130);              // guaranteed big loop, even up close
+      const dir = end.x >= start.x ? 1 : -1;
+
       chars.forEach((ch, i) => {
         if (ch === ' ') return;
         const span = document.createElement('span');
         span.className = 'eon-pour'; span.textContent = ch;
         span.style.left = start.x + 'px'; span.style.top = start.y + 'px';
+        span.style.fontSize = (11 + Math.random() * 4).toFixed(1) + 'px';
+        if (i % 4 === 2) span.style.color = 'rgba(126,217,87,.72)';   // playful green accent
         document.body.appendChild(span);
-        const frames = [];
-        for (let s = 0; s <= 1.0001; s += 0.2) {
-          const m = 1 - s;
-          const x = m * m * start.x + 2 * m * s * cx + s * s * end.x;
-          const y = m * m * start.y + 2 * m * s * cy + s * s * end.y;
-          frames.push({
-            transform: `translate(${x - start.x}px, ${y - start.y}px) scale(${s > 0.85 ? 0.55 : 1}) rotate(${i % 2 ? 10 : -8}deg)`,
-            opacity: s < 0.08 ? 0 : (s > 0.9 ? 0 : 0.85),
-          });
-        }
-        const anim = span.animate(frames, { duration: 700, delay: i * 52, easing: 'cubic-bezier(.45,.02,.5,1)', fill: 'forwards' });
+
+        // per-letter waypoints: launch up out of the bag → fan to a high apex
+        // → glide over the field → drop in. Randomised so they scatter & gather.
+        const side = (i % 2 ? 1 : -1);
+        const spread = 45 + Math.random() * 80;
+        const launch = { x: start.x - dir * (20 + Math.random() * 30), y: start.y - 26 - Math.random() * 46 };
+        const apex   = { x: (start.x + end.x) / 2 + side * spread, y: Math.min(start.y, end.y) - lift * (0.7 + Math.random() * 0.5) };
+        const overF  = { x: end.x + (Math.random() - 0.5) * 55, y: end.y - 56 - Math.random() * 34 };
+        const pts = [start, launch, apex, overF, end].map((p) => this._clampPt(p));
+        const path = this._spline(pts, 7);
+
+        const spin = (Math.random() < 0.5 ? 1 : -1) * (200 + Math.random() * 460);
+        const frames = path.map((p, idx) => {
+          const t = idx / (path.length - 1);
+          const sc = 0.7 + Math.sin(Math.min(t, 1) * Math.PI) * 0.6;     // grow mid-flight, shrink in
+          return {
+            offset: t,
+            transform: `translate(${p.x - start.x}px, ${p.y - start.y}px) rotate(${spin * t}deg) scale(${sc.toFixed(3)})`,
+            opacity: t < 0.06 ? 0 : (t > 0.9 ? 0 : 0.92),
+          };
+        });
+        const dur = 780 + Math.random() * 240;
+        const anim = span.animate(frames, { duration: dur, delay: i * 46, easing: 'cubic-bezier(.4,.02,.4,1)', fill: 'forwards' });
         const kill = () => span.remove();
         anim.onfinish = kill;
-        setTimeout(kill, 700 + i * 52 + 500);            // safety cleanup
+        setTimeout(kill, dur + i * 46 + 500);
       });
+
+      setTimeout(() => this._landingPop(end), 360);              // little splash where they land
+    } catch {}
+  }
+
+  /** Catmull-Rom spline through the waypoints → smooth screen-space samples. */
+  _spline(pts, perSeg) {
+    const P = [pts[0], ...pts, pts[pts.length - 1]];
+    const out = [];
+    for (let i = 1; i < P.length - 2; i++) {
+      const p0 = P[i - 1], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2];
+      for (let j = 0; j < perSeg; j++) {
+        const t = j / perSeg, t2 = t * t, t3 = t2 * t;
+        out.push({
+          x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+          y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+        });
+      }
+    }
+    out.push(pts[pts.length - 1]);
+    return out;
+  }
+  _clampPt(p) { return { x: Math.max(6, Math.min(innerWidth - 6, p.x)), y: Math.max(8, Math.min(innerHeight - 6, p.y)) }; }
+
+  /** A soft expanding ring where the letters land. */
+  _landingPop(p) {
+    try {
+      const d = document.createElement('div'); d.className = 'eon-pop';
+      d.style.left = p.x + 'px'; d.style.top = p.y + 'px';
+      document.body.appendChild(d);
+      const a = d.animate(
+        [{ transform: 'translate(-50%,-50%) scale(.2)', opacity: .6 }, { transform: 'translate(-50%,-50%) scale(1.7)', opacity: 0 }],
+        { duration: 500, easing: 'ease-out', fill: 'forwards' });
+      a.onfinish = () => d.remove();
+      setTimeout(() => d.remove(), 800);
     } catch {}
   }
 
@@ -216,8 +268,10 @@ export class Backpack {
       #eon-pockets .ep-clear:hover{opacity:1}
       #eon-pockets .ep-close{margin-left:12px;cursor:pointer;opacity:.8;font-size:14px;line-height:1}
       #eon-pockets .ep-close:hover{opacity:1}
-      .eon-pour{position:fixed;z-index:2147483640;font:600 12px/1 system-ui,sans-serif;
-        color:rgba(20,24,40,.6);pointer-events:none;will-change:transform,opacity;text-shadow:0 1px 1px rgba(255,255,255,.5)}
+      .eon-pour{position:fixed;z-index:2147483640;font:700 12px/1 system-ui,sans-serif;
+        color:rgba(20,24,40,.62);pointer-events:none;will-change:transform,opacity;text-shadow:0 1px 2px rgba(255,255,255,.55)}
+      .eon-pop{position:fixed;z-index:2147483639;width:26px;height:26px;border-radius:50%;
+        border:2px solid rgba(126,217,87,.55);pointer-events:none;will-change:transform,opacity}
       #eon-pockets .ep-row{display:flex;align-items:center;gap:8px;padding:9px 12px;border-top:1px solid #eef1f7}
       #eon-pockets .ep-txt{flex:1;min-width:0;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#16203a;font-weight:600}
       #eon-pockets .ep-row:hover .ep-txt{color:#1f6dff}
