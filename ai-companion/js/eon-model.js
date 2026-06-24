@@ -39,6 +39,14 @@ const EMOTE_DEF = {
   proud:   { dur: 2.8, face: { eL: 'happy', eR: 'happy', mouth: 'smile' } },
   applaud: { dur: 2.8, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
   flex:    { dur: 2.4, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
+  // Companion expressions (used by the owner-mode helpers).
+  idea:     { dur: 2.0, face: { eL: 'open', eR: 'open', mouth: 'o' } },
+  facepalm: { dur: 2.2, face: { mouth: 'smile', tilt: 0.06 } },
+  shrug:    { dur: 2.0, face: { mouth: 'smile' } },
+  peek:     { dur: 2.6, face: { eL: 'open', eR: 'open', mouth: 'smile' } },
+  sleepy:   { dur: 2.8, face: { eL: 'closed', eR: 'closed', mouth: 'smile' } },
+  sad:      { dur: 2.2, face: { eL: 'open', eR: 'open', mouth: 'o' } },
+  nod:      { dur: 1.6, face: { mouth: 'smile' } },
 };
 
 export class EonModel {
@@ -516,6 +524,41 @@ export class EonModel {
         eon.rotation.z = Math.sin(t * 9) * 0.03;
         aL.shoulder.rotation.set(-0.2, 0, 1.5); aL.elbow.rotation.x = 2.3;
         aR.shoulder.rotation.set(-0.2, 0, -1.5); aR.elbow.rotation.x = 2.3;
+        break;
+      case 'idea': {                                                             // aha! finger up
+        const k = Math.sin(Math.min(1, ep * 3) * Math.PI);
+        eon.position.y = base + 0.06 * k;
+        aR.shoulder.rotation.set(-0.3, 0, -1.95); aR.elbow.rotation.x = -0.15;
+        aL.shoulder.rotation.set(0.1, 0, 0.4);
+        break;
+      }
+      case 'facepalm':                                                           // hand to face
+        eon.position.y = base + Math.sin(t * 1.6) * 0.02;
+        this.head.rotation.x = 0.26; eon.rotation.z = Math.sin(t * 2) * 0.03;
+        aR.shoulder.rotation.set(-1.5, 0, -0.42); aR.elbow.rotation.x = -1.95;
+        break;
+      case 'shrug':                                                              // "who knows?"
+        eon.position.y = base + Math.abs(Math.sin(t * 4)) * 0.02;
+        this.head.rotation.z = Math.sin(t * 1.5) * 0.06;
+        aL.shoulder.rotation.set(-0.2, 0, 0.95); aL.elbow.rotation.x = -0.7;
+        aR.shoulder.rotation.set(-0.2, 0, -0.95); aR.elbow.rotation.x = -0.7;
+        break;
+      case 'peek':                                                               // looks around
+        eon.rotation.y = this.turn + Math.sin(t * 2.5) * 0.45;
+        this.head.rotation.y = Math.sin(t * 2.5) * 0.2;
+        break;
+      case 'sleepy':                                                             // droopy, tilted
+        eon.position.y = base + Math.sin(t * 1.2) * 0.03;
+        this.head.rotation.z = 0.2 + Math.sin(t * 1.0) * 0.05;
+        aL.shoulder.rotation.set(0.1, 0, 0.4); aR.shoulder.rotation.set(0.1, 0, -0.4);
+        break;
+      case 'sad':                                                                // slumped, head down
+        eon.position.y = base - 0.04 + Math.sin(t * 1.2) * 0.015;
+        this.head.rotation.x = 0.3;
+        aL.shoulder.rotation.set(0.22, 0, 0.34); aR.shoulder.rotation.set(0.22, 0, -0.34);
+        break;
+      case 'nod':                                                                // yes, yes
+        this.head.rotation.x = 0.1 + Math.sin(t * 7) * 0.16;
         break;
     }
   }
