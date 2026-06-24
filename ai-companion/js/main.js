@@ -108,6 +108,8 @@ class Eon {
     catch (e) { console.warn('[EON] nudger failed to start:', e); this.nudger = null; }
     try { this.resume = new Resume(this.ctx); this.resume.start(); }                 // owner-mode: where-was-I resume
     catch (e) { console.warn('[EON] resume failed to start:', e); this.resume = null; }
+    try { this._buildDen(); this._wireHouse(); }                                     // optional 3D den (settings → House)
+    catch (e) { console.warn('[EON] den failed to start:', e); }
     this._setSize(this._userScale || 1);     // apply saved size now the model exists
 
     // ---- restore memory + live state, then resume or greet ----
@@ -147,17 +149,27 @@ class Eon {
       <div id="eon-hit"></div>
       <div class="eon-bubble" id="eon-bubble"></div>
       <div id="eon-panel" class="eon-panel">
+        <div class="eon-pan-grp">Appearance</div>
         <div class="eon-pan-h">Personality</div>
         <div class="eon-pan-row" id="eon-arche"></div>
+        <div class="eon-pan-h">Size</div>
+        <input type="range" id="eon-size" min="55" max="175" value="100" class="eon-range">
+
+        <div class="eon-pan-grp">Behaviour</div>
         <div class="eon-pan-h">Mode</div>
         <div class="eon-pan-row" id="eon-modes"></div>
         <div class="eon-pan-h">Energy <span id="eon-energy-v"></span></div>
         <input type="range" id="eon-energy" min="0" max="100" value="50" class="eon-range">
-        <div class="eon-pan-h">Size</div>
-        <input type="range" id="eon-size" min="55" max="175" value="100" class="eon-range">
         <div class="eon-pan-h">Messages</div>
         <div class="eon-pan-row"><button class="eon-pill" id="eon-msg-toggle" style="width:100%">Speech bubbles: On</button></div>
-        <button class="eon-pill" id="eon-meditate" style="width:100%;margin-top:9px">🧘 Meditate now</button>
+
+        <div class="eon-pan-grp">House</div>
+        <div class="eon-pan-row"><button class="eon-pill" id="eon-house-toggle" style="width:100%">House: Off</button></div>
+        <div class="eon-pan-h">House size</div>
+        <input type="range" id="eon-house-size" min="50" max="170" value="100" class="eon-range">
+
+        <div class="eon-pan-grp">Tools</div>
+        <button class="eon-pill" id="eon-meditate" style="width:100%">🧘 Meditate now</button>
       </div>
       <div id="eon-controls">
         <button class="eon-chip" id="eon-settings" title="EON settings">⚙</button>
@@ -359,6 +371,71 @@ class Eon {
       this.activity._whenArrived(() => this.character.setState('drinkTea'));
       this.ai?.speak('Cozy here. 🍵');
     }
+  }
+
+  // -------------------- the 3D den (optional, settings → House) --------------------
+  /** Isolated den iframe (its own three.js) — never touches the avatar. */
+  _buildDen() {
+    if (document.getElementById('eon-den-frame')) { this.denEl = document.getElementById('eon-den-frame'); return; }
+    const st = document.createElement('style');
+    st.textContent = `
+      #eon-den-frame{position:fixed;right:0;bottom:0;width:520px;height:420px;border:0;background:transparent;
+        pointer-events:none;z-index:2147482000;opacity:0;transform-origin:bottom right;transition:opacity .45s ease;}
+      #eon-den-frame.show{opacity:1;}
+      body.eon-house-on #eon-home{display:none !important;}
+      .eon-pan-grp{font:800 10px system-ui;letter-spacing:.6px;text-transform:uppercase;color:#9aa6c2;
+        margin:13px 0 3px;padding-top:9px;border-top:1px solid rgba(31,109,255,.13);}
+      .eon-pan-grp:first-child{border-top:0;padding-top:0;margin-top:2px;}`;
+    document.head.appendChild(st);
+    const f = document.createElement('iframe');
+    f.id = 'eon-den-frame'; f.src = `${this._base}assets/eon-den.html`;
+    f.setAttribute('scrolling', 'no'); f.setAttribute('tabindex', '-1'); f.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(f); this.denEl = f;
+  }
+
+  _wireHouse() {
+    const btn = this.layer.querySelector('#eon-house-toggle');
+    const sizeEl = this.layer.querySelector('#eon-house-size');
+    if (btn) btn.onclick = () => this._setHouse(!this._houseOn);
+    if (sizeEl) {
+      const saved = parseFloat(localStorage.getItem('eon-house-size'));
+      this._houseScale = (!isNaN(saved) && saved > 0) ? saved : 1;
+      sizeEl.value = Math.round(this._houseScale * 100);
+      sizeEl.oninput = () => this._setHouseSize(sizeEl.value / 100);
+      this._setHouseSize(this._houseScale, true);
+    }
+    // while the house is on, "home" becomes the den — his normal idle life happens there
+    if (this.nav && !this._origGoHome) {
+      this._origGoHome = this.nav.goHome.bind(this.nav);
+      this.nav.goHome = () => {
+        if (this._houseOn) { const c = this._houseCenterWorld(); if (c) { this.nav.goTo(c.x, c.y); return; } }
+        this._origGoHome();
+      };
+    }
+    this._setHouse(localStorage.getItem('eon-house') === '1', true);   // restore
+  }
+
+  _setHouse(on, silent) {
+    this._houseOn = !!on;
+    document.body.classList.toggle('eon-house-on', this._houseOn);
+    this.denEl?.classList.toggle('show', this._houseOn);
+    const btn = this.layer.querySelector('#eon-house-toggle');
+    if (btn) { btn.textContent = `House: ${this._houseOn ? 'On' : 'Off'}`; btn.classList.toggle('on', this._houseOn); }
+    try { localStorage.setItem('eon-house', this._houseOn ? '1' : '0'); } catch {}
+    this.home?.show(false);                                  // the den replaces the flat home backdrop
+    if (this._houseOn && !silent) { try { this.nav.goHome(); } catch {} this.ai?.speak('Ooh — my den! 🏠', 3000); }
+  }
+  _setHouseSize(scale, silent) {
+    this._houseScale = scale;
+    if (this.denEl) this.denEl.style.transform = `scale(${scale})`;
+    if (!silent) { try { localStorage.setItem('eon-house-size', String(scale)); } catch {} }
+  }
+  /** Roughly the middle of the room, in EON's screen-world coords. */
+  _houseCenterWorld() {
+    if (!this.denEl) return null;
+    const r = this.denEl.getBoundingClientRect();
+    if (!r.width) return null;
+    return this._screenToWorld(r.left + r.width * 0.5, r.top + r.height * 0.6);
   }
 
   /** Hide EON entirely (pausing the render loop) but leave a bring-back button. */
