@@ -88,8 +88,8 @@ class Eon {
     });
 
     this.home.mount(this.layer);
-    this.hype = new HypeMan(this.ctx);       // public-mode: EON brags about his owner
-    this.hype.start();
+    try { this.hype = new HypeMan(this.ctx); this.hype.start(); }  // public-mode: the aware guide
+    catch (e) { console.warn('[EON] guide failed to start:', e); this.hype = null; }
     this._setSize(this._userScale || 1);     // apply saved size now the model exists
 
     // ---- restore memory + live state, then resume or greet ----
@@ -542,7 +542,7 @@ class Eon {
     this._pollBrain(dt);
     this._updateAura(t, dt);
     this._selfMeditate();
-    this.hype?.update(dt, performance.now());
+    try { this.hype?.update(); } catch (e) { /* guide must never break the loop */ }
 
     // DOM overlays follow EON
     this._syncOverlays();
