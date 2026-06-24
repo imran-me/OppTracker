@@ -338,7 +338,7 @@ export class Backpack {
     p.querySelector('.et-sum').onclick = (e) => { e.stopPropagation(); this._toolSum(); };
     p.querySelector('.et-bundle').onclick = (e) => { e.stopPropagation(); this._toolBundle(); };
     p.querySelector('.et-sort').onclick = (e) => { e.stopPropagation(); this._toolSort(); };
-    p.querySelector('.et-fetch').onclick = (e) => { e.stopPropagation(); this._toolFetch(); };
+    p.querySelector('.et-fetch').onclick = (e) => { e.stopPropagation(); this._openFetch(e.currentTarget); };
   }
   _togglePanel(force) {
     this._open = (force === undefined) ? !this._open : force;
@@ -405,18 +405,55 @@ export class Backpack {
     this._save(); this._renderPanel();
     this._react('🔤', 'Tidied the bag! 🔤', 'point');
   }
-  _toolFetch() {
-    let feed = []; try { feed = window.EonBrain?.getAlerts?.() || []; } catch {}
-    if (!feed.length) { this._react('📥', 'Nothing urgent to fetch right now. 🌿', 'think'); return; }
-    const top = feed.slice(0, 3);
-    for (const f of top) {
-      const due = f.dueAt ? ` — due ${this._fmtDate(f.dueAt)}` : '';
-      const t = `${f.label || f.entity}${due}`;
-      this.pockets = this.pockets.filter((p) => p.text !== t);
-      this.pockets.unshift({ id: 'f' + Date.now().toString(36) + ((Math.random() * 999) | 0), text: t, pinned: false, ts: Date.now() });
-    }
+  // He goes and brings real records back: a fetch menu over the live data.
+  async _openFetch(anchor) {
+    try { await window.EonBrain?.ensureData?.(); } catch {}
+    const data = (() => { try { return window.EonBrain?.getData?.() || {}; } catch { return {}; } })();
+    const m = this._ensureToolsMenu(); m.innerHTML = '';
+    const add = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = (e) => { e.stopPropagation(); m.classList.remove('show'); fn(); }; m.appendChild(b); };
+    add('⏰ Due this week', () => this._fetchDeadlines('week'));
+    add('🔴 Overdue', () => this._fetchDeadlines('overdue'));
+    Object.keys(data).filter((k) => Array.isArray(data[k]) && data[k].length).slice(0, 6)
+      .forEach((k) => add(`📄 Latest ${k}`, () => this._fetchLatest(k)));
+    m.classList.add('show');
+    const rh = m.getBoundingClientRect(), r = anchor.getBoundingClientRect();
+    m.style.left = Math.max(8, r.left - rh.width - 6) + 'px';
+    m.style.top = Math.max(8, Math.min(innerHeight - rh.height - 8, r.bottom + 4)) + 'px';
+  }
+  _fetchDeadlines(mode) {
+    const recs = (() => { try { return window.EonBrain?.getRecords?.() || []; } catch { return []; } })();
+    const now = Date.now();
+    let items = mode === 'overdue'
+      ? recs.filter((r) => r.deadlineAt && Date.parse(r.deadlineAt) < now)
+      : recs.filter((r) => { if (!r.deadlineAt) return false; const d = (Date.parse(r.deadlineAt) - now) / 86400000; return d >= 0 && d <= 7; });
+    items = items.filter((r) => !Number.isNaN(Date.parse(r.deadlineAt)))
+      .sort((a, b) => Date.parse(a.deadlineAt) - Date.parse(b.deadlineAt)).slice(0, 4);
+    if (!items.length) { this._react('📥', 'Nothing there to fetch. 🌿', 'think'); return; }
+    this._fetchRun(() => {
+      items.forEach((r) => this._dropPocket(`${r.label} — due ${this._fmtDate(r.deadlineAt)}`));
+      this._react('📥', `Fetched ${items.length} for you. 📥`, 'cheer');
+    });
+  }
+  _fetchLatest(entity) {
+    const recs = (() => { try { return (window.EonBrain?.getRecords?.() || []).filter((r) => r.entity === entity); } catch { return []; } })();
+    if (!recs.length) { this._react('📥', 'Nothing there yet. 🌿', 'think'); return; }
+    const r = recs[recs.length - 1];
+    this._fetchRun(() => {
+      this._dropPocket(r.label + (r.deadlineAt ? ` — ${this._fmtDate(r.deadlineAt)}` : ''));
+      this._react('📥', `Here's the latest ${entity}. 📥`, 'cheer');
+    });
+  }
+  _dropPocket(text) {
+    const t = String(text);
+    this.pockets = this.pockets.filter((p) => p.text !== t);
+    this.pockets.unshift({ id: 'f' + Date.now().toString(36) + ((Math.random() * 999) | 0), text: t, pinned: false, ts: Date.now() });
     this._trim(); this._save(); this._renderChip(); if (this._open) this._renderPanel();
-    this._react('📥', `Fetched ${top.length} deadline${top.length > 1 ? 's' : ''} for you. 📥`, 'cheer');
+  }
+  /** A short "off to fetch it" beat before the items land in the bag. */
+  _fetchRun(deliver) {
+    try { this.ctx.character.playEmote('spin'); } catch {}
+    this._sparkle('📦');
+    setTimeout(() => { try { deliver(); } catch {} }, 650);
   }
 
   // per-pocket actions popover
