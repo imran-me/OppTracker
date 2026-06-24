@@ -12,6 +12,8 @@
      "total amount of invoices"  "list my tasks"  "find chevening"
    ============================================================ */
 
+import { CompanionBrain } from './companion-brain.js';
+
 const SYN = {
   opportunities: ['opportunit', 'opps', 'opp'],
   tasks: ['task', 'to-do', 'todo'],
@@ -25,7 +27,7 @@ const SYN = {
 const AMOUNT_HINTS = ['amount', 'value', 'price', 'cost', 'fee', 'total', 'budget', 'salary', 'paid'];
 
 export class AskEon {
-  constructor(ctx) { this.ctx = ctx; this._open = false; }
+  constructor(ctx) { this.ctx = ctx; this._open = false; this.cb = new CompanionBrain(() => (typeof window !== 'undefined' ? window.EonBrain : null)); }
 
   start() {
     this._injectStyle();
@@ -66,6 +68,20 @@ export class AskEon {
     const nq = q.toLowerCase();
     const now = Date.now();
     const days = (iso) => Math.floor((Date.parse(iso) - now) / 86400000);
+
+    if (/\bplan\b|what should i do|where (to|do i) start|prioriti|my day|to-?do list|organi[sz]e/.test(nq)) {
+      const { items, overload } = this.cb.plan();
+      if (!items.length) return { speak: "Nothing scheduled — you're clear. 🌿" };
+      const detail = items.map((i, idx) => `${idx + 1}. ${i.label}${i.dueAt ? ` — ${this._date(i.dueAt)}` : ''}`).join('\n');
+      const ov = overload.length ? ` Heads up: ${overload.map((o) => `${o.count} on ${this._date(o.date)}`).join(', ')}.` : '';
+      return { speak: `Here's how I'd tackle it:${ov}`, detail, items };
+    }
+    if (/problem|issue|anomal|missing|incomplete|looks off|clean ?up|hygiene|wrong|tidy/.test(nq)) {
+      const h = this.cb.hygiene();
+      if (!h.length) return { speak: 'Everything looks tidy. ✨' };
+      const detail = h.map((x) => `• ${x.label} — ${x.issue} (${x.entity})`).join('\n');
+      return { speak: `${h.length} thing${h.length > 1 ? 's' : ''} to tidy:`, detail };
+    }
     const ent = this._entityIn(nq, keys);
     const recs = ent ? records.filter((r) => r.entity === ent) : records;
     const dl = recs.filter((r) => r.deadlineAt && !Number.isNaN(Date.parse(r.deadlineAt)));
@@ -185,7 +201,7 @@ export class AskEon {
     p.innerHTML = `
       <div class="ea-h">💬 Ask EON <span class="ea-x" title="Close">✕</span></div>
       <div class="ea-in"><input type="text" placeholder="e.g. what's due this week?" /><button class="ea-go">Ask</button></div>
-      <div class="ea-ex">Try: how many tasks · overdue · find &lt;name&gt; · total amount</div>
+      <div class="ea-ex">Try: plan my day · what's due this week · overdue · how many tasks · find &lt;name&gt; · total amount · problems</div>
       <div class="ea-a"></div>
       <button class="ea-keep">🎒 Keep these in the backpack</button>`;
     document.body.appendChild(p);
