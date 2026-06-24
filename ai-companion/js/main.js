@@ -141,12 +141,13 @@ class Eon {
         <input type="range" id="eon-energy" min="0" max="100" value="50" class="eon-range">
         <div class="eon-pan-h">Size</div>
         <input type="range" id="eon-size" min="55" max="175" value="100" class="eon-range">
+        <div class="eon-pan-h">Messages</div>
+        <div class="eon-pan-row"><button class="eon-pill" id="eon-msg-toggle" style="width:100%">Speech bubbles: On</button></div>
         <button class="eon-pill" id="eon-meditate" style="width:100%;margin-top:9px">🧘 Meditate now</button>
       </div>
       <div id="eon-controls">
         <button class="eon-chip" id="eon-settings" title="EON settings">⚙</button>
         <button class="eon-chip" id="eon-home-btn" title="Send EON home to sit">🏠</button>
-        <button class="eon-chip" id="eon-mute" title="Hide EON’s messages">💬</button>
         <button class="eon-chip" id="eon-power" title="Hide EON">✕</button>
       </div>`;
     document.body.appendChild(layer);
@@ -156,14 +157,18 @@ class Eon {
     this.shadowEl = layer.querySelector('#eon-floor-shadow');
     this.hitEl = layer.querySelector('#eon-hit');
 
-    // 💬 messages — toggle speech bubbles on/off
-    const muteBtn = layer.querySelector('#eon-mute');
-    muteBtn.onclick = () => {
-      this.config.features.speech = !this.config.features.speech;
-      muteBtn.classList.toggle('active', this.config.features.speech === false);
-      muteBtn.title = this.config.features.speech ? 'Hide EON’s messages' : 'Show EON’s messages';
-      if (!this.config.features.speech) this.bubbleEl.classList.remove('show');
+    // messages — toggle speech bubbles on/off (now lives inside Settings)
+    const msgBtn = layer.querySelector('#eon-msg-toggle');
+    const syncMsg = () => {
+      msgBtn.textContent = `Speech bubbles: ${this.config.features.speech ? 'On' : 'Off'}`;
+      msgBtn.classList.toggle('on', this.config.features.speech !== false);
     };
+    msgBtn.onclick = () => {
+      this.config.features.speech = !this.config.features.speech;
+      if (!this.config.features.speech) this.bubbleEl.classList.remove('show');
+      syncMsg();
+    };
+    syncMsg();
 
     // 🏠 home — send EON home to sit, and keep him there (toggle)
     const homeBtn = layer.querySelector('#eon-home-btn');
@@ -356,8 +361,9 @@ class Eon {
     if (homeEl) homeEl.style.display = vis;
 
     // hide the other chips while EON is away; the ✕ becomes a bring-back 🙂
-    this.layer.querySelector('#eon-mute').style.display = vis;
     this.layer.querySelector('#eon-home-btn').style.display = vis;
+    // owner chips: hide on the way out; their own update() restores them on return
+    [document.getElementById('eon-bag'), document.getElementById('eon-ask-chip')].forEach((el) => { if (el && hidden) el.style.display = 'none'; });
     const power = this.layer.querySelector('#eon-power');
     power.textContent = hidden ? '🙂' : '✕';
     power.title = hidden ? 'Bring EON back' : 'Hide EON';

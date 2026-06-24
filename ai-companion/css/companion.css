@@ -103,7 +103,14 @@
   gap: 6px;
   pointer-events: auto;
   z-index: 4;                 /* above the home backdrop */
+  align-items: center;
 }
+/* one clean row: settings · backpack · home · ask eon · cross */
+#eon-controls #eon-settings { order: 1; }
+#eon-controls #eon-bag      { order: 2; }
+#eon-controls #eon-home-btn { order: 3; }
+#eon-controls #eon-ask-chip { order: 4; }
+#eon-controls #eon-power    { order: 5; }
 .eon-chip {
   width: 26px;
   height: 26px;
