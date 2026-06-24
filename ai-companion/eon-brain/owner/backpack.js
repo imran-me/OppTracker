@@ -30,6 +30,7 @@ export class Backpack {
     this._reaching = false;
     this._selectMode = false;
     this._selected = new Set();
+    this._nextDelight = 0;
   }
 
   start() {
@@ -71,6 +72,49 @@ export class Backpack {
     const show = this._owner() && this.pockets.length > 0;
     if (this._chip) this._chip.style.display = show ? 'inline-flex' : 'none';
     if (!this._owner() && this._open) this._togglePanel(false);
+    if (this._owner()) this._maybeDelight(Date.now());
+  }
+
+  // ---------------- delight moments ----------------
+  _maybeDelight(now) {
+    if (!this._nextDelight) { this._nextDelight = now + 90000; return; }
+    if (now < this._nextDelight) return;
+    if (this.ctx.drag?.active || this.ctx.focus || this.ctx.hypeBusy) { this._nextDelight = now + 30000; return; }
+    const idle = (() => { try { return this.ctx.personality?.ignoredFor?.() ?? 1e9; } catch { return 1e9; } })();
+    if (idle < 30000) { this._nextDelight = now + 25000; return; }   // wait for a quiet moment
+    this._nextDelight = now + 120000 + Math.random() * 150000;        // ~2–4.5 min between moments
+    const roll = Math.random();
+    if (this.pockets.length && roll < 0.4) this._pssst();
+    else if (this.pockets.length && roll < 0.72) this._juggle();
+    else if (Math.random() < 0.5) this._treasure();
+    else this._pssst();
+  }
+  _scatter(glyphs, n = 6) {
+    try { const ch = this.ctx.character, P = this.ctx.particles; for (let i = 0; i < n; i++) P.emote(glyphs[(Math.random() * glyphs.length) | 0], ch._worldHead((Math.random() - 0.5) * 0.9, 0.3 + Math.random() * 0.6)); } catch {}
+  }
+  _spill() {
+    try { this.ctx.character.playEmote('jump'); } catch {}
+    this._scatter(['📄', '✨', '💨', '🎒'], 9);
+    try { this.ctx.ai?.speak("Oof — the bag's getting heavy! 😅", 3000); } catch {}
+  }
+  _pssst() {
+    try { this.ctx.character.playEmote('wave'); } catch {}
+    this._scatter(['🎒', '✨'], 4);
+    try { this.ctx.ai?.speak("Psst… I've got things in here for you. 🎒", 3400); } catch {}
+  }
+  _juggle() {
+    try { this.ctx.character.playEmote('spin'); } catch {}
+    this._scatter(['🤹', '✨', '🎒', '💫'], 7);
+    if (Math.random() < 0.5) { try { this.ctx.ai?.speak('Just juggling your stuff. 🤹', 3000); } catch {} }
+  }
+  _treasure() {
+    const recs = (() => { try { return window.EonBrain?.getRecords?.() || []; } catch { return []; } })();
+    if (!recs.length) { this._pssst(); return; }
+    const r = recs[(Math.random() * recs.length) | 0];
+    this._scatter(['💎', '✨', '🔎'], 6);
+    try { this.ctx.character.playEmote('cheer'); } catch {}
+    try { this.ctx.ai?.speak(`Found a little treasure while thinking — “${this._short(r.label, 38)}”. Tucked it in your bag. 💎`, 4800); } catch {}
+    this._dropPocket(r.label + (r.deadlineAt ? ` — ${this._fmtDate(r.deadlineAt)}` : ''));
   }
 
   // ---------------- catch ----------------
@@ -87,6 +131,9 @@ export class Backpack {
     try { this.ctx.character.playEmote('cheer'); } catch {}
     try { this.ctx.ai?.speak(`Caught it! 🎒 “${this._short(clipped)}”`, 3200); } catch {}
     this._sparkle('🎒');
+
+    // overstuffed → the bag comically spills
+    if (this.pockets.filter((p) => !p.pinned).length >= MAX_POCKETS && Math.random() < 0.5) setTimeout(() => this._spill(), 700);
   }
 
   _trim() {
