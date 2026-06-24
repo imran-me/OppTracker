@@ -31,6 +31,8 @@ export class Backpack {
     this._selectMode = false;
     this._selected = new Set();
     this._nextDelight = 0;
+    this._run = null;
+    this._grabMode = false;
   }
 
   start() {
@@ -64,15 +66,28 @@ export class Backpack {
     document.addEventListener('drop', this._onDrop);
     document.addEventListener('dragend', this._onDragEnd);
 
+    // magnet grab mode: while on, a click anywhere pockets that element's text
+    this._onGrabClick = (e) => {
+      if (!this._grabMode || !this._owner()) return;
+      const t = e.target;
+      if (!t || (t.closest && t.closest('#eon-layer, #eon-pockets, #eon-bag, #eon-ask, #eon-ask-chip, #eon-tools-menu, #eon-magnify'))) return;
+      const text = (t.innerText || t.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text) return;
+      e.preventDefault(); e.stopPropagation();
+      this._catch(text.slice(0, 2000));
+    };
+    document.addEventListener('click', this._onGrabClick, true);
+
     this._renderChip();
   }
 
   /** Light refresh from the main loop (owner gating + chip). */
   update() {
+    if (this._run) this._driveRun(Date.now());
     const show = this._owner() && this.pockets.length > 0;
     if (this._chip) this._chip.style.display = show ? 'inline-flex' : 'none';
     if (!this._owner() && this._open) this._togglePanel(false);
-    if (this._owner()) this._maybeDelight(Date.now());
+    if (this._owner() && !this._run) this._maybeDelight(Date.now());
   }
 
   // ---------------- delight moments ----------------
@@ -366,7 +381,8 @@ export class Backpack {
       #eon-magnify.show{display:flex}
       #eon-magnify .em-card{max-width:min(640px,90vw);max-height:74vh;overflow:auto;background:#fff;border-radius:14px;
         padding:22px 24px;box-shadow:0 24px 60px rgba(0,0,0,.3);font:500 16px/1.5 system-ui;color:#16203a;white-space:pre-wrap;word-break:break-word}
-      #eon-magnify .em-x{position:fixed;top:18px;right:24px;color:#fff;font-size:26px;cursor:pointer;line-height:1}`;
+      #eon-magnify .em-x{position:fixed;top:18px;right:24px;color:#fff;font-size:26px;cursor:pointer;line-height:1}
+      body.eon-grab, body.eon-grab *{cursor:crosshair !important}`;
     document.head.appendChild(s);
   }
   _buildChip() {
@@ -390,6 +406,7 @@ export class Backpack {
         <button class="et-fetch" title="Fetch records into the bag">📥 Fetch</button>
         <button class="et-note" title="Jot a quick note he'll keep">✏️ Note</button>
         <button class="et-select" title="Pick several to bundle or sum">☑️ Select</button>
+        <button class="et-grab" title="Grab mode: click anything on the page to pocket it">🧲 Grab</button>
       </div>
       <div class="ep-list"></div>
       <div class="ep-foot"></div>`;
@@ -403,6 +420,7 @@ export class Backpack {
     p.querySelector('.et-fetch').onclick = (e) => { e.stopPropagation(); this._openFetch(e.currentTarget); };
     p.querySelector('.et-note').onclick = (e) => { e.stopPropagation(); this._toolNote(); };
     p.querySelector('.et-select').onclick = (e) => { e.stopPropagation(); this._toggleSelect(); };
+    p.querySelector('.et-grab').onclick = (e) => { e.stopPropagation(); this._toggleGrab(); };
     this._foot = p.querySelector('.ep-foot');
   }
   _togglePanel(force) {
@@ -452,6 +470,19 @@ export class Backpack {
     this._renderPanel();
   }
   _toggleSel(id) { this._selected.has(id) ? this._selected.delete(id) : this._selected.add(id); this._renderPanel(); }
+  _toggleGrab() {
+    this._grabMode = !this._grabMode;
+    document.body.classList.toggle('eon-grab', this._grabMode);
+    this._panel?.querySelector('.et-grab')?.classList.toggle('on', this._grabMode);
+    if (this._grabMode) {
+      try { this.ctx.ai?.speak("Grab mode on — click anything and I'll pocket it. (Esc to stop) 🧲", 4200); } catch {}
+      this._escHandler = (e) => { if (e.key === 'Escape') this._toggleGrab(); };
+      document.addEventListener('keydown', this._escHandler);
+      this._togglePanel(false);
+    } else if (this._escHandler) {
+      document.removeEventListener('keydown', this._escHandler); this._escHandler = null;
+    }
+  }
   _renderFoot() {
     if (!this._foot) return;
     this._foot.classList.toggle('show', this._selectMode);
@@ -575,11 +606,23 @@ export class Backpack {
     this.pockets.unshift({ id: 'f' + Date.now().toString(36) + ((Math.random() * 999) | 0), text: t, pinned: false, ts: Date.now() });
     this._trim(); this._save(); this._renderChip(); if (this._open) this._renderPanel();
   }
-  /** A short "off to fetch it" beat before the items land in the bag. */
+  /** He actually dashes off to the edge and hurries back, then delivers. */
   _fetchRun(deliver) {
-    try { this.ctx.character.playEmote('spin'); } catch {}
-    this._sparkle('📦');
-    setTimeout(() => { try { deliver(); } catch {} }, 650);
+    const nav = this.ctx.nav;
+    if (this._run || !nav || typeof nav.goTo !== 'function') { try { deliver(); } catch {} return; }
+    this.ctx.hypeBusy = true;
+    this._scatter(['📦', '💨'], 4);
+    this._run = { phase: 'out', home: { x: nav.x, y: nav.y }, deliver, until: Date.now() + 1700 };
+  }
+  _driveRun(now) {
+    const r = this._run, nav = this.ctx.nav;
+    if (r.phase === 'out') {
+      nav.goTo(99999, r.home.y);                         // dash to the right edge ("off to fetch it")
+      if (nav.atTarget?.() || now >= r.until) { r.phase = 'back'; r.until = now + 2000; }
+      return;
+    }
+    nav.goTo(r.home.x, r.home.y);                        // hurry back
+    if (nav.atTarget?.() || now >= r.until) { try { r.deliver(); } catch {} this._run = null; this.ctx.hypeBusy = false; }
   }
 
   // per-pocket actions popover
