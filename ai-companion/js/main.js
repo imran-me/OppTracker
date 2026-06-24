@@ -19,6 +19,7 @@ import { HomeSystem }         from './home-system.js';
 import { HypeMan }            from './hype-man.js';
 import { OwnerCompanion }     from '../eon-brain/owner/whiteboard.js';
 import { Backpack }           from '../eon-brain/owner/backpack.js';
+import { AskEon }             from '../eon-brain/owner/ask.js';
 import { Personality, ARCHETYPES } from './personality.js';
 
 // Front-end mirror of config/settings.php so EON works with no backend.
@@ -96,6 +97,8 @@ class Eon {
     catch (e) { console.warn('[EON] companion failed to start:', e); this.companion = null; }
     try { this.backpack = new Backpack(this.ctx); this.backpack.start(); }          // owner-mode: backpack catch/paste
     catch (e) { console.warn('[EON] backpack failed to start:', e); this.backpack = null; }
+    try { this.ask = new AskEon(this.ctx); this.ask.start(); }                       // owner-mode: ask EON about your data
+    catch (e) { console.warn('[EON] ask failed to start:', e); this.ask = null; }
     this._setSize(this._userScale || 1);     // apply saved size now the model exists
 
     // ---- restore memory + live state, then resume or greet ----
@@ -558,6 +561,7 @@ class Eon {
     try { this.hype?.update(); } catch (e) { /* guide must never break the loop */ }
     try { this.companion?.update(); } catch (e) { /* companion must never break the loop */ }
     try { this.backpack?.update(); } catch (e) { /* backpack must never break the loop */ }
+    try { this.ask?.update(); } catch (e) { /* ask must never break the loop */ }
 
     // DOM overlays follow EON
     this._syncOverlays();
