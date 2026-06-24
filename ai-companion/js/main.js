@@ -18,6 +18,7 @@ import { AiCore }             from './ai-core.js';
 import { HomeSystem }         from './home-system.js';
 import { HypeMan }            from './hype-man.js';
 import { OwnerCompanion }     from '../eon-brain/owner/whiteboard.js';
+import { Backpack }           from '../eon-brain/owner/backpack.js';
 import { Personality, ARCHETYPES } from './personality.js';
 
 // Front-end mirror of config/settings.php so EON works with no backend.
@@ -93,6 +94,8 @@ class Eon {
     catch (e) { console.warn('[EON] guide failed to start:', e); this.hype = null; }
     try { this.companion = new OwnerCompanion(this.ctx); this.companion.start(); }  // owner-mode: standup + escort
     catch (e) { console.warn('[EON] companion failed to start:', e); this.companion = null; }
+    try { this.backpack = new Backpack(this.ctx); this.backpack.start(); }          // owner-mode: backpack catch/paste
+    catch (e) { console.warn('[EON] backpack failed to start:', e); this.backpack = null; }
     this._setSize(this._userScale || 1);     // apply saved size now the model exists
 
     // ---- restore memory + live state, then resume or greet ----
@@ -554,6 +557,7 @@ class Eon {
     this._selfMeditate();
     try { this.hype?.update(); } catch (e) { /* guide must never break the loop */ }
     try { this.companion?.update(); } catch (e) { /* companion must never break the loop */ }
+    try { this.backpack?.update(); } catch (e) { /* backpack must never break the loop */ }
 
     // DOM overlays follow EON
     this._syncOverlays();
