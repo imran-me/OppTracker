@@ -22,6 +22,7 @@ import { Backpack }           from '../eon-brain/owner/backpack.js';
 import { AskEon }             from '../eon-brain/owner/ask.js';
 import { Motivation }         from '../eon-brain/owner/motivation.js';
 import { Nudger }             from '../eon-brain/owner/nudger.js';
+import { Resume }             from '../eon-brain/owner/resume.js';
 import { Personality, ARCHETYPES } from './personality.js';
 
 // Front-end mirror of config/settings.php so EON works with no backend.
@@ -105,6 +106,8 @@ class Eon {
     catch (e) { console.warn('[EON] motivation failed to start:', e); this.motiv = null; }
     try { this.nudger = new Nudger(this.ctx); this.nudger.start(); }                 // owner-mode: forgot/loose-ends nudges
     catch (e) { console.warn('[EON] nudger failed to start:', e); this.nudger = null; }
+    try { this.resume = new Resume(this.ctx); this.resume.start(); }                 // owner-mode: where-was-I resume
+    catch (e) { console.warn('[EON] resume failed to start:', e); this.resume = null; }
     this._setSize(this._userScale || 1);     // apply saved size now the model exists
 
     // ---- restore memory + live state, then resume or greet ----
@@ -576,6 +579,7 @@ class Eon {
     try { this.ask?.update(); } catch (e) { /* ask must never break the loop */ }
     try { this.motiv?.update(); } catch (e) { /* motivation must never break the loop */ }
     try { this.nudger?.update(); } catch (e) { /* nudger must never break the loop */ }
+    try { this.resume?.update(); } catch (e) { /* resume must never break the loop */ }
 
     // DOM overlays follow EON
     this._syncOverlays();
