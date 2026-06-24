@@ -380,7 +380,7 @@ class Eon {
     if (!document.getElementById('eon-house-style')) {
       const st = document.createElement('style'); st.id = 'eon-house-style';
       st.textContent = `
-        body.eon-house-on #eon-home{display:none !important;}
+        body.eon-in-house #eon-home{display:none !important;}
         body.eon-in-house #eon-canvas,body.eon-in-house #eon-floor-shadow,body.eon-in-house #eon-hit,body.eon-in-house #eon-bubble{opacity:0 !important;pointer-events:none !important;}
         .eon-pan-grp{font:800 10px system-ui;letter-spacing:.6px;text-transform:uppercase;color:#9aa6c2;margin:13px 0 3px;padding-top:9px;border-top:1px solid rgba(31,109,255,.13);}
         .eon-pan-grp:first-child{border-top:0;padding-top:0;margin-top:2px;}`;
@@ -409,13 +409,11 @@ class Eon {
 
   _setHouse(on, silent) {
     this._houseOn = !!on;
-    document.body.classList.toggle('eon-house-on', this._houseOn);
-    this.den?.show(this._houseOn);
     const btn = this.layer.querySelector('#eon-house-toggle');
     if (btn) { btn.textContent = `House: ${this._houseOn ? 'On' : 'Off'}`; btn.classList.toggle('on', this._houseOn); }
     try { localStorage.setItem('eon-house', this._houseOn ? '1' : '0'); } catch {}
-    if (!this._houseOn) this._exitHouse();                  // house off → fully normal EON
-    if (this._houseOn && !silent) this.ai?.speak('Ooh — my den! 🏠', 3000);
+    if (!this._houseOn) this._exitHouse();                  // off → den gone, EON 100% as before
+    if (this._houseOn && !silent) this.ai?.speak('My den is on — I’ll pop in when I’m free. 🏠', 3600);
   }
   _setHouseSize(scale, silent) {
     this._houseScale = scale;
@@ -423,15 +421,16 @@ class Eon {
     if (!silent) { try { localStorage.setItem('eon-house-size', String(scale)); } catch {} }
   }
 
-  /** House on: idle → EON is home (in the den); activity → out on the page. */
+  /** Den is PURELY additive: it only appears for autonomous idle, and never
+      when the house feature is off or you've parked him with the 🏠 button. */
   _houseTick() {
-    if (!this._houseOn || !this.den || this.ctx.drag?.active) { if (this._inHouse) this._exitHouse(); return; }
+    if (!this._houseOn || !this.den || this.ctx.drag?.active || this.ctx.stayHome) { if (this._inHouse) this._exitHouse(); return; }
     const idle = performance.now() - (this._lastUserAt || 0);
     if (!this._inHouse && idle > 18000) this._enterHouse();
     else if (this._inHouse && idle < 800) this._exitHouse();
   }
-  _enterHouse() { this._inHouse = true; document.body.classList.add('eon-in-house'); this.den?.setActive(true); }
-  _exitHouse() { if (!this._inHouse) return; this._inHouse = false; document.body.classList.remove('eon-in-house'); this.den?.setActive(false); }
+  _enterHouse() { this._inHouse = true; document.body.classList.add('eon-in-house'); this.den?.show(true); this.den?.setActive(true); }
+  _exitHouse() { if (!this._inHouse) return; this._inHouse = false; document.body.classList.remove('eon-in-house'); this.den?.setActive(false); this.den?.show(false); }
 
   /** Hide EON entirely (pausing the render loop) but leave a bring-back button. */
   _setHidden(hidden) {
