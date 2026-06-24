@@ -114,6 +114,7 @@ export class OwnerCompanion {
   }
   _dismiss() {
     const item = this.agenda[this.idx];
+    try { this.cb.noteDismiss(item.entity); } catch {}     // learn: ease off this kind next time
     try { window.EonBrain?.dismiss?.(item.id); } catch {}
     this._next();
   }

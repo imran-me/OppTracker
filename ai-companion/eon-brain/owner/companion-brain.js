@@ -52,7 +52,67 @@ export class CompanionBrain {
   _score(f) {
     const u = URGENCY_WEIGHT[f.urgency] ?? 1.2;
     const c = consequenceOf(f.entity, f.label);
-    return { ...f, consequence: c, score: u * c, line: this._line(f) };
+    const esc = this._escalation(f);      // grows the longer something is overdue
+    const w = this._weight(f.entity);     // learned: down-rank what you keep dismissing
+    return { ...f, consequence: c, score: u * c * esc * w, line: this._line(f) };
+  }
+  _escalation(f) {
+    const iso = f.dueAt || f.deadlineAt;
+    if (f.urgency === 'overdue' && iso) {
+      const od = Math.max(0, (Date.now() - Date.parse(iso)) / 86400000);
+      return 1 + Math.min(0.6, od * 0.05);
+    }
+    return 1;
+  }
+
+  // ---- learning: remember what the owner dismisses, and ease off ----
+  _learn() { try { return JSON.parse(localStorage.getItem('eon-learn') || '{}'); } catch { return {}; } }
+  _weight(entity) { const c = (this._learn().dismissed || {})[entity] || 0; return 1 / (1 + 0.25 * Math.min(c, 6)); }
+  noteDismiss(entity) {
+    if (!entity) return;
+    try { const l = this._learn(); l.dismissed = l.dismissed || {}; l.dismissed[entity] = (l.dismissed[entity] || 0) + 1; localStorage.setItem('eon-learn', JSON.stringify(l)); } catch {}
+  }
+
+  // ---- planning: an ordered way to tackle what's due (from raw records) ----
+  plan({ horizon = 7, max = 8 } = {}) {
+    const recs = (() => { try { return this.brain()?.getRecords?.() || []; } catch { return []; } })();
+    const now = Date.now();
+    const items = recs
+      .filter((r) => r.deadlineAt && !Number.isNaN(Date.parse(r.deadlineAt)))
+      .map((r) => { const days = Math.floor((Date.parse(r.deadlineAt) - now) / 86400000); return { ...r, dueAt: r.deadlineAt, days, urgency: this._urg(days) }; })
+      .filter((r) => r.days <= horizon)
+      .map((r) => this._score(r))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, max);
+    const byDay = {};
+    items.forEach((i) => { const k = String(i.dueAt).slice(0, 10); byDay[k] = (byDay[k] || 0) + 1; });
+    const overload = Object.entries(byDay).filter(([, c]) => c >= 3).map(([date, count]) => ({ date, count }));
+    return { items, overload };
+  }
+  _urg(days) { return days < 0 ? 'overdue' : days === 0 ? 'due-today' : days <= 1 ? 'within-1d' : days <= 3 ? 'within-3d' : 'within-7d'; }
+
+  // ---- anomaly / data hygiene: things that look off or unfinished ----
+  hygiene() {
+    const b = this.brain();
+    const data = (() => { try { return b?.getData?.() || {}; } catch { return {}; } })();
+    const ents = (() => { try { return b?.getEntities?.() || {}; } catch { return {}; } })();
+    const out = [];
+    for (const [entity, arr] of Object.entries(data)) {
+      if (!Array.isArray(arr) || !arr.length) continue;
+      const desc = ents[entity] || {};
+      const lf = desc.labelField, df = desc.deadlineField;
+      const haveDl = df ? arr.filter((r) => r && r[df]).length / arr.length : 0;
+      const seen = {};
+      for (const r of arr) {
+        if (!r || typeof r !== 'object') continue;
+        const label = (lf && r[lf]) ? String(r[lf]) : (r.name || r.title || `${entity} #${r.id ?? '?'}`);
+        if (lf && !r[lf]) out.push({ entity, label, issue: 'no title' });
+        else if (df && haveDl > 0.5 && !r[df]) out.push({ entity, label, issue: 'missing deadline' });
+        const key = label.toLowerCase().trim();
+        if (key) { if (seen[key]) out.push({ entity, label, issue: 'possible duplicate' }); seen[key] = 1; }
+      }
+    }
+    return out.slice(0, 12);
   }
 
   /** Human one-liner for the board. */
