@@ -69,13 +69,27 @@ export class CompanionBrain {
     }
   }
 
-  /** A short spoken intro for the whole standup. */
+  /** A short spoken intro for the whole standup, with a quick data digest. */
   intro(items) {
     const name = this.ownerName();
-    if (!items.length) return `All clear, ${name} — nothing urgent. 🌿`;
+    const digest = this._digest();
+    if (!items.length) return `All clear, ${name} — nothing urgent.${digest} 🌿`;
     const n = items.length;
     const over = items.filter((i) => i.urgency === 'overdue').length;
-    if (over) return `Morning, ${name}. ${n} thing${n > 1 ? 's' : ''} to review — ${over} already overdue.`;
-    return `Morning, ${name}. ${n} thing${n > 1 ? 's' : ''} on your radar. Shall we?`;
+    if (over) return `Morning, ${name}. ${n} thing${n > 1 ? 's' : ''} to review — ${over} already overdue.${digest}`;
+    return `Morning, ${name}. ${n} thing${n > 1 ? 's' : ''} on your radar.${digest} Shall we?`;
+  }
+
+  /** " · 9 opportunities, 8 tasks, 2 research" from the cached data. */
+  _digest() {
+    try {
+      const data = this.brain()?.getData?.() || {};
+      const parts = Object.keys(data)
+        .filter((k) => Array.isArray(data[k]) && data[k].length)
+        .sort((a, b) => data[b].length - data[a].length)
+        .slice(0, 4)
+        .map((k) => `${data[k].length} ${k}`);
+      return parts.length ? ` · ${parts.join(', ')}.` : '';
+    } catch { return ''; }
   }
 }

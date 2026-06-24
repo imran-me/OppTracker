@@ -21,6 +21,9 @@ export class Brain {
     this._reminders = [];    // manual reminders
     this._memory = {};
     this._busy = false;
+    this._records = [];      // flattened records from the last read (owner only)
+    this._data = {};         // raw entity arrays from the last read
+    this._entities = {};     // discovered schema per entity
   }
 
   // ---- firebase handles (compat SDK loaded globally on the page) ----
@@ -72,6 +75,7 @@ export class Brain {
         if (this.cfg.meditationPauseMs) await sleep(this.cfg.meditationPauseMs);
       }
       this._memory = { lastCycleAt: nowIso(), entities: keys, learned: records.length };
+      this._data = data; this._records = records; this._entities = entities;   // cache for lookups/fetch/ask
 
       const alerts = this._scanDeadlines(records);
       this.feed = this._buildFeed(alerts);
@@ -198,6 +202,28 @@ export class Brain {
     return s;
   }
   getAlerts() { return this.feed; }
+
+  // ---- knowledge bridge (owner-only): raw records for fetch/lookups/ask ----
+  getRecords() { return this._records || []; }
+  getData() { return this._data || {}; }
+  getEntities() { return this._entities || {}; }
+
+  /** Ensure the dataset is loaded for lookups, without the full meditation cycle. */
+  async ensureData() {
+    if (!this.isOwner()) return this._data;
+    if (this._records && this._records.length) return this._data;
+    try {
+      const snap = await this._sourceRef().get();
+      const doc = snap.exists ? (snap.data() || {}) : {};
+      const data = (this.cfg.sourceRoot && doc[this.cfg.sourceRoot] && typeof doc[this.cfg.sourceRoot] === 'object')
+        ? doc[this.cfg.sourceRoot] : doc;
+      const entities = discover(data, this.cfg.overrides);
+      const records = [];
+      for (const e of Object.keys(entities)) records.push(...extractRecords(data, e, entities[e]));
+      this._data = data; this._records = records; this._entities = entities;
+    } catch (e) { console.warn('[EON brain] ensureData failed:', e); }
+    return this._data;
+  }
 
   async meditate() {
     if (!this.isOwner()) { console.warn('[EON brain] meditate() ignored — not signed in as owner.'); return { alerts: 0, owner: false }; }

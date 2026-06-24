@@ -34,6 +34,7 @@ export class Backpack {
     this._injectStyle();
     this._buildChip();
     this._buildPanel();
+    if (typeof window !== 'undefined') window.EonBackpack = this;   // let Ask EON drop results in
 
     // remember where the owner is typing (so paste knows the target)
     this._onFocus = (e) => {
@@ -365,6 +366,9 @@ export class Backpack {
       this._list.appendChild(row);
     }
   }
+
+  /** Public: drop a snippet into the bag (used by Ask EON / fetch). */
+  addText(text, line) { if (text != null && String(text).trim()) this._addResult(String(text), line || 'Kept it. 🎒', '🎒'); }
 
   // ---------------- tools & transforms (the smart hands) ----------------
   /** A reaction: little emote + sparkle + a word. */
