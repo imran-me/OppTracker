@@ -23,7 +23,7 @@ import { AskEon }             from '../eon-brain/owner/ask.js';
 import { Motivation }         from '../eon-brain/owner/motivation.js';
 import { Nudger }             from '../eon-brain/owner/nudger.js';
 import { Resume }             from '../eon-brain/owner/resume.js';
-import { DenEngine }          from './den-engine.js';
+import { Couch }              from './couch.js';
 import { Personality, ARCHETYPES } from './personality.js';
 
 // Front-end mirror of config/settings.php so EON works with no backend.
@@ -109,8 +109,8 @@ class Eon {
     catch (e) { console.warn('[EON] nudger failed to start:', e); this.nudger = null; }
     try { this.resume = new Resume(this.ctx); this.resume.start(); }                 // owner-mode: where-was-I resume
     catch (e) { console.warn('[EON] resume failed to start:', e); this.resume = null; }
-    try { this._buildDen(); this._wireHouse(); }                                     // optional 3D den (settings → House)
-    catch (e) { console.warn('[EON] den failed to start:', e); }
+    try { this._buildCouch(); this._wireCouch(); }                                   // optional couch (settings → Couch)
+    catch (e) { console.warn('[EON] couch failed to start:', e); }
     this._setSize(this._userScale || 1);     // apply saved size now the model exists
 
     // ---- restore memory + live state, then resume or greet ----
@@ -164,10 +164,10 @@ class Eon {
         <div class="eon-pan-h">Messages</div>
         <div class="eon-pan-row"><button class="eon-pill" id="eon-msg-toggle" style="width:100%">Speech bubbles: On</button></div>
 
-        <div class="eon-pan-grp">House</div>
-        <div class="eon-pan-row"><button class="eon-pill" id="eon-house-toggle" style="width:100%">House: Off</button></div>
-        <div class="eon-pan-h">House size</div>
-        <input type="range" id="eon-house-size" min="50" max="170" value="100" class="eon-range">
+        <div class="eon-pan-grp">Couch</div>
+        <div class="eon-pan-row"><button class="eon-pill" id="eon-couch-toggle" style="width:100%">Couch: Off</button></div>
+        <div class="eon-pan-h">Couch size</div>
+        <input type="range" id="eon-couch-size" min="50" max="170" value="100" class="eon-range">
 
         <div class="eon-pan-grp">Tools</div>
         <button class="eon-pill" id="eon-meditate" style="width:100%">🧘 Meditate now</button>
@@ -374,64 +374,60 @@ class Eon {
     }
   }
 
-  // -------------------- the 3D den (optional, settings → House) --------------------
-  /** Dedicated den engine (own scene + a real EON inside). Never touches the avatar. */
-  _buildDen() {
-    if (!document.getElementById('eon-house-style')) {
-      const st = document.createElement('style'); st.id = 'eon-house-style';
+  // -------------------- the couch (optional, settings → Couch) --------------------
+  /** A couch in his corner. He sits on it during his normal idle "go home". */
+  _buildCouch() {
+    if (!document.getElementById('eon-couch-extra')) {
+      const st = document.createElement('style'); st.id = 'eon-couch-extra';
       st.textContent = `
-        body.eon-in-house #eon-home{display:none !important;}
-        body.eon-in-house #eon-canvas,body.eon-in-house #eon-floor-shadow,body.eon-in-house #eon-hit,body.eon-in-house #eon-bubble{opacity:0 !important;pointer-events:none !important;}
+        body.eon-couch-on #eon-home{display:none !important;}
         .eon-pan-grp{font:800 9.5px system-ui;letter-spacing:.5px;text-transform:uppercase;color:#9aa6c2;margin:9px 0 2px;padding-top:7px;border-top:1px solid rgba(31,109,255,.13);}
         .eon-pan-grp:first-child{border-top:0;padding-top:0;margin-top:0;}`;
       document.head.appendChild(st);
     }
-    this.den = new DenEngine(); this.den.start();
-    // track activity so we know when he's "home" (idle) vs out on the page
-    this._lastUserAt = performance.now();
-    const bump = () => { this._lastUserAt = performance.now(); };
-    ['pointermove', 'pointerdown', 'keydown', 'wheel'].forEach((ev) => addEventListener(ev, bump, { passive: true }));
+    this.couch = new Couch(); this.couch.start();
   }
 
-  _wireHouse() {
-    const btn = this.layer.querySelector('#eon-house-toggle');
-    const sizeEl = this.layer.querySelector('#eon-house-size');
-    if (btn) btn.onclick = () => this._setHouse(!this._houseOn);
+  _wireCouch() {
+    const btn = this.layer.querySelector('#eon-couch-toggle');
+    const sizeEl = this.layer.querySelector('#eon-couch-size');
+    if (btn) btn.onclick = () => this._setCouch(!this._couchOn);
     if (sizeEl) {
-      const saved = parseFloat(localStorage.getItem('eon-house-size'));
-      this._houseScale = (!isNaN(saved) && saved > 0) ? saved : 1;
-      sizeEl.value = Math.round(this._houseScale * 100);
-      sizeEl.oninput = () => this._setHouseSize(sizeEl.value / 100);
-      this._setHouseSize(this._houseScale, true);
+      const saved = parseFloat(localStorage.getItem('eon-couch-size'));
+      this._couchScale = (!isNaN(saved) && saved > 0) ? saved : 1;
+      sizeEl.value = Math.round(this._couchScale * 100);
+      sizeEl.oninput = () => this._setCouchSize(sizeEl.value / 100);
+      this._setCouchSize(this._couchScale, true);
     }
-    this._setHouse(localStorage.getItem('eon-house') === '1', true);   // restore
+    // his AUTONOMOUS "go home" now lands on the couch — but never the 🏠 button
+    if (this.nav && !this._origGoHome) {
+      this._origGoHome = this.nav.goHome.bind(this.nav);
+      this.nav.goHome = () => {
+        if (this._couchOn && !this.ctx.stayHome) { const c = this._couchSeatWorld(); if (c) { this.nav.goTo(c.x, c.y); return; } }
+        this._origGoHome();
+      };
+    }
+    this._setCouch(localStorage.getItem('eon-couch') === '1', true);   // restore
   }
 
-  _setHouse(on, silent) {
-    this._houseOn = !!on;
-    this.den?.show(this._houseOn);                          // the room is visible whenever the house is on
-    const btn = this.layer.querySelector('#eon-house-toggle');
-    if (btn) { btn.textContent = `House: ${this._houseOn ? 'On' : 'Off'}`; btn.classList.toggle('on', this._houseOn); }
-    try { localStorage.setItem('eon-house', this._houseOn ? '1' : '0'); } catch {}
-    if (!this._houseOn) this._exitHouse();                  // off → den gone, EON 100% as before
-    if (this._houseOn && !silent) this.ai?.speak('My den is open — I’ll pop in when I’m free. 🏠', 3600);
+  _setCouch(on, silent) {
+    this._couchOn = !!on;
+    document.body.classList.toggle('eon-couch-on', this._couchOn);
+    this.couch?.show(this._couchOn);
+    const btn = this.layer.querySelector('#eon-couch-toggle');
+    if (btn) { btn.textContent = `Couch: ${this._couchOn ? 'On' : 'Off'}`; btn.classList.toggle('on', this._couchOn); }
+    try { localStorage.setItem('eon-couch', this._couchOn ? '1' : '0'); } catch {}
+    if (this._couchOn && !silent) this.ai?.speak('A couch! I’ll relax there when I’m free. 🛋️', 3400);
   }
-  _setHouseSize(scale, silent) {
-    this._houseScale = scale;
-    this.den?.setSize(scale);
-    if (!silent) { try { localStorage.setItem('eon-house-size', String(scale)); } catch {} }
+  _setCouchSize(scale, silent) {
+    this._couchScale = scale;
+    this.couch?.setSize(scale);
+    if (!silent) { try { localStorage.setItem('eon-couch-size', String(scale)); } catch {} }
   }
-
-  /** Den is PURELY additive: it only appears for autonomous idle, and never
-      when the house feature is off or you've parked him with the 🏠 button. */
-  _houseTick() {
-    if (!this._houseOn || !this.den || this.ctx.drag?.active || this.ctx.stayHome) { if (this._inHouse) this._exitHouse(); return; }
-    const idle = performance.now() - (this._lastUserAt || 0);
-    if (!this._inHouse && idle > 18000) this._enterHouse();
-    else if (this._inHouse && idle < 800) this._exitHouse();
+  _couchSeatWorld() {
+    const s = this.couch?.seatScreen(); if (!s) return null;
+    return this._screenToWorld(s.x, s.y);
   }
-  _enterHouse() { this._inHouse = true; document.body.classList.add('eon-in-house'); this.den?.setActive(true); }   // room already shown; EON walks in
-  _exitHouse() { if (!this._inHouse) return; this._inHouse = false; document.body.classList.remove('eon-in-house'); this.den?.setActive(false); }   // room stays while house on
 
   /** Hide EON entirely (pausing the render loop) but leave a bring-back button. */
   _setHidden(hidden) {
@@ -660,7 +656,6 @@ class Eon {
     try { this.motiv?.update(); } catch (e) { /* motivation must never break the loop */ }
     try { this.nudger?.update(); } catch (e) { /* nudger must never break the loop */ }
     try { this.resume?.update(); } catch (e) { /* resume must never break the loop */ }
-    try { this._houseTick(); } catch (e) { /* house must never break the loop */ }
 
     // DOM overlays follow EON
     this._syncOverlays();
