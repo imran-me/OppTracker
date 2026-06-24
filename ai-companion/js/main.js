@@ -382,8 +382,8 @@ class Eon {
       st.textContent = `
         body.eon-in-house #eon-home{display:none !important;}
         body.eon-in-house #eon-canvas,body.eon-in-house #eon-floor-shadow,body.eon-in-house #eon-hit,body.eon-in-house #eon-bubble{opacity:0 !important;pointer-events:none !important;}
-        .eon-pan-grp{font:800 10px system-ui;letter-spacing:.6px;text-transform:uppercase;color:#9aa6c2;margin:13px 0 3px;padding-top:9px;border-top:1px solid rgba(31,109,255,.13);}
-        .eon-pan-grp:first-child{border-top:0;padding-top:0;margin-top:2px;}`;
+        .eon-pan-grp{font:800 9.5px system-ui;letter-spacing:.5px;text-transform:uppercase;color:#9aa6c2;margin:9px 0 2px;padding-top:7px;border-top:1px solid rgba(31,109,255,.13);}
+        .eon-pan-grp:first-child{border-top:0;padding-top:0;margin-top:0;}`;
       document.head.appendChild(st);
     }
     this.den = new DenEngine(); this.den.start();

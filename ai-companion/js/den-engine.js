@@ -37,9 +37,9 @@ export class DenEngine {
     const cv = document.createElement('canvas'); cv.id = 'eon-den-canvas';
     const st = document.createElement('style');
     st.textContent = `
-      #eon-den-canvas{position:fixed;right:0;bottom:0;width:520px;height:440px;pointer-events:none;
-        z-index:2147482000;opacity:0;transform-origin:bottom right;transition:opacity .45s ease;}
-      #eon-den-canvas.show{opacity:1;}`;
+      #eon-den-canvas{position:fixed;right:8px;bottom:64px;width:480px;height:380px;pointer-events:none;
+        z-index:2147482500;opacity:0;transform-origin:bottom right;transition:opacity .45s ease;}
+      #eon-den-canvas.show{opacity:1;outline:1px dashed rgba(31,109,255,.25);outline-offset:-1px;}`;
     document.head.appendChild(st);
     document.body.appendChild(cv);
     this.cv = cv;
@@ -248,7 +248,8 @@ export class DenEngine {
     this._stepLife(dt, t);
     if (this._screen) this._screen.material.emissiveIntensity = 0.8 + Math.sin(t * 9) * 0.06;
     if (this._lf1) { this._lf1.rotation.x = Math.sin(t * 1.2) * 0.06; this._lf2.rotation.x = Math.sin(t * 1.2 + 0.5) * 0.06; }
-    this.renderer.render(this.scene, this.camera);
+    try { this.renderer.render(this.scene, this.camera); if (!this._drew) { this._drew = true; console.info('[EON den] first render', this.cv.width + 'x' + this.cv.height); } }
+    catch (e) { if (!this._renderErr) { this._renderErr = 1; console.error('[EON den] render error:', e); } }
   }
   _applyCam() {
     const az = 0.5, pol = 0.95, dist = 14;
@@ -263,7 +264,11 @@ export class DenEngine {
   }
 
   // ---------------- public ----------------
-  show(on) { this._visible = !!on; this.cv?.classList.toggle('show', this._visible); if (this._visible) this._clock?.start(); }
+  show(on) {
+    this._visible = !!on;
+    this.cv?.classList.toggle('show', this._visible);
+    if (this._visible) { this._resize(); this._clock?.start(); console.info('[EON den] show ON', this.cv?.clientWidth + 'x' + this.cv?.clientHeight); }
+  }
   setActive(on) {                                     // is EON currently AT home?
     this._active = !!on;
     if (this.mover) this.mover.visible = this._active;

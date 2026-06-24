@@ -134,23 +134,23 @@
 
 /* ---------------- Settings popover ---------------- */
 .eon-panel {
-  position: absolute; right: 12px; bottom: 48px; width: 208px;
+  position: absolute; right: 12px; bottom: 48px; width: 196px;
   background: rgba(255, 255, 255, .96); backdrop-filter: blur(10px);
   border: 1px solid rgba(31, 109, 255, .18); border-radius: 14px;
-  box-shadow: 0 14px 34px rgba(16, 24, 40, .2); padding: 12px;
+  box-shadow: 0 14px 34px rgba(16, 24, 40, .2); padding: 10px 11px;
   pointer-events: auto; z-index: 5; font-family: var(--eon-font);
   opacity: 0; transform: translateY(8px) scale(.98); transform-origin: bottom right;
   transition: opacity .18s ease, transform .18s cubic-bezier(.2, .8, .3, 1);
   visibility: hidden;
 }
 .eon-panel.show { opacity: 1; transform: translateY(0) scale(1); visibility: visible; }
-.eon-pan-h { font: 700 10px/1 var(--eon-font); letter-spacing: .08em; text-transform: uppercase;
-  color: #8a93b8; margin: 4px 2px 7px; }
-.eon-pan-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.eon-pan-h { font: 700 9.5px/1 var(--eon-font); letter-spacing: .07em; text-transform: uppercase;
+  color: #8a93b8; margin: 2px 2px 4px; }
+.eon-pan-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 .eon-pill {
-  font: 600 11.5px/1 var(--eon-font); color: var(--eon-navy);
-  border: 1px solid #d8deea; background: #eef2ff; border-radius: 8px;
-  padding: 6px 9px; cursor: pointer; transition: .12s;
+  font: 600 11px/1 var(--eon-font); color: var(--eon-navy);
+  border: 1px solid #d8deea; background: #eef2ff; border-radius: 7px;
+  padding: 5px 8px; cursor: pointer; transition: .12s;
 }
 .eon-pill:hover { background: #e0e7ff; }
 .eon-pill.on { background: var(--eon-ocean); color: #fff; border-color: var(--eon-ocean); }
