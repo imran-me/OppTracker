@@ -650,7 +650,7 @@ export class Backpack {
       c.style.top = Math.max(ch + 8, Math.min(innerHeight - 8, h.y - 24)) + 'px';
     } catch {}
   }
-  _hideOtherCards() { ['eon-nudge', 'eon-resume'].forEach((id) => document.getElementById(id)?.classList.remove('show')); }
+  _hideOtherCards() { ['eon-nudge', 'eon-resume', 'eon-hook'].forEach((id) => document.getElementById(id)?.classList.remove('show')); }
 
   // per-pocket actions popover
   _openTools(p, anchor) {

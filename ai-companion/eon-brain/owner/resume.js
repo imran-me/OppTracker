@@ -62,6 +62,7 @@ export class Resume {
   }
 
   _show(p) {
+    ['eon-nudge', 'eon-go', 'eon-hook'].forEach((id) => document.getElementById(id)?.classList.remove('show')); // never stack
     const name = ownerFirstName(document.getElementById('pfName')?.textContent) || OWNER.name;
     this._title.textContent = `Welcome back, ${name}!`;
     this._line.textContent = `Pick up where you left off — ${p.label}?`;
