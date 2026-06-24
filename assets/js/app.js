@@ -1275,6 +1275,7 @@ function initTasks() {
       <div class="kc-top">
         <div class="kc-title">${escapeHtml(t.title)}</div>
         <button class="btn-sm btn btn-ghost ms-auto p-1 owner-only" style="line-height:1" onclick="openEntityModal('tasks','${t.id}')" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="btn-sm btn btn-ghost p-1 owner-only text-danger" style="line-height:1" onclick="confirmDelete('tasks','${t.id}')" title="Delete"><i class="bi bi-trash3"></i></button>
       </div>
       <div class="kc-meta">
         ${prioChip(t.priority)}

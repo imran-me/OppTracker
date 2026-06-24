@@ -409,11 +409,12 @@ class Eon {
 
   _setHouse(on, silent) {
     this._houseOn = !!on;
+    this.den?.show(this._houseOn);                          // the room is visible whenever the house is on
     const btn = this.layer.querySelector('#eon-house-toggle');
     if (btn) { btn.textContent = `House: ${this._houseOn ? 'On' : 'Off'}`; btn.classList.toggle('on', this._houseOn); }
     try { localStorage.setItem('eon-house', this._houseOn ? '1' : '0'); } catch {}
     if (!this._houseOn) this._exitHouse();                  // off → den gone, EON 100% as before
-    if (this._houseOn && !silent) this.ai?.speak('My den is on — I’ll pop in when I’m free. 🏠', 3600);
+    if (this._houseOn && !silent) this.ai?.speak('My den is open — I’ll pop in when I’m free. 🏠', 3600);
   }
   _setHouseSize(scale, silent) {
     this._houseScale = scale;
@@ -429,8 +430,8 @@ class Eon {
     if (!this._inHouse && idle > 18000) this._enterHouse();
     else if (this._inHouse && idle < 800) this._exitHouse();
   }
-  _enterHouse() { this._inHouse = true; document.body.classList.add('eon-in-house'); this.den?.show(true); this.den?.setActive(true); }
-  _exitHouse() { if (!this._inHouse) return; this._inHouse = false; document.body.classList.remove('eon-in-house'); this.den?.setActive(false); this.den?.show(false); }
+  _enterHouse() { this._inHouse = true; document.body.classList.add('eon-in-house'); this.den?.setActive(true); }   // room already shown; EON walks in
+  _exitHouse() { if (!this._inHouse) return; this._inHouse = false; document.body.classList.remove('eon-in-house'); this.den?.setActive(false); }   // room stays while house on
 
   /** Hide EON entirely (pausing the render loop) but leave a bring-back button. */
   _setHidden(hidden) {
