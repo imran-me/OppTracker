@@ -1,6 +1,7 @@
 /* ============================================================
    EON — owner/backpack.js
-   The Backpack (his living clipboard). OWNER-MODE v1: text catch & paste.
+   The Backpack (his living clipboard). OWNER-MODE: text catch & paste,
+   plus the "smart hands" — tools & transforms over what he carries.
 
    • Catch — drag selected text onto EON; he grabs it with a "caught it!"
      reaction and tucks it in a pocket.
@@ -10,7 +11,10 @@
    • Paste — click a pocket and it pours into the field you last used
      (or onto the clipboard if no field is focused).
 
-   Later phases add: numbers→charts, fetch, tools, batch, transforms.
+   • Tools — 🧮 Sum every number he carries, 🧺 Bundle into one, 🔤 Sort,
+     📥 Fetch your deadlines into the bag.
+   • Per-pocket — 🔍 Magnify, 📋 Copy, 📅 → Reminder (date), case transforms.
+     Every result becomes a new pocket, so nothing is lost.
    ============================================================ */
 
 const STORE_KEY = 'eon-pockets';
@@ -287,7 +291,22 @@ export class Backpack {
       #eon-pockets .ep-pin,.ep-x{cursor:pointer;opacity:.55;font-size:13px}
       #eon-pockets .ep-pin:hover,.ep-x:hover{opacity:1}
       #eon-pockets .ep-pin.on{opacity:1;filter:drop-shadow(0 0 1px #C9A227)}
-      #eon-pockets .ep-empty{padding:16px 12px;color:#8a96ad;font-weight:500;text-align:center}`;
+      #eon-pockets .ep-empty{padding:16px 12px;color:#8a96ad;font-weight:500;text-align:center}
+      #eon-pockets .ep-tools{display:flex;gap:6px;padding:8px 12px;background:#f6f8fc;border-top:1px solid #eef1f7}
+      #eon-pockets .ep-tools button{flex:1;border:0;border-radius:8px;padding:6px 3px;cursor:pointer;background:#eaeefb;color:#10225e;font:700 11px system-ui}
+      #eon-pockets .ep-tools button:hover{background:#dde4f8}
+      #eon-pockets .ep-tool{cursor:pointer;opacity:.5;font-size:12px}
+      #eon-pockets .ep-tool:hover{opacity:1}
+      #eon-tools-menu{position:fixed;z-index:2147483641;background:#fff;color:#10225e;border-radius:10px;
+        border:1px solid #1f6dff33;box-shadow:0 12px 30px rgba(16,34,94,.22);padding:5px;display:none;min-width:158px;font:600 12.5px system-ui}
+      #eon-tools-menu.show{display:block}
+      #eon-tools-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:7px 9px;border-radius:7px;cursor:pointer;color:#16203a;font:600 12.5px system-ui}
+      #eon-tools-menu button:hover{background:#eef1f7}
+      #eon-magnify{position:fixed;inset:0;z-index:2147483645;background:rgba(16,34,94,.34);display:none;align-items:center;justify-content:center}
+      #eon-magnify.show{display:flex}
+      #eon-magnify .em-card{max-width:min(640px,90vw);max-height:74vh;overflow:auto;background:#fff;border-radius:14px;
+        padding:22px 24px;box-shadow:0 24px 60px rgba(0,0,0,.3);font:500 16px/1.5 system-ui;color:#16203a;white-space:pre-wrap;word-break:break-word}
+      #eon-magnify .em-x{position:fixed;top:18px;right:24px;color:#fff;font-size:26px;cursor:pointer;line-height:1}`;
     document.head.appendChild(s);
   }
   _buildChip() {
@@ -302,11 +321,23 @@ export class Backpack {
   _buildPanel() {
     if (document.getElementById('eon-pockets')) { this._panel = document.getElementById('eon-pockets'); return; }
     const p = document.createElement('div'); p.id = 'eon-pockets';
-    p.innerHTML = `<div class="ep-h">🎒 Backpack <span class="ep-clear">Clear</span><span class="ep-close" title="Close">✕</span></div><div class="ep-list"></div>`;
+    p.innerHTML = `
+      <div class="ep-h">🎒 Backpack <span class="ep-clear">Clear</span><span class="ep-close" title="Close">✕</span></div>
+      <div class="ep-tools">
+        <button class="et-sum" title="Add up every number he's carrying">🧮 Sum</button>
+        <button class="et-bundle" title="Combine everything into one">🧺 Bundle</button>
+        <button class="et-sort" title="Tidy the bag">🔤 Sort</button>
+        <button class="et-fetch" title="Fetch your deadlines into the bag">📥 Fetch</button>
+      </div>
+      <div class="ep-list"></div>`;
     document.body.appendChild(p);
     this._panel = p; this._list = p.querySelector('.ep-list');
     p.querySelector('.ep-clear').onclick = (e) => { e.stopPropagation(); this._clear(); };
     p.querySelector('.ep-close').onclick = (e) => { e.stopPropagation(); this._togglePanel(false); };
+    p.querySelector('.et-sum').onclick = (e) => { e.stopPropagation(); this._toolSum(); };
+    p.querySelector('.et-bundle').onclick = (e) => { e.stopPropagation(); this._toolBundle(); };
+    p.querySelector('.et-sort').onclick = (e) => { e.stopPropagation(); this._toolSort(); };
+    p.querySelector('.et-fetch').onclick = (e) => { e.stopPropagation(); this._toolFetch(); };
   }
   _togglePanel(force) {
     this._open = (force === undefined) ? !this._open : force;
@@ -324,14 +355,135 @@ export class Backpack {
     for (const p of this.pockets) {
       const row = document.createElement('div'); row.className = 'ep-row';
       row.innerHTML = `<span class="ep-pin ${p.pinned ? 'on' : ''}" title="Pin">📌</span>
-        <span class="ep-txt" title="Paste">${this._esc(this._short(p.text, 60))}</span>
+        <span class="ep-txt" title="Paste">${this._esc(this._short(p.text, 56))}</span>
+        <span class="ep-tool" title="Tools">🔧</span>
         <span class="ep-x" title="Remove">✕</span>`;
       row.querySelector('.ep-txt').onclick = (e) => { e.stopPropagation(); this._paste(p); };
       row.querySelector('.ep-pin').onclick = (e) => { e.stopPropagation(); this._pin(p); };
+      row.querySelector('.ep-tool').onclick = (e) => { e.stopPropagation(); this._openTools(p, e.currentTarget); };
       row.querySelector('.ep-x').onclick = (e) => { e.stopPropagation(); this._del(p); };
       this._list.appendChild(row);
     }
   }
+
+  // ---------------- tools & transforms (the smart hands) ----------------
+  /** A reaction: little emote + sparkle + a word. */
+  _react(glyph, line, emote = 'cheer') {
+    try { this.ctx.character.playEmote(emote); } catch {}
+    this._sparkle(glyph || '✨');
+    try { this.ctx.ai?.speak(line, 2700); } catch {}
+  }
+
+  /** Put a freshly made snippet into the bag (nothing lost). */
+  _addResult(text, line, glyph, emote) {
+    const clean = String(text);
+    this.pockets = this.pockets.filter((p) => p.text !== clean);
+    this.pockets.unshift({ id: 'r' + Date.now().toString(36) + ((Math.random() * 999) | 0), text: clean, pinned: false, ts: Date.now() });
+    this._trim(); this._save(); this._renderChip();
+    if (this._open) this._renderPanel();
+    this._react(glyph, line, emote);
+  }
+
+  _toolSum() {
+    const nums = this.pockets.flatMap((p) => this._numbersIn(p.text));
+    if (!nums.length) { this._react('🧮', 'No numbers to add up. 🤔', 'think'); return; }
+    const total = nums.reduce((a, b) => a + b, 0);
+    this._addResult(this._fmtNum(total), `🧮 ${nums.length} number${nums.length > 1 ? 's' : ''} = ${this._fmtNum(total)}`, '🧮');
+  }
+  _toolBundle() {
+    const texts = this.pockets.map((p) => p.text);
+    if (texts.length < 2) { this._react('🧺', 'Give me a couple of things to bundle. 🧺', 'think'); return; }
+    this._addResult(texts.join('\n'), `Bundled ${texts.length} into one. 🧺`, '🧺');
+  }
+  _toolSort() {
+    if (this.pockets.length < 2) return;
+    this.pockets.sort((a, b) => (b.pinned - a.pinned) || a.text.localeCompare(b.text));
+    this._save(); this._renderPanel();
+    this._react('🔤', 'Tidied the bag! 🔤', 'point');
+  }
+  _toolFetch() {
+    let feed = []; try { feed = window.EonBrain?.getAlerts?.() || []; } catch {}
+    if (!feed.length) { this._react('📥', 'Nothing urgent to fetch right now. 🌿', 'think'); return; }
+    const top = feed.slice(0, 3);
+    for (const f of top) {
+      const due = f.dueAt ? ` — due ${this._fmtDate(f.dueAt)}` : '';
+      const t = `${f.label || f.entity}${due}`;
+      this.pockets = this.pockets.filter((p) => p.text !== t);
+      this.pockets.unshift({ id: 'f' + Date.now().toString(36) + ((Math.random() * 999) | 0), text: t, pinned: false, ts: Date.now() });
+    }
+    this._trim(); this._save(); this._renderChip(); if (this._open) this._renderPanel();
+    this._react('📥', `Fetched ${top.length} deadline${top.length > 1 ? 's' : ''} for you. 📥`, 'cheer');
+  }
+
+  // per-pocket actions popover
+  _openTools(p, anchor) {
+    const m = this._ensureToolsMenu();
+    m.innerHTML = '';
+    const add = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = (e) => { e.stopPropagation(); m.classList.remove('show'); fn(); }; m.appendChild(b); };
+    add('🔍 Magnify', () => this._magnify(p));
+    add('📋 Copy', () => { try { navigator.clipboard?.writeText(p.text); } catch {} this._react('📋', 'Copied. 📋', 'point'); });
+    if (this._isDateish(p.text)) add('📅 → Reminder', () => this._toReminder(p));
+    if (this._numbersIn(p.text).length >= 2) add('🧮 Sum its numbers', () => this._addResult(this._fmtNum(this._numbersIn(p.text).reduce((a, b) => a + b, 0)), '🧮 Summed. ', '🧮'));
+    if (/[a-z]/i.test(p.text)) { add('AA  UPPERCASE', () => this._recase(p, 'upper')); add('aa  lowercase', () => this._recase(p, 'lower')); add('Aa  Title Case', () => this._recase(p, 'title')); }
+    m.classList.add('show');
+    const rh = m.getBoundingClientRect(), r = anchor.getBoundingClientRect();
+    m.style.left = Math.max(8, r.left - rh.width - 6) + 'px';
+    m.style.top = Math.max(8, Math.min(innerHeight - rh.height - 8, r.top - 4)) + 'px';
+  }
+  _ensureToolsMenu() {
+    if (this._toolsMenu) return this._toolsMenu;
+    const m = document.createElement('div'); m.id = 'eon-tools-menu';
+    document.body.appendChild(m);
+    document.addEventListener('click', (e) => { if (this._toolsMenu && !this._toolsMenu.contains(e.target)) this._toolsMenu.classList.remove('show'); });
+    this._toolsMenu = m; return m;
+  }
+
+  _recase(p, mode) {
+    const fn = mode === 'upper' ? (s) => s.toUpperCase()
+      : mode === 'lower' ? (s) => s.toLowerCase()
+      : (s) => s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+    this._addResult(fn(p.text), 'Reworded it for you. ✍️', '✍️', 'point');
+  }
+  _toReminder(p) {
+    const d = this._parseDateish(p.text);
+    if (!d) { this._react('📅', 'Hmm, no clear date there. 🤔', 'think'); return; }
+    const title = this._short(p.text, 60);
+    try {
+      const r = window.EonBrain?.createReminder?.({ title, remindAt: d.toISOString() });
+      if (r && r.catch) r.catch(() => {});
+      this._react('📅', `Reminder set for ${this._fmtDate(d.toISOString())}. ⏰`, 'cheer');
+    } catch { this._react('📅', 'Sign in as owner to set reminders. 🔒', 'think'); }
+  }
+  _magnify(p) {
+    let m = document.getElementById('eon-magnify');
+    if (!m) {
+      m = document.createElement('div'); m.id = 'eon-magnify';
+      m.innerHTML = `<span class="em-x" title="Close">✕</span><div class="em-card"></div>`;
+      document.body.appendChild(m);
+      const close = () => m.classList.remove('show');
+      m.onclick = (e) => { if (e.target === m || e.target.classList.contains('em-x')) close(); };
+    }
+    m.querySelector('.em-card').textContent = p.text;
+    m.classList.add('show');
+  }
+
+  // type detection
+  _numbersIn(s) {
+    return (String(s).match(/-?\d[\d,]*\.?\d*/g) || [])
+      .map((x) => parseFloat(x.replace(/,/g, ''))).filter((n) => !Number.isNaN(n));
+  }
+  _isDateish(s) {
+    const t = String(s);
+    if (!/\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(t)) return false;
+    return !Number.isNaN(this._parseMs(t));
+  }
+  _parseDateish(s) { const ms = this._parseMs(s); return Number.isNaN(ms) ? null : new Date(ms); }
+  _parseMs(s) {
+    const m = String(s).match(/\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}|\b\d{1,2}\s+\w+\s+\d{2,4}|\b\w+\s+\d{1,2},?\s+\d{2,4}/i);
+    return Date.parse(m ? m[0] : s);
+  }
+  _fmtNum(n) { return (Math.round(n * 100) / 100).toLocaleString(); }
+  _fmtDate(iso) { const d = new Date(iso); return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' }); }
 
   // ---------------- helpers ----------------
   _owner() { try { return !!window.EonBrain?.isOwner?.(); } catch { return false; } }
