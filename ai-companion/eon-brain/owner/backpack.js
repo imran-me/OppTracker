@@ -28,6 +28,8 @@ export class Backpack {
     this.lastField = null;                // last focused input/textarea/contenteditable
     this._open = false;
     this._reaching = false;
+    this._selectMode = false;
+    this._selected = new Set();
   }
 
   start() {
@@ -294,9 +296,18 @@ export class Backpack {
       #eon-pockets .ep-pin:hover,.ep-x:hover{opacity:1}
       #eon-pockets .ep-pin.on{opacity:1;filter:drop-shadow(0 0 1px #C9A227)}
       #eon-pockets .ep-empty{padding:16px 12px;color:#8a96ad;font-weight:500;text-align:center}
-      #eon-pockets .ep-tools{display:flex;gap:6px;padding:8px 12px;background:#f6f8fc;border-top:1px solid #eef1f7}
-      #eon-pockets .ep-tools button{flex:1;border:0;border-radius:8px;padding:6px 3px;cursor:pointer;background:#eaeefb;color:#10225e;font:700 11px system-ui}
+      #eon-pockets .ep-tools{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;background:#f6f8fc;border-top:1px solid #eef1f7}
+      #eon-pockets .ep-tools button{flex:1 1 28%;border:0;border-radius:8px;padding:6px 3px;cursor:pointer;background:#eaeefb;color:#10225e;font:700 11px system-ui}
       #eon-pockets .ep-tools button:hover{background:#dde4f8}
+      #eon-pockets .ep-tools button.on{background:#1f6dff;color:#fff}
+      #eon-pockets .ep-foot{display:none;gap:6px;padding:8px 12px;background:#f6f8fc;border-top:1px solid #eef1f7}
+      #eon-pockets .ep-foot.show{display:flex}
+      #eon-pockets .ep-foot button{flex:1;border:0;border-radius:8px;padding:7px 4px;cursor:pointer;font:700 11.5px system-ui;background:#1f6dff;color:#fff}
+      #eon-pockets .ep-foot button.ep-cancel{background:#eef1f7;color:#52607a}
+      #eon-pockets .ep-chk{cursor:pointer;font-size:13px;opacity:.8}
+      .eon-chart{font:600 13px system-ui;color:#16203a}
+      .eon-chart svg{display:block;margin:8px 0}
+      .eon-chart .ec-meta{color:#52607a;font-weight:500;font-size:13px}
       #eon-pockets .ep-tool{cursor:pointer;opacity:.5;font-size:12px}
       #eon-pockets .ep-tool:hover{opacity:1}
       #eon-tools-menu{position:fixed;z-index:2147483641;background:#fff;color:#10225e;border-radius:10px;
@@ -329,9 +340,12 @@ export class Backpack {
         <button class="et-sum" title="Add up every number he's carrying">🧮 Sum</button>
         <button class="et-bundle" title="Combine everything into one">🧺 Bundle</button>
         <button class="et-sort" title="Tidy the bag">🔤 Sort</button>
-        <button class="et-fetch" title="Fetch your deadlines into the bag">📥 Fetch</button>
+        <button class="et-fetch" title="Fetch records into the bag">📥 Fetch</button>
+        <button class="et-note" title="Jot a quick note he'll keep">✏️ Note</button>
+        <button class="et-select" title="Pick several to bundle or sum">☑️ Select</button>
       </div>
-      <div class="ep-list"></div>`;
+      <div class="ep-list"></div>
+      <div class="ep-foot"></div>`;
     document.body.appendChild(p);
     this._panel = p; this._list = p.querySelector('.ep-list');
     p.querySelector('.ep-clear').onclick = (e) => { e.stopPropagation(); this._clear(); };
@@ -340,6 +354,9 @@ export class Backpack {
     p.querySelector('.et-bundle').onclick = (e) => { e.stopPropagation(); this._toolBundle(); };
     p.querySelector('.et-sort').onclick = (e) => { e.stopPropagation(); this._toolSort(); };
     p.querySelector('.et-fetch').onclick = (e) => { e.stopPropagation(); this._openFetch(e.currentTarget); };
+    p.querySelector('.et-note').onclick = (e) => { e.stopPropagation(); this._toolNote(); };
+    p.querySelector('.et-select').onclick = (e) => { e.stopPropagation(); this._toggleSelect(); };
+    this._foot = p.querySelector('.ep-foot');
   }
   _togglePanel(force) {
     this._open = (force === undefined) ? !this._open : force;
@@ -352,20 +369,81 @@ export class Backpack {
   }
   _renderPanel() {
     if (!this._list) return;
+    this._renderFoot();
     if (!this.pockets.length) { this._list.innerHTML = `<div class="ep-empty">Drag any text onto EON and he’ll keep it here.</div>`; return; }
     this._list.innerHTML = '';
     for (const p of this.pockets) {
       const row = document.createElement('div'); row.className = 'ep-row';
-      row.innerHTML = `<span class="ep-pin ${p.pinned ? 'on' : ''}" title="Pin">📌</span>
-        <span class="ep-txt" title="Paste">${this._esc(this._short(p.text, 56))}</span>
-        <span class="ep-tool" title="Tools">🔧</span>
-        <span class="ep-x" title="Remove">✕</span>`;
-      row.querySelector('.ep-txt').onclick = (e) => { e.stopPropagation(); this._paste(p); };
-      row.querySelector('.ep-pin').onclick = (e) => { e.stopPropagation(); this._pin(p); };
-      row.querySelector('.ep-tool').onclick = (e) => { e.stopPropagation(); this._openTools(p, e.currentTarget); };
-      row.querySelector('.ep-x').onclick = (e) => { e.stopPropagation(); this._del(p); };
+      if (this._selectMode) {
+        row.innerHTML = `<span class="ep-chk" title="Select">${this._selected.has(p.id) ? '☑️' : '⬜'}</span>
+          <span class="ep-txt">${this._esc(this._short(p.text, 56))}</span>`;
+        const sel = (e) => { e.stopPropagation(); this._toggleSel(p.id); };
+        row.querySelector('.ep-chk').onclick = sel; row.querySelector('.ep-txt').onclick = sel;
+      } else {
+        row.innerHTML = `<span class="ep-pin ${p.pinned ? 'on' : ''}" title="Pin">📌</span>
+          <span class="ep-txt" title="Paste">${this._esc(this._short(p.text, 56))}</span>
+          <span class="ep-tool" title="Tools">🔧</span>
+          <span class="ep-x" title="Remove">✕</span>`;
+        row.querySelector('.ep-txt').onclick = (e) => { e.stopPropagation(); this._paste(p); };
+        row.querySelector('.ep-pin').onclick = (e) => { e.stopPropagation(); this._pin(p); };
+        row.querySelector('.ep-tool').onclick = (e) => { e.stopPropagation(); this._openTools(p, e.currentTarget); };
+        row.querySelector('.ep-x').onclick = (e) => { e.stopPropagation(); this._del(p); };
+      }
       this._list.appendChild(row);
     }
+  }
+
+  // ---- quick note + multi-select basket ----
+  _toolNote() {
+    let t = ''; try { t = window.prompt('Note for EON to keep:') || ''; } catch {}
+    t = t.trim(); if (t) this._addResult(t, 'Got it — noted. ✏️', '✏️', 'point');
+  }
+  _toggleSelect() {
+    this._selectMode = !this._selectMode;
+    if (!this._selectMode) this._selected.clear();
+    this._panel?.querySelector('.et-select')?.classList.toggle('on', this._selectMode);
+    this._renderPanel();
+  }
+  _toggleSel(id) { this._selected.has(id) ? this._selected.delete(id) : this._selected.add(id); this._renderPanel(); }
+  _renderFoot() {
+    if (!this._foot) return;
+    this._foot.classList.toggle('show', this._selectMode);
+    if (!this._selectMode) { this._foot.innerHTML = ''; return; }
+    const n = this._selected.size;
+    this._foot.innerHTML = `<button class="ep-bsel">🧺 Bundle (${n})</button><button class="ep-ssel">🧮 Sum (${n})</button><button class="ep-cancel">Done</button>`;
+    this._foot.querySelector('.ep-bsel').onclick = (e) => { e.stopPropagation(); this._bundleSelected(); };
+    this._foot.querySelector('.ep-ssel').onclick = (e) => { e.stopPropagation(); this._sumSelected(); };
+    this._foot.querySelector('.ep-cancel').onclick = (e) => { e.stopPropagation(); this._toggleSelect(); };
+  }
+  _selectedPockets() { return this.pockets.filter((p) => this._selected.has(p.id)); }
+  _bundleSelected() {
+    const items = this._selectedPockets();
+    if (!items.length) { this._react('🧺', 'Pick a few first. 🧺', 'think'); return; }
+    this._toggleSelect();
+    this._addResult(items.map((p) => p.text).join('\n'), `Bundled ${items.length}. 🧺`, '🧺');
+  }
+  _sumSelected() {
+    const nums = this._selectedPockets().flatMap((p) => this._numbersIn(p.text));
+    if (!nums.length) { this._react('🧮', 'No numbers in your picks. 🤔', 'think'); return; }
+    this._toggleSelect();
+    const total = nums.reduce((a, b) => a + b, 0);
+    this._addResult(this._fmtNum(total), `🧮 ${nums.length} = ${this._fmtNum(total)}`, '🧮');
+  }
+
+  // ---- number → mini chart ----
+  _chart(p) {
+    const nums = this._numbersIn(p.text);
+    if (nums.length < 2) { this._react('📊', 'Need a couple of numbers to chart. 📊', 'think'); return; }
+    const w = 280, h = 90, pad = 10, max = Math.max(...nums), min = Math.min(...nums), span = (max - min) || 1;
+    const step = (w - pad * 2) / (nums.length - 1);
+    const xy = (n, i) => [pad + i * step, h - pad - ((n - min) / span) * (h - pad * 2)];
+    const line = nums.map((n, i) => xy(n, i).map((v) => v.toFixed(1)).join(',')).join(' ');
+    const dots = nums.map((n, i) => { const [x, y] = xy(n, i); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="#1f6dff"/>`; }).join('');
+    const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+    this._magnifyHtml(`<div class="eon-chart"><b>📊 ${nums.length} values</b>
+      <svg width="${w}" height="${h}"><polyline points="${line}" fill="none" stroke="#1f6dff" stroke-width="2"/>${dots}</svg>
+      <div class="ec-meta">min ${this._fmtNum(min)} · max ${this._fmtNum(max)} · avg ${this._fmtNum(avg)}</div></div>`);
+    this._react('📊', "Here's the shape of it. 📊", 'point');
   }
 
   /** Public: drop a snippet into the bag (used by Ask EON / fetch). */
@@ -465,7 +543,7 @@ export class Backpack {
     add('🔍 Magnify', () => this._magnify(p));
     add('📋 Copy', () => { try { navigator.clipboard?.writeText(p.text); } catch {} this._react('📋', 'Copied. 📋', 'point'); });
     if (this._isDateish(p.text)) add('📅 → Reminder', () => this._toReminder(p));
-    if (this._numbersIn(p.text).length >= 2) add('🧮 Sum its numbers', () => this._addResult(this._fmtNum(this._numbersIn(p.text).reduce((a, b) => a + b, 0)), '🧮 Summed. ', '🧮'));
+    if (this._numbersIn(p.text).length >= 2) { add('🧮 Sum its numbers', () => this._addResult(this._fmtNum(this._numbersIn(p.text).reduce((a, b) => a + b, 0)), '🧮 Summed. ', '🧮')); add('📊 Chart it', () => this._chart(p)); }
     if (/[a-z]/i.test(p.text)) { add('AA  UPPERCASE', () => this._recase(p, 'upper')); add('aa  lowercase', () => this._recase(p, 'lower')); add('Aa  Title Case', () => this._recase(p, 'title')); }
     m.classList.add('show');
     const rh = m.getBoundingClientRect(), r = anchor.getBoundingClientRect();
@@ -496,17 +574,17 @@ export class Backpack {
       this._react('📅', `Reminder set for ${this._fmtDate(d.toISOString())}. ⏰`, 'cheer');
     } catch { this._react('📅', 'Sign in as owner to set reminders. 🔒', 'think'); }
   }
-  _magnify(p) {
+  _magnify(p) { this._ensureMagnify().textContent = p.text; this._magWrap.classList.add('show'); }
+  _magnifyHtml(html) { this._ensureMagnify().innerHTML = html; this._magWrap.classList.add('show'); }
+  _ensureMagnify() {
     let m = document.getElementById('eon-magnify');
     if (!m) {
       m = document.createElement('div'); m.id = 'eon-magnify';
       m.innerHTML = `<span class="em-x" title="Close">✕</span><div class="em-card"></div>`;
       document.body.appendChild(m);
-      const close = () => m.classList.remove('show');
-      m.onclick = (e) => { if (e.target === m || e.target.classList.contains('em-x')) close(); };
+      m.onclick = (e) => { if (e.target === m || e.target.classList.contains('em-x')) m.classList.remove('show'); };
     }
-    m.querySelector('.em-card').textContent = p.text;
-    m.classList.add('show');
+    this._magWrap = m; return m.querySelector('.em-card');
   }
 
   // type detection
