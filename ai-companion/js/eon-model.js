@@ -35,6 +35,10 @@ const EMOTE_DEF = {
   jump:  { dur: 1.1, face: { mouth: 'open' } },
   cheer: { dur: 2.6, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
   point: { dur: 2.4, face: { mouth: 'smile' } },
+  // Hype-man set (used when EON brags about his owner in public mode).
+  proud:   { dur: 2.8, face: { eL: 'happy', eR: 'happy', mouth: 'smile' } },
+  applaud: { dur: 2.8, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
+  flex:    { dur: 2.4, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
 };
 
 export class EonModel {
@@ -493,6 +497,25 @@ export class EonModel {
       case 'point':
         eon.position.y = base + Math.sin(t * 2) * 0.02;
         aR.shoulder.rotation.set(-1.35, 0, -0.25); aR.elbow.rotation.x = -0.1;   // arm extended, pointing
+        break;
+      case 'proud':                                                              // chest out, hands on hips, proud bounce
+        eon.position.y = base + Math.abs(Math.sin(t * 3)) * 0.05;
+        eon.rotation.z = Math.sin(t * 2) * 0.05;
+        aL.shoulder.rotation.set(0.15, 0, 0.78); aL.elbow.rotation.x = 1.55;
+        aR.shoulder.rotation.set(0.15, 0, -0.78); aR.elbow.rotation.x = 1.55;
+        break;
+      case 'applaud': {                                                          // clapping
+        const clap = Math.sin(t * 16) * 0.2;
+        eon.position.y = base + Math.sin(t * 4) * 0.03;
+        aL.shoulder.rotation.set(-0.5, 0, 0.5 + clap); aL.elbow.rotation.x = -1.4;
+        aR.shoulder.rotation.set(-0.5, 0, -0.5 - clap); aR.elbow.rotation.x = -1.4;
+        break;
+      }
+      case 'flex':                                                               // both biceps up
+        eon.position.y = base + Math.sin(t * 8) * 0.02;
+        eon.rotation.z = Math.sin(t * 9) * 0.03;
+        aL.shoulder.rotation.set(-0.2, 0, 1.5); aL.elbow.rotation.x = 2.3;
+        aR.shoulder.rotation.set(-0.2, 0, -1.5); aR.elbow.rotation.x = 2.3;
         break;
     }
   }
