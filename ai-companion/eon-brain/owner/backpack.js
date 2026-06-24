@@ -624,12 +624,12 @@ export class Backpack {
   // "Wanna go there?" after fetching a specific record → escort on yes.
   _offerGo(item) {
     const c = this._ensureGoCard(); this._goItem = item;
+    try { this.ctx.ai.bubble = null; } catch {}            // no speech bubble behind the card
     c.querySelector('.eg-l').textContent = `Go to “${this._short(item.label, 34)}”?`;
     this._hideOtherCards();
     c.classList.add('show'); this._positionGo();
     try { this.ctx.character.playEmote('point'); } catch {}
-    try { this.ctx.ai?.speak(`Found it — want me to take you to “${this._short(item.label, 26)}”?`, 5200); } catch {}
-    clearTimeout(this._goTimeout); this._goTimeout = setTimeout(() => c.classList.remove('show'), 12000);
+    clearTimeout(this._goTimeout); this._goTimeout = setTimeout(() => c.classList.remove('show'), 12000);   // card is the message
   }
   _ensureGoCard() {
     if (this._goCard) return this._goCard;

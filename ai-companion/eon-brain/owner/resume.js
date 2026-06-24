@@ -63,14 +63,14 @@ export class Resume {
 
   _show(p) {
     ['eon-nudge', 'eon-go', 'eon-hook'].forEach((id) => document.getElementById(id)?.classList.remove('show')); // never stack
+    try { this.ctx.ai.bubble = null; } catch {}            // no speech bubble behind the card
     const name = ownerFirstName(document.getElementById('pfName')?.textContent) || OWNER.name;
     this._title.textContent = `Welcome back, ${name}!`;
     this._line.textContent = `Pick up where you left off — ${p.label}?`;
     this._card.classList.add('show');
     this._position();
     try { this.ctx.character.playEmote('idea'); } catch {}
-    try { this.ctx.ai?.speak(`Welcome back! Want to pick up where you left off — ${p.label}?`, 5200); } catch {}
-    this._timeout = setTimeout(() => this._hide(), 13000);
+    this._timeout = setTimeout(() => this._hide(), 13000);   // card is the message (no duplicate bubble)
   }
   _go() { const p = this._prev; this._hide(); if (p?.url) { try { location.href = p.url; } catch {} } }
   _hide() { if (this._timeout) clearTimeout(this._timeout); this._card?.classList.remove('show'); }
