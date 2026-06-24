@@ -169,7 +169,7 @@ export class OwnerCompanion {
   _navigate(item) {
     const baton = {
       page: this._pageFile(item.pointTo), record: String(item.recordId || ''),
-      line: item.line, entity: item.entity,
+      line: item.line, entity: item.entity, label: item.label || '',
     };
     try { sessionStorage.setItem('eon-escort', JSON.stringify(baton)); } catch {}
     this._setSessionFlag('eon-standup-shown');     // don't auto-rerun after we land
@@ -216,7 +216,15 @@ export class OwnerCompanion {
       const byId = document.querySelector(`[data-id="${rec}"], [href*="id=${rec}"], #record-${rec}`);
       if (byId) return byId;
     }
+    if (t.label) { const byText = this._findByText(t.label); if (byText) return byText; }   // land on the exact card by its title
     return document.querySelector('#oppDetail, .page-wrap .card, .page-wrap, main, #app') || document.body;
+  }
+  /** Find the smallest card/row whose text contains the record's title. */
+  _findByText(label) {
+    const needle = String(label).toLowerCase().trim(); if (needle.length < 3) return null;
+    const cands = document.querySelectorAll('.gal-grid > *, .stack-16 > *, .dt tbody tr, .pf-timeline > *, .card, li, h3, h2, td');
+    for (const el of cands) { const txt = (el.textContent || '').toLowerCase(); if (txt.length < 400 && txt.includes(needle)) return el; }
+    return null;
   }
 
   // ---------------- geometry / flourish ----------------
@@ -261,7 +269,7 @@ export class OwnerCompanion {
       #eon-board .eb-x:hover{opacity:1}
       #eon-board .eb-body{padding:14px;font-weight:600;color:#16203a;min-height:42px}
       #eon-board .eb-btns{display:flex;gap:7px;padding:0 14px 14px}
-      #eon-board button{flex:1;border:0;border-radius:10px;padding:8px 6px;cursor:pointer;font:700 12.5px system-ui}
+      #eon-board button{flex:1;border:0;border-radius:9px;padding:6px 5px;cursor:pointer;font:700 11.5px system-ui}
       #eon-board .eb-go{background:#1f6dff;color:#fff}
       #eon-board .eb-go:hover{background:#1559d8}
       #eon-board .eb-l{background:#eef1f7;color:#52607a}

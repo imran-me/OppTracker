@@ -50,8 +50,15 @@ export class Resume {
   update() {
     if (this._done || !this._offerAt || !this._owner()) return;
     if (Date.now() < this._offerAt) { this._position(); return; }
+    if (this._otherCardUp()) { this._offerAt = Date.now() + 15000; return; }   // wait — don't stack
     this._done = true; this._setSessionDone();
     this._show(this._prev);
+  }
+  _otherCardUp() {
+    for (const id of ['eon-board', 'eon-nudge', 'eon-go', 'eon-hook', 'eon-ask']) {
+      const e = document.getElementById(id); if (e && e.classList.contains('show')) return true;
+    }
+    return false;
   }
 
   _show(p) {
@@ -103,7 +110,7 @@ export class Resume {
       #eon-resume .er-t{font-size:11.5px;color:#1f6dff;font-weight:800}
       #eon-resume .er-l{margin:3px 0 9px;color:#16203a}
       #eon-resume .er-b{display:flex;gap:7px}
-      #eon-resume button{flex:1;border:0;border-radius:9px;padding:6px 8px;cursor:pointer;font:700 12px system-ui}
+      #eon-resume button{flex:1;border:0;border-radius:8px;padding:5px 6px;cursor:pointer;font:700 11px system-ui}
       #eon-resume .er-go{background:#1f6dff;color:#fff}#eon-resume .er-go:hover{background:#1559d8}
       #eon-resume .er-no{background:#eef1f7;color:#52607a}#eon-resume .er-no:hover{background:#e2e7f2}`;
     document.head.appendChild(s);
