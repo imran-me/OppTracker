@@ -52,7 +52,11 @@ export class AskEon {
     try { res = await this._answer(q); } catch (e) { res = { speak: 'I tripped on that one — try rephrasing?' }; }
     this._lastItems = res.items || null;
     this._answerEl.textContent = res.detail ? `${res.speak}\n${res.detail}` : res.speak;
-    this._keepBtn.style.display = (res.items && res.items.length) ? 'inline-block' : 'none';
+    const hasItems = !!(res.items && res.items.length);
+    this._keepBtn.style.display = hasItems ? 'inline-block' : 'none';
+    const first = hasItems ? res.items[0] : null;
+    this._goBtn.style.display = (first && first.entity) ? 'inline-block' : 'none';
+    if (first && first.entity) this._goBtn.textContent = `➡️ Take me to “${this._short(first.label, 22)}”`;
     try { this.ctx.character.playEmote('point'); } catch {}
     try { this.ctx.ai?.speak(res.speak.slice(0, 140), 5200); } catch {}
   }
@@ -214,6 +218,8 @@ export class AskEon {
       #eon-ask .ea-a{padding:0 12px 12px;white-space:pre-wrap;color:#16203a;max-height:42vh;overflow:auto;font-weight:600}
       #eon-ask .ea-keep{display:none;margin:0 12px 12px;border:0;border-radius:9px;background:#eef1f7;color:#10225e;padding:7px 10px;cursor:pointer;font:700 12px system-ui}
       #eon-ask .ea-keep:hover{background:#e2e7f2}
+      #eon-ask .ea-go-there{display:none;margin:0 12px 8px;border:0;border-radius:9px;background:#1f6dff;color:#fff;padding:7px 10px;cursor:pointer;font:700 12px system-ui}
+      #eon-ask .ea-go-there:hover{background:#1559d8}
       #eon-ask .ea-ex{padding:2px 12px 10px;color:#8a96ad;font-size:11px}`;
     document.head.appendChild(s);
   }
@@ -232,12 +238,15 @@ export class AskEon {
       <div class="ea-in"><input type="text" placeholder="e.g. what's due this week?" /><button class="ea-go">Ask</button></div>
       <div class="ea-ex">Try: what am I forgetting · remind me to call X tomorrow · plan my day · what's due · overdue · find &lt;name&gt; · total amount</div>
       <div class="ea-a"></div>
+      <button class="ea-go-there">➡️ Take me there</button>
       <button class="ea-keep">🎒 Keep these in the backpack</button>`;
     document.body.appendChild(p);
     this._panel = p;
     this._input = p.querySelector('input');
     this._answerEl = p.querySelector('.ea-a');
     this._keepBtn = p.querySelector('.ea-keep');
+    this._goBtn = p.querySelector('.ea-go-there');
+    this._goBtn.onclick = (e) => { e.stopPropagation(); this._goThere(); };
     p.querySelector('.ea-x').onclick = (e) => { e.stopPropagation(); this._toggle(false); };
     p.querySelector('.ea-go').onclick = (e) => { e.stopPropagation(); this.ask(this._input.value); };
     this._input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.ask(this._input.value); });
@@ -249,7 +258,15 @@ export class AskEon {
       this._keepBtn.style.display = 'none';
     };
   }
-  _echo(q) { if (this._answerEl) this._answerEl.textContent = ''; if (this._keepBtn) this._keepBtn.style.display = 'none'; }
+  _goThere() {
+    const f = (this._lastItems || [])[0]; if (!f || !f.entity) return;
+    const id = f.recordId ?? f.id;
+    const item = { entity: f.entity, recordId: id, pointTo: f.pointTo || this.cb._pointTo(f.entity, id), label: f.label, line: `Here it is — ${f.label}.` };
+    this._toggle(false);
+    try { window.EonCompanion?.escortTo?.(item); } catch {}
+  }
+  _short(t, n = 28) { const s = String(t).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  _echo(q) { if (this._answerEl) this._answerEl.textContent = ''; if (this._keepBtn) this._keepBtn.style.display = 'none'; if (this._goBtn) this._goBtn.style.display = 'none'; }
   _toggle(force) {
     this._open = (force === undefined) ? !this._open : force;
     this._panel.classList.toggle('show', this._open);
