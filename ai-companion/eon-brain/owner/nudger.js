@@ -48,6 +48,7 @@ export class Nudger {
   }
 
   _show(item) {
+    ['eon-resume', 'eon-go', 'eon-hook'].forEach((id) => document.getElementById(id)?.classList.remove('show')); // never stack
     this._active = item;
     const name = ownerFirstName(document.getElementById('pfName')?.textContent) || OWNER.name;
     this._title.textContent = `Don't forget, ${name}:`;
