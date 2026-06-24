@@ -96,12 +96,12 @@ export class Backpack {
     this._togglePanel(false);
     const el = this._validField(this.lastField);
     if (el) {
-      this._pourAnimation(p.text, el);                 // letters arc out of his bag…
-      setTimeout(() => {                               // …then the text lands in the field
+      this._pourAnimation(p.text, el);                 // letters drift out of his bag…
+      setTimeout(() => {                               // …then the text settles into the field
         this._pasteInto(el, p.text);
         try { this.ctx.character.playEmote('point'); } catch {}
         try { this.ctx.ai?.speak('There you go! ✨', 2200); } catch {}
-      }, 360);
+      }, 620);
     } else {
       this._pasteInto(null, p.text);                   // no field → clipboard
       try { this.ctx.character.playEmote('point'); } catch {}
@@ -113,57 +113,66 @@ export class Backpack {
     return (el && el.isConnected && (el.matches?.('input, textarea') || el.isContentEditable)) ? el : null;
   }
 
-  /** Letters burst out of his bag, fan + swirl on a smooth spline, and funnel
-      into the field — a lively loop even when he's standing right next to it. */
+  /** Letters drift gently out of his bag, glide along a soft spline with a
+      faint comet trail, and settle into the field. Calm — even up close. */
   _pourAnimation(text, el) {
     try {
       const start = this._bagPoint();
       const r = el.getBoundingClientRect();
       const end = { x: r.left + 14 + Math.random() * 8, y: r.top + Math.min(18, r.height / 2) };
-      const chars = String(text).replace(/\s+/g, ' ').trim().slice(0, 14).split('');
+      const chars = String(text).replace(/\s+/g, ' ').trim().slice(0, 12).split('');
       if (!chars.length || !start) return;
       const dist = Math.hypot(end.x - start.x, end.y - start.y);
-      const lift = Math.max(160, dist * 0.5 + 130);              // guaranteed big loop, even up close
-      const dir = end.x >= start.x ? 1 : -1;
+      const lift = Math.max(130, dist * 0.42 + 105);             // a soft loop, enough to read up close
 
       chars.forEach((ch, i) => {
         if (ch === ' ') return;
-        const span = document.createElement('span');
-        span.className = 'eon-pour'; span.textContent = ch;
-        span.style.left = start.x + 'px'; span.style.top = start.y + 'px';
-        span.style.fontSize = (11 + Math.random() * 4).toFixed(1) + 'px';
-        if (i % 4 === 2) span.style.color = 'rgba(126,217,87,.72)';   // playful green accent
-        document.body.appendChild(span);
-
-        // per-letter waypoints: launch up out of the bag → fan to a high apex
-        // → glide over the field → drop in. Randomised so they scatter & gather.
+        // gentle waypoints: ease up out of the bag → soft apex → over the field → settle
         const side = (i % 2 ? 1 : -1);
-        const spread = 45 + Math.random() * 80;
-        const launch = { x: start.x - dir * (20 + Math.random() * 30), y: start.y - 26 - Math.random() * 46 };
-        const apex   = { x: (start.x + end.x) / 2 + side * spread, y: Math.min(start.y, end.y) - lift * (0.7 + Math.random() * 0.5) };
-        const overF  = { x: end.x + (Math.random() - 0.5) * 55, y: end.y - 56 - Math.random() * 34 };
+        const spread = 24 + Math.random() * 40;
+        const launch = { x: start.x + (Math.random() - 0.5) * 26, y: start.y - 18 - Math.random() * 26 };
+        const apex   = { x: (start.x + end.x) / 2 + side * spread, y: Math.min(start.y, end.y) - lift * (0.7 + Math.random() * 0.35) };
+        const overF  = { x: end.x + (Math.random() - 0.5) * 38, y: end.y - 44 - Math.random() * 24 };
         const pts = [start, launch, apex, overF, end].map((p) => this._clampPt(p));
-        const path = this._spline(pts, 7);
+        const path = this._spline(pts, 9);
 
-        const spin = (Math.random() < 0.5 ? 1 : -1) * (200 + Math.random() * 460);
+        const spin = (Math.random() < 0.5 ? 1 : -1) * (22 + Math.random() * 40);   // gentle tilt, no whirl
         const frames = path.map((p, idx) => {
           const t = idx / (path.length - 1);
-          const sc = 0.7 + Math.sin(Math.min(t, 1) * Math.PI) * 0.6;     // grow mid-flight, shrink in
+          const sc = 0.82 + Math.sin(Math.min(t, 1) * Math.PI) * 0.3;
           return {
             offset: t,
-            transform: `translate(${p.x - start.x}px, ${p.y - start.y}px) rotate(${spin * t}deg) scale(${sc.toFixed(3)})`,
-            opacity: t < 0.06 ? 0 : (t > 0.9 ? 0 : 0.92),
+            transform: `translate(${(p.x - start.x).toFixed(1)}px, ${(p.y - start.y).toFixed(1)}px) rotate(${(spin * t).toFixed(1)}deg) scale(${sc.toFixed(3)})`,
+            opacity: t < 0.05 ? 0 : (t > 0.92 ? 0 : 0.9),
           };
         });
-        const dur = 780 + Math.random() * 240;
-        const anim = span.animate(frames, { duration: dur, delay: i * 46, easing: 'cubic-bezier(.4,.02,.4,1)', fill: 'forwards' });
-        const kill = () => span.remove();
-        anim.onfinish = kill;
-        setTimeout(kill, dur + i * 46 + 500);
+        const dur = 1150 + Math.random() * 320;
+        const delay = i * 72;
+        const color = (i % 4 === 2) ? 'rgba(126,217,87,.7)' : '';
+        const size = 11 + Math.random() * 3.5;
+
+        // two faint ghosts trail behind the leader → a soft comet tail
+        this._flyLetter(ch, start, frames, { dur, delay: delay + 150, easing: 'ease-out', opacityMul: 0.22, size: size * 0.82, color });
+        this._flyLetter(ch, start, frames, { dur, delay: delay + 78,  easing: 'ease-out', opacityMul: 0.42, size: size * 0.9,  color });
+        this._flyLetter(ch, start, frames, { dur, delay,              easing: 'cubic-bezier(.36,0,.32,1)', opacityMul: 1, size, color });
       });
 
-      setTimeout(() => this._landingPop(end), 360);              // little splash where they land
+      setTimeout(() => this._landingPop(end), 560);
     } catch {}
+  }
+
+  _flyLetter(ch, start, baseFrames, o) {
+    const span = document.createElement('span');
+    span.className = 'eon-pour'; span.textContent = ch;
+    span.style.left = start.x + 'px'; span.style.top = start.y + 'px';
+    span.style.fontSize = o.size.toFixed(1) + 'px';
+    if (o.color) span.style.color = o.color;
+    document.body.appendChild(span);
+    const frames = o.opacityMul === 1 ? baseFrames
+      : baseFrames.map((f) => ({ ...f, opacity: +(f.opacity * o.opacityMul).toFixed(3) }));
+    const anim = span.animate(frames, { duration: o.dur, delay: o.delay, easing: o.easing, fill: 'forwards' });
+    const kill = () => span.remove(); anim.onfinish = kill;
+    setTimeout(kill, o.dur + o.delay + 500);
   }
 
   /** Catmull-Rom spline through the waypoints → smooth screen-space samples. */
@@ -192,8 +201,8 @@ export class Backpack {
       d.style.left = p.x + 'px'; d.style.top = p.y + 'px';
       document.body.appendChild(d);
       const a = d.animate(
-        [{ transform: 'translate(-50%,-50%) scale(.2)', opacity: .6 }, { transform: 'translate(-50%,-50%) scale(1.7)', opacity: 0 }],
-        { duration: 500, easing: 'ease-out', fill: 'forwards' });
+        [{ transform: 'translate(-50%,-50%) scale(.3)', opacity: .5 }, { transform: 'translate(-50%,-50%) scale(1.5)', opacity: 0 }],
+        { duration: 720, easing: 'ease-out', fill: 'forwards' });
       a.onfinish = () => d.remove();
       setTimeout(() => d.remove(), 800);
     } catch {}
