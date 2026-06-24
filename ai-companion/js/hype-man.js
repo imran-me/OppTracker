@@ -508,8 +508,8 @@ export class HypeMan {
   _highlight(el) {
     try {
       el.animate([{ boxShadow: '0 0 0 0 rgba(126,217,87,0)' },
-        { boxShadow: '0 0 0 6px rgba(126,217,87,0.5)' },
-        { boxShadow: '0 0 0 0 rgba(126,217,87,0)' }], { duration: 1500, easing: 'ease-out' });
+        { boxShadow: '0 0 0 2px rgba(126,217,87,0.28)' },
+        { boxShadow: '0 0 0 0 rgba(126,217,87,0)' }], { duration: 850, easing: 'ease-out' });
     } catch {}
   }
 
