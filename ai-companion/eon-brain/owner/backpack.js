@@ -31,7 +31,6 @@ export class Backpack {
     this._selectMode = false;
     this._selected = new Set();
     this._nextDelight = 0;
-    this._run = null;
     this._grabMode = false;
   }
 
@@ -83,11 +82,11 @@ export class Backpack {
 
   /** Light refresh from the main loop (owner gating + chip). */
   update() {
-    if (this._run) this._driveRun(Date.now());
-    const show = this._owner() && this.pockets.length > 0;
-    if (this._chip) this._chip.style.display = show ? 'inline-flex' : 'none';
-    if (!this._owner() && this._open) this._togglePanel(false);
-    if (this._owner() && !this._run) this._maybeDelight(Date.now());
+    const owner = this._owner();
+    if (this._chip) this._chip.style.display = owner ? 'inline-flex' : 'none';   // always there for the owner
+    if (!owner && this._open) this._togglePanel(false);
+    this._positionGo();
+    if (owner) this._maybeDelight(Date.now());
   }
 
   // ---------------- delight moments ----------------
@@ -382,7 +381,17 @@ export class Backpack {
       #eon-magnify .em-card{max-width:min(640px,90vw);max-height:74vh;overflow:auto;background:#fff;border-radius:14px;
         padding:22px 24px;box-shadow:0 24px 60px rgba(0,0,0,.3);font:500 16px/1.5 system-ui;color:#16203a;white-space:pre-wrap;word-break:break-word}
       #eon-magnify .em-x{position:fixed;top:18px;right:24px;color:#fff;font-size:26px;cursor:pointer;line-height:1}
-      body.eon-grab, body.eon-grab *{cursor:crosshair !important}`;
+      body.eon-grab, body.eon-grab *{cursor:crosshair !important}
+      #eon-go{position:fixed;z-index:2147483600;max-width:260px;transform:translate(-50%,-100%);background:#fff;color:#10225e;
+        border-radius:14px;padding:11px 13px;box-shadow:0 12px 34px rgba(16,34,94,.24);border:1.5px solid #1f6dff44;
+        font:600 13px/1.35 system-ui;opacity:0;pointer-events:none;transition:opacity .18s}
+      #eon-go.show{opacity:1;pointer-events:auto}
+      #eon-go .eg-t{font-size:11px;color:#1f6dff;font-weight:800;letter-spacing:.3px}
+      #eon-go .eg-l{margin:3px 0 9px;color:#16203a}
+      #eon-go .eg-b{display:flex;gap:6px}
+      #eon-go button{flex:1;border:0;border-radius:8px;padding:5px 7px;cursor:pointer;font:700 11px system-ui}
+      #eon-go .eg-go{background:#1f6dff;color:#fff}#eon-go .eg-go:hover{background:#1559d8}
+      #eon-go .eg-no{background:#eef1f7;color:#52607a}#eon-go .eg-no:hover{background:#e2e7f2}`;
     document.head.appendChild(s);
   }
   _buildChip() {
@@ -595,10 +604,8 @@ export class Backpack {
     const recs = (() => { try { return (window.EonBrain?.getRecords?.() || []).filter((r) => r.entity === entity); } catch { return []; } })();
     if (!recs.length) { this._react('📥', 'Nothing there yet. 🌿', 'think'); return; }
     const r = recs[recs.length - 1];
-    this._fetchRun(() => {
-      this._dropPocket(r.label + (r.deadlineAt ? ` — ${this._fmtDate(r.deadlineAt)}` : ''));
-      this._react('📥', `Here's the latest ${entity}. 📥`, 'cheer');
-    });
+    // a specific record → he fetches it, then offers to take you to it
+    this._fetchRun(() => this._offerGo({ entity, recordId: r.id, label: r.label, pointTo: this._pointToFor(entity, r.id), line: `Here it is — ${r.label}.` }));
   }
   _dropPocket(text) {
     const t = String(text);
@@ -606,24 +613,44 @@ export class Backpack {
     this.pockets.unshift({ id: 'f' + Date.now().toString(36) + ((Math.random() * 999) | 0), text: t, pinned: false, ts: Date.now() });
     this._trim(); this._save(); this._renderChip(); if (this._open) this._renderPanel();
   }
-  /** He actually dashes off to the edge and hurries back, then delivers. */
+  /** A quick in-place "off to fetch it" beat (no big movement → no freeze). */
   _fetchRun(deliver) {
-    const nav = this.ctx.nav;
-    if (this._run || !nav || typeof nav.goTo !== 'function') { try { deliver(); } catch {} return; }
-    this.ctx.hypeBusy = true;
-    this._scatter(['📦', '💨'], 4);
-    this._run = { phase: 'out', home: { x: nav.x, y: nav.y }, deliver, until: Date.now() + 1700 };
+    try { this.ctx.character.playEmote('spin'); } catch {}
+    this._scatter(['📦', '✨'], 4);
+    setTimeout(() => { try { deliver(); } catch {} }, 600);
   }
-  _driveRun(now) {
-    const r = this._run, nav = this.ctx.nav;
-    if (r.phase === 'out') {
-      nav.goTo(99999, r.home.y);                         // dash to the right edge ("off to fetch it")
-      if (nav.atTarget?.() || now >= r.until) { r.phase = 'back'; r.until = now + 2000; }
-      return;
-    }
-    nav.goTo(r.home.x, r.home.y);                        // hurry back
-    if (nav.atTarget?.() || now >= r.until) { try { r.deliver(); } catch {} this._run = null; this.ctx.hypeBusy = false; }
+  _pointToFor(entity, id) { return entity === 'opportunities' ? `opportunity-details.html?id=${encodeURIComponent(id)}` : `${entity}.html`; }
+
+  // "Wanna go there?" after fetching a specific record → escort on yes.
+  _offerGo(item) {
+    const c = this._ensureGoCard(); this._goItem = item;
+    c.querySelector('.eg-l').textContent = `Go to “${this._short(item.label, 34)}”?`;
+    this._hideOtherCards();
+    c.classList.add('show'); this._positionGo();
+    try { this.ctx.character.playEmote('point'); } catch {}
+    try { this.ctx.ai?.speak(`Found it — want me to take you to “${this._short(item.label, 26)}”?`, 5200); } catch {}
+    clearTimeout(this._goTimeout); this._goTimeout = setTimeout(() => c.classList.remove('show'), 12000);
   }
+  _ensureGoCard() {
+    if (this._goCard) return this._goCard;
+    const c = document.createElement('div'); c.id = 'eon-go';
+    c.innerHTML = `<div class="eg-t">FETCHED</div><div class="eg-l"></div>
+      <div class="eg-b"><button class="eg-go">Take me there</button><button class="eg-no">Dismiss</button></div>`;
+    document.body.appendChild(c);
+    c.querySelector('.eg-go').onclick = (e) => { e.stopPropagation(); c.classList.remove('show'); const it = this._goItem; if (it) { try { window.EonCompanion?.escortTo?.(it); } catch {} } };
+    c.querySelector('.eg-no').onclick = (e) => { e.stopPropagation(); c.classList.remove('show'); };
+    this._goCard = c; return c;
+  }
+  _positionGo() {
+    const c = this._goCard; if (!c || !c.classList.contains('show')) return;
+    try {
+      const h = this.ctx.project(this.ctx.character.headAnchor);
+      const ch = c.getBoundingClientRect().height || 90;
+      c.style.left = Math.max(150, Math.min(innerWidth - 150, h.x)) + 'px';
+      c.style.top = Math.max(ch + 8, Math.min(innerHeight - 8, h.y - 24)) + 'px';
+    } catch {}
+  }
+  _hideOtherCards() { ['eon-nudge', 'eon-resume'].forEach((id) => document.getElementById(id)?.classList.remove('show')); }
 
   // per-pocket actions popover
   _openTools(p, anchor) {

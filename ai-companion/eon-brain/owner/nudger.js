@@ -37,6 +37,7 @@ export class Nudger {
     if (c.drag?.active || c.focus || c.hypeBusy || c.meditating) { this._next = now + 30000; return; }
     const idle = (() => { try { return c.personality?.ignoredFor?.() ?? 1e9; } catch { return 1e9; } })();
     if (idle < IDLE_MS) { this._next = now + 20000; return; }
+    if (this._otherCardUp()) { this._next = now + 30000; return; }   // never stack on another card
 
     try { window.EonBrain?.ensureData?.(); } catch {}
     const le = this.cb.looseEnds({ max: 8 });
@@ -95,7 +96,7 @@ export class Nudger {
       #eon-nudge .en-t{font-size:11.5px;color:#C9A227;font-weight:800;letter-spacing:.2px}
       #eon-nudge .en-l{margin:3px 0 9px;color:#16203a}
       #eon-nudge .en-b{display:flex;gap:7px}
-      #eon-nudge button{flex:1;border:0;border-radius:9px;padding:6px 8px;cursor:pointer;font:700 12px system-ui}
+      #eon-nudge button{flex:1;border:0;border-radius:8px;padding:5px 6px;cursor:pointer;font:700 11px system-ui}
       #eon-nudge .en-go{background:#1f6dff;color:#fff}#eon-nudge .en-go:hover{background:#1559d8}
       #eon-nudge .en-no{background:#eef1f7;color:#52607a}#eon-nudge .en-no:hover{background:#e2e7f2}`;
     document.head.appendChild(s);
@@ -111,6 +112,12 @@ export class Nudger {
     el.querySelector('.en-no').onclick = (e) => { e.stopPropagation(); this._dismiss(false); };
   }
 
+  _otherCardUp() {
+    for (const id of ['eon-board', 'eon-resume', 'eon-go', 'eon-hook', 'eon-ask']) {
+      const e = document.getElementById(id); if (e && e.classList.contains('show')) return true;
+    }
+    return false;
+  }
   _key(x) { return `${x.entity}:${x.recordId}:${x.reason}`; }
   _short(t, n = 40) { const s = String(t).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 }
