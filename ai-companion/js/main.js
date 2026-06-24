@@ -150,27 +150,38 @@ class Eon {
       <div id="eon-hit"></div>
       <div class="eon-bubble" id="eon-bubble"></div>
       <div id="eon-panel" class="eon-panel">
-        <div class="eon-pan-grp">Appearance</div>
-        <div class="eon-pan-h">Personality</div>
-        <div class="eon-pan-row" id="eon-arche"></div>
-        <div class="eon-pan-h">Size</div>
-        <input type="range" id="eon-size" min="55" max="175" value="100" class="eon-range">
+        <div class="eon-pan-title">EON Settings</div>
+        <div class="eon-acc">
+          <button class="eon-grp open" data-sec="appearance"><span>🎨 Appearance</span><span class="chev">⌄</span></button>
+          <div class="eon-sec open" data-body="appearance">
+            <div class="eon-pan-h">Personality</div>
+            <div class="eon-pan-row" id="eon-arche"></div>
+            <div class="eon-pan-h">Size</div>
+            <input type="range" id="eon-size" min="55" max="175" value="100" class="eon-range">
+          </div>
 
-        <div class="eon-pan-grp">Behaviour</div>
-        <div class="eon-pan-h">Mode</div>
-        <div class="eon-pan-row" id="eon-modes"></div>
-        <div class="eon-pan-h">Energy <span id="eon-energy-v"></span></div>
-        <input type="range" id="eon-energy" min="0" max="100" value="50" class="eon-range">
-        <div class="eon-pan-h">Messages</div>
-        <div class="eon-pan-row"><button class="eon-pill" id="eon-msg-toggle" style="width:100%">Speech bubbles: On</button></div>
+          <button class="eon-grp" data-sec="behaviour"><span>🧭 Behaviour</span><span class="chev">⌄</span></button>
+          <div class="eon-sec" data-body="behaviour">
+            <div class="eon-pan-h">Mode</div>
+            <div class="eon-pan-row" id="eon-modes"></div>
+            <div class="eon-pan-h">Energy <span id="eon-energy-v"></span></div>
+            <input type="range" id="eon-energy" min="0" max="100" value="50" class="eon-range">
+            <div class="eon-pan-h">Messages</div>
+            <div class="eon-pan-row"><button class="eon-pill" id="eon-msg-toggle" style="width:100%">Speech bubbles: On</button></div>
+          </div>
 
-        <div class="eon-pan-grp">Couch</div>
-        <div class="eon-pan-row"><button class="eon-pill" id="eon-couch-toggle" style="width:100%">Couch: Off</button></div>
-        <div class="eon-pan-h">Couch size</div>
-        <input type="range" id="eon-couch-size" min="50" max="170" value="100" class="eon-range">
+          <button class="eon-grp" data-sec="space"><span>🛋️ Space</span><span class="chev">⌄</span></button>
+          <div class="eon-sec" data-body="space">
+            <div class="eon-pan-row"><button class="eon-pill" id="eon-couch-toggle" style="width:100%">Couch: Off</button></div>
+            <div class="eon-pan-h">Couch size</div>
+            <input type="range" id="eon-couch-size" min="50" max="170" value="100" class="eon-range">
+          </div>
 
-        <div class="eon-pan-grp">Tools</div>
-        <button class="eon-pill" id="eon-meditate" style="width:100%">🧘 Meditate now</button>
+          <button class="eon-grp" data-sec="tools"><span>🧰 Tools</span><span class="chev">⌄</span></button>
+          <div class="eon-sec" data-body="tools">
+            <button class="eon-pill" id="eon-meditate" style="width:100%">🧘 Meditate now</button>
+          </div>
+        </div>
       </div>
       <div id="eon-controls">
         <button class="eon-chip" id="eon-settings" title="EON settings">⚙</button>
@@ -233,6 +244,16 @@ class Eon {
     this._syncModes = () => modes.querySelectorAll('button').forEach((b) =>
       b.classList.toggle('on', b.dataset.m === this._mode));
     this._mode = 'follow'; this._syncModes();
+
+    // collapsible sections (accordion) — keeps the panel short as options grow
+    const acc = this.layer.querySelector('.eon-acc');
+    if (acc) acc.querySelectorAll('.eon-grp').forEach((h) => {
+      h.onclick = () => {
+        const sec = h.dataset.sec, open = !h.classList.contains('open');
+        acc.querySelectorAll('.eon-grp,.eon-sec').forEach((x) => x.classList.remove('open'));
+        if (open) { h.classList.add('open'); acc.querySelector(`.eon-sec[data-body="${sec}"]`)?.classList.add('open'); }
+      };
+    });
 
     // energy / activity level
     const energy = this.layer.querySelector('#eon-energy');

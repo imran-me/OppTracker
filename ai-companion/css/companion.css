@@ -155,6 +155,20 @@
 .eon-pill:hover { background: #e0e7ff; }
 .eon-pill.on { background: var(--eon-ocean); color: #fff; border-color: var(--eon-ocean); }
 .eon-range { width: 100%; accent-color: var(--eon-ocean); cursor: pointer; }
+
+/* --- settings: collapsible accordion (scales as options grow) --- */
+.eon-pan-title { font: 800 12px var(--eon-font); color: var(--eon-navy); margin: 0 2px 6px; }
+.eon-grp {
+  display: flex; align-items: center; gap: 6px; width: 100%; border: 0; cursor: pointer;
+  background: transparent; padding: 8px 4px; color: var(--eon-navy);
+  font: 800 11px var(--eon-font); border-top: 1px solid rgba(31, 109, 255, .1);
+}
+.eon-grp:first-of-type { border-top: 0; }
+.eon-grp:hover { color: var(--eon-ocean); }
+.eon-grp .chev { margin-left: auto; opacity: .5; font-size: 13px; transition: transform .2s ease; }
+.eon-grp.open .chev { transform: rotate(180deg); }
+.eon-sec { max-height: 0; overflow: hidden; transition: max-height .22s ease; }
+.eon-sec.open { max-height: 360px; padding-bottom: 4px; }
 #eon-energy-v { font-weight: 600; color: #8a93b8; letter-spacing: 0; text-transform: none; }
 /* When EON is hidden, the lone bring-back button gets a gentle pulse. */
 .eon-chip.bring-back { background: var(--eon-lime); color: var(--eon-navy); border-color: var(--eon-lime); }
