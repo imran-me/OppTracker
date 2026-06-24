@@ -117,6 +117,14 @@ class Eon {
     this.tracker.start();
     this._bindLifecycle();
 
+    // cover his eyes while a password is being typed (login) — "not peeking!"
+    addEventListener('focusin', (e) => {
+      if (e.target?.matches?.('input[type="password"]')) { this.character.setCoverEyes(true); this.ai?.speak('🙈 Not peeking, I promise!', 3000); }
+    }, true);
+    addEventListener('focusout', (e) => {
+      if (e.target?.matches?.('input[type="password"]')) this.character.setCoverEyes(false);
+    }, true);
+
     this.clock = new THREE.Clock();
     this._loop();
 

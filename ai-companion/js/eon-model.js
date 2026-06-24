@@ -446,6 +446,8 @@ export class EonModel {
     if (this._meditating && !(this._emote && this._emote.name === 'point')) {
       this._applyMeditation(t);
     }
+    // covering his eyes while a password is typed wins over all
+    if (this._covering) this._applyCoverEyes(t);
   }
 
   /** Trigger a full-body emote by name. */
@@ -574,5 +576,14 @@ export class EonModel {
     this.armL.shoulder.rotation.set(0.55, 0, 0.65); this.armL.elbow.rotation.x = 0.7;
     this.armR.shoulder.rotation.set(0.55, 0, -0.65); this.armR.elbow.rotation.x = 0.7;
     this._setEye(this.eyeL, 'open', 1, 0, 0, 1); this._setEye(this.eyeR, 'open', 1, 0, 0, 1); // eyes closed
+  }
+
+  /** Both hands over the eyes, eyes shut — "not peeking" while a password is typed. */
+  setCoverEyes(on) { this._covering = !!on; }
+  _applyCoverEyes(t) {
+    this.armL.shoulder.rotation.set(-1.45, 0, 0.6); this.armL.elbow.rotation.x = -1.9;
+    this.armR.shoulder.rotation.set(-1.45, 0, -0.6); this.armR.elbow.rotation.x = -1.9;
+    this._setEye(this.eyeL, 'open', 1, 0, 0, 1); this._setEye(this.eyeR, 'open', 1, 0, 0, 1); // shut
+    this.head.rotation.z = Math.sin(t * 2.2) * 0.04;                                          // tiny "no peeking" wiggle
   }
 }
