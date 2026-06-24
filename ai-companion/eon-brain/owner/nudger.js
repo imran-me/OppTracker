@@ -49,6 +49,7 @@ export class Nudger {
 
   _show(item) {
     ['eon-resume', 'eon-go', 'eon-hook'].forEach((id) => document.getElementById(id)?.classList.remove('show')); // never stack
+    try { this.ctx.ai.bubble = null; } catch {}            // no speech bubble behind the card
     this._active = item;
     const name = ownerFirstName(document.getElementById('pfName')?.textContent) || OWNER.name;
     this._title.textContent = `Don't forget, ${name}:`;
@@ -56,8 +57,7 @@ export class Nudger {
     this._card.classList.add('show');
     this._position();
     try { this.ctx.character.playEmote(/overdue/.test(item.reason) ? 'idea' : 'peek'); } catch {}
-    try { this.ctx.ai?.speak(`Quick reminder — “${this._short(item.label)}” (${item.reason}).`, 5000); } catch {}
-    this._timeout = setTimeout(() => this._dismiss(true), 12000);   // ignored = soft dismiss
+    this._timeout = setTimeout(() => this._dismiss(true), 12000);   // ignored = soft dismiss (card is the message)
   }
   _accept() {
     const item = this._active; this._hide();
