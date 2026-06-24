@@ -19,7 +19,7 @@ import * as THREE from 'three';
 const C = {
   navy: 0x0A2C5B, hood: 0x0E78DC, royal: 0x0E78DC, cyan: 0x1DC7E4,
   green: 0xAAE545, greenSoft: 0xBCEE63, purple: 0x7E6BD9, lightPurple: 0xB2A3F3,
-  white: 0xffffff, mouth: 0x1DC7E4, tongue: 0xff6f91, soleW: 0xE8ECF0,
+  white: 0xffffff, mouth: 0x1DC7E4, mouthLip: 0xffffff, tongue: 0xff6f91, soleW: 0xE8ECF0,
   wood: 0x7a4a26, screen: 0x0E78DC,
 };
 
@@ -137,9 +137,15 @@ export class EonModel {
       return { ball, iris, pupil, upper, lower, arc };
     };
     this.eyeL = eye(-1); this.eyeR = eye(1);
-    const brow = (side) => { const b = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.022, 12, 24, Math.PI * 0.85), P(C.green)), 0.255 * side, 0.3, 0.64); b.rotation.z = side > 0 ? -0.25 : Math.PI + 0.25; return b; };
+    // Green arc eyebrows. Both sides use the SAME upper-arc orientation so the
+    // left mirrors the right (the old `Math.PI + 0.25` put the left arc on the
+    // lower half — an upside-down brow that read as missing). Mirror angle:
+    //   right = -0.25 ; left = π - (-0.25) - 0.85π = 0.15π + 0.25
+    const brow = (side) => { const b = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.022, 12, 24, Math.PI * 0.85), P(C.green)), 0.255 * side, 0.3, 0.64); b.rotation.z = side > 0 ? -0.25 : (0.15 * Math.PI + 0.25); return b; };
     brow(-1); brow(1);
-    this.mSmile = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.105, 0.038, 14, 28, Math.PI), P(C.mouth, { cc: 0.3, emissive: C.mouth, ei: 0.85 })), 0, -0.22, 0.66); this.mSmile.rotation.z = Math.PI;
+    // Always-visible smile — white so it reads clearly against the navy face
+    // (the old cyan blended in and only showed during big open expressions).
+    this.mSmile = add(head, new THREE.Mesh(new THREE.TorusGeometry(0.115, 0.042, 16, 32, Math.PI), P(C.mouthLip, { cc: 0.4, ccr: 0.2, emissive: C.mouthLip, ei: 0.3 })), 0, -0.22, 0.66); this.mSmile.rotation.z = Math.PI;
     const mOpen = this.mOpen = new THREE.Group(); mOpen.position.set(0, -0.24, 0.64); head.add(mOpen);
     add(mOpen, new THREE.Mesh(new THREE.SphereGeometry(0.12, 28, 28), P(C.mouth, { cc: 0.2, emissive: C.mouth, ei: 0.85 })), 0, 0, 0).scale.set(1.1, 0.85, 0.55);
     add(mOpen, new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 20), P(C.tongue, { cc: 0.2 })), 0, -0.045, 0.05).scale.set(1, 0.7, 0.6);
@@ -368,11 +374,18 @@ export class EonModel {
     this._setEye(this.eyeL, cfg.eL, close, gx, gy, dilT);
     this._setEye(this.eyeR, cfg.eR, close, gx, gy, dilT);
 
-    // mouth
+    // mouth — the smile is the ALWAYS-visible base; the open / 'o' shapes are
+    // reactions (happy, excited, curious, singing…) that take over when active.
     const mm = cfg.mouth, msc = cfg.mscale || 1;
-    this.mSmile.visible = (mm === 'smile'); this.mOpen.visible = (mm === 'open'); this.mO.visible = (mm === 'o');
-    if (mm === 'smile') { this.mSmile.scale.x += (msc - this.mSmile.scale.x) * 0.15; this.mSmile.scale.y += (msc - this.mSmile.scale.y) * 0.15; }
-    if (mm === 'open') { const pls = 1 + Math.sin(t * 8) * 0.08; this.mOpen.scale.set(pls, pls, 1); }
+    const openMouth = (mm === 'open'), oMouth = (mm === 'o');
+    this.mOpen.visible = openMouth; this.mO.visible = oMouth;
+    this.mSmile.visible = !openMouth && !oMouth;          // visible in every other state
+    if (this.mSmile.visible) {
+      const breathe = Math.sin(t * 2.2) * 0.05;            // gentle idle life
+      this.mSmile.scale.x += ((msc * (1 + breathe)) - this.mSmile.scale.x) * 0.15;
+      this.mSmile.scale.y += ((msc * (1 - breathe)) - this.mSmile.scale.y) * 0.15;
+    }
+    if (openMouth) { const pls = 1 + Math.sin(t * 8) * 0.08; this.mOpen.scale.set(pls, pls, 1); }
 
     // props
     this.cap.visible = !!cfg.cap; this.think.visible = !!cfg.bubble; this.bed.visible = !!cfg.bed;
