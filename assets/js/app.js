@@ -510,18 +510,65 @@ function fixField(el) {
   try { window.EON?.ai?.speak('Tidied that up for you. ✍️', 3200); } catch {}
 }
 
-/* The big spelling library (~3.4k misspelling→correction pairs) lives in its
-   own file and is fetched once at startup, then merged into the proofreader. */
+/* The big spelling library (~3.4k misspelling→correction pairs) + a base
+   English wordlist live in their own files, fetched once at startup. The
+   wordlist powers EON's live "it's not X, it's Y" spotting of any misspelled
+   word (not just the curated ones). */
 let LEXICON = {};
-async function loadLexicon() {
+let WORD_VALID = new Set();        // recognised words (base + inflections) — never flagged
+let WORD_TARGETS_BY_CHAR = new Map(); // first-letter → [real words] used as suggestion targets
+
+/* Add a base word plus its likely inflections to the "valid" set. Over-
+   generating here is safe: it only prevents false alarms on real words. */
+function _addWordForms(set, w) {
+  w = w.toLowerCase();
+  if (w.length < 2 || !/^[a-z]+$/.test(w)) return;
+  set.add(w);
+  ['s', 'es', 'ed', 'd', 'ing', 'ly', 'er', 'est', 'ers', 'ment', 'ness', 'ity', 'al', 'ic', 'ful', 'less', 'able', 'ion', 'ions'].forEach(suf => set.add(w + suf));
+  if (w.endsWith('e')) { const b = w.slice(0, -1); ['ing', 'ed', 'er', 'est', 'al', 'able', 'ion'].forEach(s => set.add(b + s)); }
+  if (w.endsWith('y')) { const b = w.slice(0, -1); ['ies', 'ied', 'ier', 'iest', 'ily', 'iness'].forEach(s => set.add(b + s)); }
+  if (/[^aeiou][aeiou][bcdfgklmnprstz]$/.test(w)) { const d = w + w.slice(-1); ['ing', 'ed', 'er'].forEach(s => set.add(d + s)); }
+}
+
+async function loadLanguageData() {
+  // 1) the misspelling→correction library
   try {
     const res = await fetch('./assets/js/lexicon.json', { cache: 'force-cache' });
-    if (!res.ok) return;
-    const data = await res.json();
-    delete data._comment;
-    LEXICON = data;
-    console.info(`[EON] spelling library loaded — ${Object.keys(LEXICON).length} entries.`);
-  } catch { /* offline / file:// — core typo map still works */ }
+    if (res.ok) { const data = await res.json(); delete data._comment; LEXICON = data; }
+  } catch { /* offline — core typo map still works */ }
+
+  // 2) the base wordlist → build the valid-set + suggestion targets
+  let base = [];
+  try {
+    const res = await fetch('./assets/js/words.json', { cache: 'force-cache' });
+    if (res.ok) base = await res.json();
+  } catch { /* offline */ }
+
+  const targets = new Map();   // lowercase → true (dedup), insertion order = priority
+  const addTarget = (w) => { const lw = String(w).toLowerCase(); if (/^[a-z]{3,}$/.test(lw)) targets.set(lw, true); };
+  base.forEach(w => { _addWordForms(WORD_VALID, w); addTarget(w); });
+  // every CORRECT spelling in the library is also a real word + a target
+  Object.values(LEXICON).forEach(v => { if (/^[a-z]+$/i.test(v)) { _addWordForms(WORD_VALID, v); addTarget(v); } });
+  Object.values(COMMON_TYPOS).forEach(v => { if (/^[a-z]+$/i.test(v)) addTarget(v); });
+
+  WORD_TARGETS_BY_CHAR = new Map();
+  for (const w of targets.keys()) {
+    const c = w[0]; if (!WORD_TARGETS_BY_CHAR.has(c)) WORD_TARGETS_BY_CHAR.set(c, []);
+    WORD_TARGETS_BY_CHAR.get(c).push(w);
+  }
+  console.info(`[EON] language ready — ${Object.keys(LEXICON).length} corrections, ${WORD_VALID.size} valid forms, ${targets.size} targets.`);
+}
+
+/* Nearest correctly-spelled word within edit distance 1 (the suggestion for a
+   typed word EON doesn't recognise). Returns null if there's no close match. */
+function nearestWord(lw) {
+  if (lw.length < 4) return null;
+  const bucket = WORD_TARGETS_BY_CHAR.get(lw[0]); if (!bucket) return null;
+  for (const w of bucket) {
+    if (w === lw || Math.abs(w.length - lw.length) > 1) continue;
+    if (editDistance(lw, w, 1) === 1) return w;
+  }
+  return null;
 }
 
 /* ---- EON spell-assist: gentle blur hint. Flags a common English typo or a
@@ -566,35 +613,48 @@ function editDistance(a, b, cap) {
   }
   return prev[n];
 }
-function spellAssist(el) {
+/* EON live spell-watch. As the owner types, EON spots a misspelled word and
+   says it in his bubble:  It's not "Tesst", it's "Test".
+   Sources, in order of confidence: known typo/contraction → near-miss of one
+   of YOUR terms → near-miss of a common English word. Each distinct slip is
+   flagged once per field so he never nags. */
+const _noticedWords = new WeakMap();   // field → Set of words already flagged
+function eonNotice(el) {
   try {
-    if (!Security.isOwner()) return;
+    if (!Security.isOwner() || !el) return;
     const text = String(el.value || ''); if (!text.trim()) return;
+    let warned = _noticedWords.get(el);
+    if (!warned) { warned = new Set(); _noticedWords.set(el, warned); }
     const dict = buildSpellDict();
     const words = text.match(/[A-Za-z][A-Za-z'-]{2,}/g) || [];
-    const suggest = (display) => {
-      if (display.toLowerCase() === _lastSpell) return true;
-      _lastSpell = display.toLowerCase();
-      toast(`Did you mean “${display}”? ✍️`, 'ok');
-      return true;
-    };
     for (const w of words) {
       const lw = w.toLowerCase();
-      // 1) a common English typo (core + library) or missing-apostrophe contraction
-      const typo = COMMON_TYPOS[lw] || LEXICON[lw];
-      if (typo && matchCase(w, typo) !== w) { suggest(matchCase(w, typo)); return; }
-      if (CONTRACTIONS[lw]) { suggest(matchCase(w, CONTRACTIONS[lw])); return; }
-      // 2) a near-miss of one of your own terms
-      if (lw.length >= 5 && dict.size && !dict.has(lw)) {
+      if (warned.has(lw)) continue;
+      if (WORD_VALID.has(lw) || dict.has(lw)) continue;        // recognised word / your own term
+      let corr = COMMON_TYPOS[lw] || LEXICON[lw] || CONTRACTIONS[lw];
+      if (!corr && lw.length >= 5 && dict.size) {              // near-miss of one of your terms
         for (const [term, display] of dict) {
-          if (term[0] === lw[0] && Math.abs(term.length - lw.length) <= 1 && editDistance(lw, term, 1) === 1) {
-            suggest(display); return;             // one gentle nudge at a time
-          }
+          if (term[0] === lw[0] && Math.abs(term.length - lw.length) <= 1 && editDistance(lw, term, 1) === 1) { corr = display; break; }
         }
       }
+      if (!corr) corr = nearestWord(lw);                       // near-miss of a common word
+      if (!corr) continue;
+      const fix = matchCase(w, corr);
+      if (fix.toLowerCase() === lw) continue;
+      warned.add(lw);
+      announceFix(w, fix);
+      return;                                                  // one at a time
     }
   } catch {}
 }
+/* Speak/show a single spelling correction in EON's voice. */
+function announceFix(wrong, right) {
+  const msg = `It's not “${wrong}”, it's “${right}”.`;
+  try { window.EON?.ai?.speak(`✍️ ${msg}`, 5000); window.EON?.character?.playEmote?.('think'); } catch {}
+  toast(msg, 'ok');
+}
+/* back-compat alias (older call sites) */
+function spellAssist(el) { return eonNotice(el); }
 
 function initials(name) {
   return (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
@@ -1228,9 +1288,12 @@ function openEntityModal(entity, id, afterSave, prefill) {
     if (b.dataset.rt === 'fix') fixField(ta);     // EON proofread
     else rtApply(ta, b.dataset.rt);
   });
-  // EON spell-assist: gently suggest the right spelling of YOUR own terms.
+  // EON live spell-watch: as you type, he spots a misspelling and says
+  // "It's not X, it's Y" (debounced so he reacts once you pause, not mid-word).
   formEl.querySelectorAll('input[type="text"], textarea').forEach(el => {
-    el.addEventListener('blur', () => spellAssist(el));
+    let t;
+    el.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => eonNotice(el), 1000); });
+    el.addEventListener('blur', () => eonNotice(el));
   });
 
   document.getElementById('entitySave').onclick = async () => {
@@ -3328,7 +3391,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (normalizeReminders()) DB.save();   // migrate legacy reminder records
   renderActivePage(page);
   startReminderWatcher();                // owner-only: fire reminders when due
-  loadLexicon();                         // load the big spelling library (async)
+  loadLanguageData();                    // load spelling library + wordlist (async)
 
   // Live sync: when another device changes the data, re-render — but
   // never yank a form out from under the owner while a modal is open.
