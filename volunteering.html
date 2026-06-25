@@ -17,10 +17,10 @@
   <link href="./ai-companion/css/home.css" rel="stylesheet">
   <link href="./ai-companion/css/animations.css" rel="stylesheet">
   <link rel="icon" type="image/svg+xml" href="./assets/img/favicon.svg">
-  <title>Dashboard · OppTrack</title>
+  <title>Social Activities · OppTrack</title>
 </head>
 <!-- data-page tells app.js which initializer to run -->
-<body data-page="dashboard" class="app-shell viewer-mode">
+<body data-page="volunteering" class="app-shell viewer-mode">
 
   <!-- ============ Shared sidebar (rendered by app.js) ============ -->
   <aside id="sidebar" class="sidebar"></aside>
@@ -31,65 +31,12 @@
 
     <!-- ============ Page content ============ -->
     <div class="page-wrap">
-      <!-- Summary cards (auto-calculated by app.js) -->
-      <section class="mb-4">
-        <div id="statGrid" class="stat-grid"></div>
-      </section>
-
-      <div class="grid-2 mb-4" style="grid-template-columns: 1.4fr 1fr;">
-        <!-- Left column: deadline alerts + recent opportunities -->
-        <div class="stack-16">
-          <!-- Deadline Alert Widget (30 / 14 / 7 / 3-day colour thresholds) -->
-          <div class="card card-pad">
-            <div class="d-flex align-items-center mb-3">
-              <div class="section-title mb-0">Deadline alerts</div>
-              <a href="opportunities.html" class="ms-auto" style="font-size:12.5px">View all</a>
-            </div>
-            <div id="deadlineAlerts"></div>
-          </div>
-
-          <!-- Recent opportunities -->
-          <div class="card table-card">
-            <div class="card-head"><h3>Recent opportunities</h3>
-              <a href="opportunities.html" class="ms-auto btn btn-ghost btn-sm">Open list</a>
-            </div>
-            <table class="dt">
-              <thead><tr><th>Opportunity</th><th>Status</th><th>Deadline</th></tr></thead>
-              <tbody id="recentOpps"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Right column: notifications + calendar -->
-        <div class="stack-16">
-          <!-- Notifications panel -->
-          <div class="card card-pad">
-            <div class="section-title">Notifications</div>
-            <div id="notifPanel" class="feed"></div>
-          </div>
-
-          <!-- Calendar widget (click a day to see / add reminders) -->
-          <div class="card card-pad">
-            <div id="calendar"></div>
-            <p class="text-faint mt-2 mb-0" style="font-size:11.5px"><i class="bi bi-info-circle me-1"></i>Click any date to see its reminders or add one. Green dots = reminders, red = deadline.</p>
-          </div>
-
-          <!-- Reminder list (full CRUD + status) — private, owner only -->
-          <div class="card card-pad owner-only">
-            <div class="d-flex align-items-center mb-2">
-              <div class="section-title mb-0">Reminders</div>
-              <button class="btn btn-soft btn-sm owner-only ms-auto" id="addReminderBtn"><i class="bi bi-plus-lg me-1"></i>Add</button>
-            </div>
-            <div id="reminderList" class="rem-list"></div>
-          </div>
-        </div>
+      <div class="toolbar">
+        <div class="grow"></div>
+        <button class="btn btn-primary owner-only" id="volAdd"><i class="bi bi-plus-lg me-1"></i>Add activity</button>
       </div>
-
-      <!-- Quick actions (owner-only: each button opens a guarded add form) -->
-      <div class="card card-pad owner-only">
-        <div class="section-title">Quick actions</div>
-        <div id="quickActions" class="qa-grid"></div>
-      </div>
+      <!-- Social activities gallery rendered by app.js -->
+      <div id="volHost"></div>
     </div><!-- /.page-wrap -->
   </div><!-- /.main -->
 

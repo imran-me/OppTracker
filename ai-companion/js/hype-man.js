@@ -49,7 +49,25 @@ const PAGE_CONTEXT = {
   opportunities: 'opportunity', 'opportunity-details': 'opportunity',
   tasks: 'task', documents: 'document', contacts: 'contact',
   research: 'research', projects: 'project', achievements: 'achievement',
+  training: 'achievement', volunteering: 'win',
   categories: 'generic', dashboard: 'stats', profile: 'generic', index: 'generic',
+};
+
+// Sidebar menu items → a SPECIFIC, data-aware line. EON reads the menu label
+// and the live count badge on the link, so he describes each section by its
+// real data (not a generic "check out his stuff"). {n} = the count on the link.
+const NAV_DESC = {
+  'dashboard': { ctx: 'stats', say: "{name}'s command centre — the whole picture at a glance. 📊" },
+  'opportunities': { ctx: 'opportunity', say: "{n} opportunities {name}'s chasing — scholarships, comps & more. 🧭" },
+  'task board': { ctx: 'task', say: "{n} tasks — this is how {name} turns plans into done. ✅" },
+  'documents': { ctx: 'document', say: "{n} documents, all neatly filed. {name} stays organised. 📁" },
+  'achievements': { ctx: 'achievement', say: "{n} awards & honours live in here. 🏆" },
+  'training & certification': { ctx: 'achievement', say: "{n} courses & certifications — {name} is always learning. 🎓" },
+  'projects': { ctx: 'project', say: "{n} things {name} has actually built. 🚀" },
+  'research hub': { ctx: 'research', say: "{n} research directions — big-brain {name} at work. 🧠" },
+  'social activities': { ctx: 'win', say: "Volunteering & community work — {name} gives back. ❤️" },
+  'contacts': { ctx: 'contact', say: "{name}'s network of mentors & collaborators. 🤝" },
+  'portfolio & profile': { ctx: 'ownerName', say: "The full story of {name} — start here. 📖" },
 };
 
 // How "worth reacting to" each context is (decision brain gate, 0..1).
@@ -236,10 +254,23 @@ export class HypeMan {
     if (this._hoverCand && this._hoverCand.el === el) return;
     const context = this._contextFor(el); if (!context) return;
     const isCard = el.matches?.(CARD_SEL);
-    this._hoverCand = {
+    const rec = {
       el, context, label: this._labelFor(el),
       item: isCard ? this._labelFor(el) : '', ts: Date.now(), hover: true,
     };
+    // Sidebar menu item → describe THAT section by its label + live count.
+    if (el.matches?.('.sidebar a')) { const nav = this._navLine(el); if (nav) { rec.say = nav.say; rec.context = nav.ctx; } }
+    this._hoverCand = rec;
+  }
+
+  /** Build a specific, data-aware line for a hovered sidebar menu link. */
+  _navLine(el) {
+    const txt = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    const m = txt.match(/(\d+)\s*$/);
+    const n = m ? m[1] : '';
+    const label = txt.replace(/\d+\s*$/, '').trim().toLowerCase();
+    const d = NAV_DESC[label]; if (!d) return null;
+    return { ctx: d.ctx, say: this._fill(d.say.replace(/\{n\}/g, n || 'plenty of'), {}) };
   }
 
   // ================= per-frame =================

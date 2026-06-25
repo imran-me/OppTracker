@@ -37,7 +37,7 @@ export function toIso(v) {
  * Discover entities from the data doc.
  * @returns {Object<string,{idField,labelField,deadlineField,dateFields:string[],fields:string[]}>}
  */
-export function discover(data, overrides = {}) {
+export function discover(data, overrides = {}, deadlineEntities = null) {
   const out = {};
   for (const [key, value] of Object.entries(data || {})) {
     if (!Array.isArray(value) || value.length === 0) continue;
@@ -56,7 +56,16 @@ export function discover(data, overrides = {}) {
     });
 
     const ov = overrides[key] || {};
-    const deadlineField = ov.deadlineField || pickByHints(dateFields, DEADLINE_HINTS) || dateFields[0] || null;
+    // Only some entities genuinely have a "deadline" (something you must act on
+    // before a date). Achievements, projects, research, contacts, etc. carry
+    // historical dates (award date, etc.) that must NOT be nagged as deadlines.
+    // When `deadlineEntities` is supplied, any entity outside it has no deadline.
+    // An explicit override of `deadlineField: false/null` also disables it.
+    const allowed = !Array.isArray(deadlineEntities) || deadlineEntities.includes(key);
+    let deadlineField;
+    if ('deadlineField' in ov) deadlineField = ov.deadlineField || null;
+    else if (!allowed) deadlineField = null;
+    else deadlineField = pickByHints(dateFields, DEADLINE_HINTS) || dateFields[0] || null;
     const labelField = ov.labelField || pickByHints(fields, LABEL_HINTS) || null;
 
     out[key] = { idField, labelField, deadlineField, dateFields, fields };

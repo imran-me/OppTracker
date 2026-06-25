@@ -60,7 +60,7 @@ const DB = {
   _hydrate(raw) {
     const data = (raw && typeof raw === 'object') ? raw : SEED_DATA();
     data.categories = Object.assign({}, DEFAULT_CATEGORIES, data.categories || {});
-    ['opportunities','tasks','documents','achievements','contacts','research','projects','reminders']
+    ['opportunities','tasks','documents','achievements','contacts','research','projects','reminders','training','volunteering']
       .forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
     data.profile = Object.assign({}, SEED_DATA().profile, data.profile || {});
     if (!Array.isArray(data.profile.references)) data.profile.references = SEED_DATA().profile.references;
@@ -281,6 +281,119 @@ function escapeHtml(s) {
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* Tiny, SAFE rich-text renderer. The toolbar in the entity modal writes a
+   minimal Markdown subset; this turns it into HTML. Crucially it escapes the
+   raw text FIRST, so only the tags WE generate are ever HTML (no XSS).
+   Supports: **bold**  *italic*  __underline__  `- ` bullet lists  newlines. */
+function mdToHtml(s) {
+  if (s == null || s === '') return '';
+  const esc = escapeHtml(s);
+  const lines = esc.split(/\r?\n/);
+  let html = '', inList = false;
+  const inline = (t) => t
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/__([^_]+)__/g, '<u>$1</u>')
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  for (const ln of lines) {
+    const li = ln.match(/^\s*[-*]\s+(.*)$/);
+    if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(li[1])}</li>`; }
+    else { if (inList) { html += '</ul>'; inList = false; } html += ln.trim() ? `<p>${inline(ln)}</p>` : ''; }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+/* Strip the formatting markers for plain-text previews (clamped card text). */
+function mdStrip(s) {
+  return String(s == null ? '' : s)
+    .replace(/\*\*([^*]+)\*\*/g, '$1').replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*\n]+)\*/g, '$1').replace(/^\s*[-*]\s+/gm, '• ');
+}
+
+/* Apply a formatting mark to the current selection of a <textarea>. */
+function rtApply(ta, kind) {
+  const start = ta.selectionStart, end = ta.selectionEnd, val = ta.value;
+  const sel = val.slice(start, end);
+  let rep;
+  if (kind === 'list') {
+    rep = (sel || 'item').split(/\n/).map(l => l.trim() ? `- ${l.replace(/^\s*[-*]\s*/, '')}` : l).join('\n');
+  } else {
+    const mark = kind === 'bold' ? '**' : kind === 'underline' ? '__' : '*';
+    rep = `${mark}${sel || kind}${mark}`;
+  }
+  ta.value = val.slice(0, start) + rep + val.slice(end);
+  ta.focus();
+  ta.selectionStart = start; ta.selectionEnd = start + rep.length;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/* ---- EON spell-assist: learns YOUR vocabulary from your own data and
+   suggests the right spelling when a typed word is a near-miss of one of
+   your terms (names, skills, orgs, titles…). High-precision: it only flags
+   close matches to YOUR domain words, never generic English. ---- */
+let _spellDict = null, _spellSig = '', _lastSpell = '';
+function buildSpellDict() {
+  const sig = String((DB.data.reminders || []).length) + ':' +
+    ['achievements', 'training', 'volunteering', 'projects', 'research', 'contacts', 'opportunities']
+      .map(k => DB.getAll(k).length).join(',');
+  if (_spellDict && sig === _spellSig) return _spellDict;
+  const map = new Map();
+  const add = (s) => String(s || '').split(/[^A-Za-z'-]+/).forEach(w => {
+    const lw = w.toLowerCase();
+    if (lw.length >= 4 && !map.has(lw)) map.set(lw, w);
+  });
+  const p = DB.data.profile || {};
+  (p.skills || []).forEach(add); (p.interests || []).forEach(add);
+  [p.name, p.university, p.department, p.major].forEach(add);
+  DB.getAll('achievements').forEach(a => { add(a.title); add(a.competition); add(a.issuer); });
+  DB.getAll('training').forEach(t => { add(t.name); add(t.issuer); (t.skills || []).forEach(add); });
+  DB.getAll('volunteering').forEach(v => { add(v.title); add(v.organization); add(v.cause); add(v.role); (v.skills || []).forEach(add); });
+  DB.getAll('projects').forEach(pr => { add(pr.name); add(pr.technologies); });
+  DB.getAll('research').forEach(r => { add(r.title); add(r.field); });
+  DB.getAll('contacts').forEach(c => { add(c.name); add(c.organization); });
+  DB.getAll('opportunities').forEach(o => { add(o.name); add(o.organizer); add(o.country); });
+  _spellDict = map; _spellSig = sig; return map;
+}
+/* bounded Levenshtein (returns >cap as cap+1 to bail early) */
+function editDistance(a, b, cap) {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > cap) return cap + 1;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i]; let best = i;
+    for (let j = 1; j <= n; j++) {
+      const c = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + c);
+      if (cur[j] < best) best = cur[j];
+    }
+    if (best > cap) return cap + 1;
+    prev = cur;
+  }
+  return prev[n];
+}
+function spellAssist(el) {
+  try {
+    if (!Security.isOwner()) return;
+    const text = String(el.value || ''); if (!text.trim()) return;
+    const dict = buildSpellDict(); if (!dict.size) return;
+    const words = text.match(/[A-Za-z][A-Za-z'-]{4,}/g) || [];
+    for (const w of words) {
+      const lw = w.toLowerCase();
+      if (dict.has(lw)) continue;                 // spelled correctly
+      for (const [term, display] of dict) {
+        if (term[0] !== lw[0]) continue;          // cheap prefilter
+        if (Math.abs(term.length - lw.length) > 1) continue;
+        if (editDistance(lw, term, 1) === 1) {
+          if (display.toLowerCase() !== _lastSpell) {
+            _lastSpell = display.toLowerCase();
+            toast(`Did you mean “${display}”? ✍️`, 'ok');
+          }
+          return;                                 // one gentle nudge at a time
+        }
+      }
+    }
+  } catch {}
+}
+
 function initials(name) {
   return (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
@@ -452,8 +565,10 @@ const NAV = [
     { page: 'tasks',         href: 'tasks.html',         icon: 'kanban-fill',  label: 'Task Board',  countOf: 'tasks' },
     { page: 'documents',     href: 'documents.html',     icon: 'folder-fill',  label: 'Documents',   countOf: 'documents' },
     { page: 'achievements',  href: 'achievements.html',  icon: 'trophy-fill',  label: 'Achievements',countOf: 'achievements' },
+    { page: 'training',      href: 'training.html',      icon: 'mortarboard-fill',label: 'Training & Certification', countOf: 'training' },
     { page: 'projects',      href: 'projects.html',      icon: 'diagram-3-fill',label: 'Projects',    countOf: 'projects' },
     { page: 'research',      href: 'research.html',      icon: 'lightbulb-fill',label: 'Research Hub', countOf: 'research' },
+    { page: 'volunteering',  href: 'volunteering.html',  icon: 'heart-fill',    label: 'Social Activities', countOf: 'volunteering' },
     { page: 'contacts',      href: 'contacts.html',      icon: 'person-rolodex',label: 'Contacts',    countOf: 'contacts' }
   ]},
   { group: 'System', items: [
@@ -537,6 +652,8 @@ function renderChrome(activePage, title, sub) {
             <li><a class="dropdown-item" href="#" data-add="tasks"><i class="bi bi-check2-square me-2"></i>Task</a></li>
             <li><a class="dropdown-item" href="#" data-add="documents"><i class="bi bi-folder me-2"></i>Document</a></li>
             <li><a class="dropdown-item" href="#" data-add="achievements"><i class="bi bi-trophy me-2"></i>Achievement</a></li>
+            <li><a class="dropdown-item" href="#" data-add="training"><i class="bi bi-mortarboard me-2"></i>Training / certification</a></li>
+            <li><a class="dropdown-item" href="#" data-add="volunteering"><i class="bi bi-heart me-2"></i>Social activity</a></li>
             <li><a class="dropdown-item" href="#" data-add="contacts"><i class="bi bi-person-plus me-2"></i>Contact</a></li>
             <li><a class="dropdown-item" href="#" data-add="research"><i class="bi bi-lightbulb me-2"></i>Research idea</a></li>
             <li><a class="dropdown-item" href="#" data-add="projects"><i class="bi bi-diagram-3 me-2"></i>Project</a></li>
@@ -644,7 +761,10 @@ const SCHEMAS = {
   achievements: {
     label: 'Achievement', icon: 'trophy',
     fields: [
-      { key: 'title', label: 'Title', type: 'text', required: true, span: true },
+      { key: 'title', label: 'Title / award name', type: 'text', required: true, span: true },
+      { key: 'position', label: 'Position / placement', type: 'text', hint: 'e.g. Champion, Runner-up, 1st' },
+      { key: 'competition', label: 'Competition / programme', type: 'text' },
+      { key: 'issuer', label: 'Issuer / organization', type: 'text', span: true },
       { key: 'category', label: 'Category', type: 'select', opts: 'achievementCategories' },
       { key: 'date', label: 'Date', type: 'date' },
       { key: 'image', label: 'Cover image URL', type: 'url' },
@@ -702,6 +822,52 @@ const SCHEMAS = {
       { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
       { key: 'photos', label: 'Upload images', type: 'photos', span: true },
       { key: 'files', label: 'Upload files (PDF, slides, data…)', type: 'files', span: true },
+      { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
+    ]
+  },
+  training: {
+    label: 'Training / certification', icon: 'mortarboard',
+    fields: [
+      { key: 'name', label: 'Training / certificate name', type: 'text', required: true, span: true },
+      { key: 'issuer', label: 'Issuer / institute', type: 'text' },
+      { key: 'type', label: 'Type', type: 'select', opts: ['Course', 'Certification', 'Workshop', 'Bootcamp', 'Training', 'Diploma', 'Nanodegree'] },
+      { key: 'date', label: 'Date completed', type: 'date' },
+      { key: 'length', label: 'Length / duration', type: 'text', hint: 'e.g. 8 weeks, 40 hours' },
+      { key: 'skills', label: 'Skills / topics gained', type: 'tags', span: true, hint: 'Added to your portfolio skills automatically' },
+      { key: 'certLink', label: 'Certificate link', type: 'url' },
+      { key: 'credentialId', label: 'Credential ID', type: 'text' },
+      { key: 'description', label: 'Description', type: 'textarea', span: true },
+      { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
+      { key: 'photos', label: 'Upload images', type: 'photos', span: true },
+      { key: 'files', label: 'Upload files / certificate', type: 'files', span: true },
+      { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
+    ]
+  },
+  reminders: {
+    label: 'Reminder', icon: 'alarm',
+    fields: [
+      { key: 'title', label: 'Remind me to…', type: 'text', required: true, span: true },
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'time', label: 'Time', type: 'time' },
+      { key: 'status', label: 'Status', type: 'select', opts: ['active', 'done'] },
+      { key: 'note', label: 'Note', type: 'textarea', span: true },
+      { key: 'link', label: 'Link (optional)', type: 'url', span: true }
+    ]
+  },
+  volunteering: {
+    label: 'Social activity', icon: 'heart',
+    fields: [
+      { key: 'title', label: 'Activity / title', type: 'text', required: true, span: true },
+      { key: 'role', label: 'My role', type: 'text' },
+      { key: 'organization', label: 'Organization', type: 'text' },
+      { key: 'cause', label: 'Cause / focus area', type: 'text' },
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'location', label: 'Location', type: 'text' },
+      { key: 'skills', label: 'Skills', type: 'tags', span: true, hint: 'Added to your portfolio skills automatically' },
+      { key: 'description', label: 'Details', type: 'textarea', span: true },
+      { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
+      { key: 'photos', label: 'Upload images', type: 'photos', span: true },
+      { key: 'files', label: 'Upload files', type: 'files', span: true },
       { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   }
@@ -762,12 +928,25 @@ function buildField(f, value) {
   }
   const v = value == null ? '' : value;
   let input;
-  if (f.type === 'images') {
+  if (f.type === 'tags') {
+    // comma/newline separated list stored as an array (skills, topics, causes…)
+    const txt = Array.isArray(value) ? value.join(', ') : v;
+    input = `<input type="text" name="${f.key}" value="${escapeHtml(txt)}" placeholder="${f.label} — comma separated">`;
+  } else if (f.type === 'images') {
     // gallery of image URLs, edited one-per-line
     const txt = Array.isArray(value) ? value.join('\n') : v;
     input = `<textarea name="${f.key}" class="img-list" rows="3" placeholder="Paste image URLs — one per line">${escapeHtml(txt)}</textarea>`;
   } else if (f.type === 'textarea') {
-    input = `<textarea name="${f.key}" placeholder="${f.label}">${escapeHtml(v)}</textarea>`;
+    // textareas get a small formatting toolbar (writes a safe Markdown subset)
+    input = `<div class="rt-wrap">
+      <div class="rt-toolbar" role="toolbar" aria-label="Format">
+        <button type="button" class="rt-b" data-rt="bold" title="Bold"><i class="bi bi-type-bold"></i></button>
+        <button type="button" class="rt-b" data-rt="italic" title="Italic"><i class="bi bi-type-italic"></i></button>
+        <button type="button" class="rt-b" data-rt="underline" title="Underline"><i class="bi bi-type-underline"></i></button>
+        <button type="button" class="rt-b" data-rt="list" title="Bullet list"><i class="bi bi-list-ul"></i></button>
+      </div>
+      <textarea name="${f.key}" placeholder="${f.label}">${escapeHtml(v)}</textarea>
+    </div>`;
   } else if (f.type === 'select') {
     let opts;
     if (typeof f.opts === 'string' && f.opts.startsWith('@')) {
@@ -791,12 +970,12 @@ function buildField(f, value) {
 }
 
 /* open the modal. entity = key in SCHEMAS, id = existing record id (optional) */
-function openEntityModal(entity, id, afterSave) {
+function openEntityModal(entity, id, afterSave, prefill) {
   // Authorization gate: visitors cannot open the add/edit form.
   if (!Security.guard(id ? 'edit this item' : 'add new items')) return;
   const schema = SCHEMAS[entity];
   if (!schema) return;
-  const record = id ? DB.get(entity, id) : {};
+  const record = id ? DB.get(entity, id) : (prefill || {});
   const isEdit = !!id;
 
   // remove a previous instance if any
@@ -835,6 +1014,19 @@ function openEntityModal(entity, id, afterSave) {
   modal.show();
   modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
 
+  // rich-text toolbar buttons (bold / italic / underline / list)
+  const formEl = document.getElementById('entityForm');
+  formEl.addEventListener('click', (e) => {
+    const b = e.target.closest('.rt-b'); if (!b) return;
+    e.preventDefault();
+    const ta = b.closest('.rt-wrap')?.querySelector('textarea');
+    if (ta) rtApply(ta, b.dataset.rt);
+  });
+  // EON spell-assist: gently suggest the right spelling of YOUR own terms.
+  formEl.querySelectorAll('input[type="text"], textarea').forEach(el => {
+    el.addEventListener('blur', () => spellAssist(el));
+  });
+
   document.getElementById('entitySave').onclick = async () => {
     const form = document.getElementById('entityForm');
     const saveBtn = document.getElementById('entitySave');
@@ -843,7 +1035,7 @@ function openEntityModal(entity, id, afterSave) {
       const el = form.elements[f.key];
       if (!el || f.type === 'file') return; // file fields handled asynchronously below
       if (f.type === 'checkbox') out[f.key] = el.checked;
-      else if (f.type === 'images') out[f.key] = el.value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+      else if (f.type === 'images' || f.type === 'tags') out[f.key] = el.value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
       else out[f.key] = el.value.trim();
     });
 
@@ -955,22 +1147,53 @@ function initDashboard() {
   const opps = DB.getAll('opportunities');
   const tasks = DB.getAll('tasks');
   const docs = DB.getAll('documents');
+  const research = DB.getAll('research');
+  const projects = DB.getAll('projects');
+  const training = DB.getAll('training');
 
   const countStatus = (s) => opps.filter(o => o.status === s).length;
+  const WON = ['Won', 'Accepted', 'Completed'];
+  const LOST = ['Lost', 'Rejected'];
+  const TERMINAL = [...WON, ...LOST, 'Irrelevant', 'Missed', 'Withdrawn'];
+  const oppWon = opps.filter(o => WON.includes(o.status)).length;
+  const oppLost = opps.filter(o => LOST.includes(o.status)).length;
+  const oppApplied = opps.filter(o => ['Applied', 'Shortlisted'].includes(o.status)).length;
+  const oppInProgress = opps.filter(o => !TERMINAL.includes(o.status) && !['Applied', 'Shortlisted'].includes(o.status)).length;
+  // missed = deadline passed while never submitted (or explicitly marked missed)
+  const oppMissed = opps.filter(o => o.status === 'Missed' || (() => { const d = daysUntil(o.deadline); return d !== null && d < 0 && !['Applied', 'Shortlisted', ...TERMINAL].includes(o.status); })()).length;
+
+  const resDone = research.filter(r => r.stage === 'Published').length;
+  const projDone = projects.filter(p => p.status === 'Completed').length;
+  const trainDone = training.filter(t => !!t.date).length;
+
+  // Grouped, labelled rows: Opportunities → Research → Projects → Training → Activity.
+  const grp = (label) => ({ group: label });
   const cards = [
-    { lbl: 'Total Opportunities', val: opps.length, ico: 'compass-fill', t: 'primary' },
-    { lbl: 'Applied', val: countStatus('Applied'), ico: 'send-fill', t: 'blue' },
-    { lbl: 'Shortlisted', val: countStatus('Shortlisted'), ico: 'star-fill', t: 'violet' },
-    { lbl: 'Won', val: countStatus('Won') + countStatus('Accepted'), ico: 'trophy-fill', t: 'green' },
-    { lbl: 'Lost', val: countStatus('Lost') + countStatus('Rejected'), ico: 'x-circle-fill', t: 'red' },
-    { lbl: 'Researching', val: countStatus('Researching') + countStatus('New'), ico: 'search', t: 'slate' },
+    grp('Opportunities'),
+    { lbl: 'Total', val: opps.length, ico: 'compass-fill', t: 'primary' },
+    { lbl: 'Applied', val: oppApplied, ico: 'send-fill', t: 'blue' },
+    { lbl: 'Won', val: oppWon, ico: 'trophy-fill', t: 'green' },
+    { lbl: 'Lost', val: oppLost, ico: 'x-circle-fill', t: 'red' },
+    { lbl: 'In Progress', val: oppInProgress, ico: 'hourglass-split', t: 'amber' },
+    { lbl: 'Missed', val: oppMissed, ico: 'slash-circle', t: 'slate' },
+    grp('Research'),
+    { lbl: 'Completed', val: resDone, ico: 'lightbulb-fill', t: 'green' },
+    { lbl: 'Ongoing', val: research.length - resDone, ico: 'lightbulb', t: 'blue' },
+    grp('Projects'),
+    { lbl: 'Completed', val: projDone, ico: 'diagram-3-fill', t: 'green' },
+    { lbl: 'Ongoing', val: projects.length - projDone, ico: 'diagram-3', t: 'violet' },
+    grp('Training & Certification'),
+    { lbl: 'Completed', val: trainDone, ico: 'mortarboard-fill', t: 'green' },
+    { lbl: 'Ongoing', val: training.length - trainDone, ico: 'mortarboard', t: 'accent' },
+    grp('Activity'),
     { lbl: 'Documents Ready', val: docs.filter(d => d.status === 'Ready' || d.status === 'Updated').length, ico: 'folder-check', t: 'accent' },
     { lbl: 'Active Tasks', val: tasks.filter(t => !['Completed', 'Cancelled'].includes(t.status)).length, ico: 'list-task', t: 'amber' },
     { lbl: 'Completed Tasks', val: tasks.filter(t => t.status === 'Completed').length, ico: 'check2-circle', t: 'green' },
     { lbl: 'Upcoming Deadlines', val: opps.filter(o => { const d = daysUntil(o.deadline); return d !== null && d >= 0 && d <= 30; }).length, ico: 'alarm-fill', t: 'red' }
   ];
-  document.getElementById('statGrid').innerHTML = cards.map(c => `
-    <div class="stat">
+  document.getElementById('statGrid').innerHTML = cards.map(c => c.group
+    ? `<div class="stat-group">${c.group}</div>`
+    : `<div class="stat">
       <div class="ico t-${c.t}"><i class="bi bi-${c.ico}"></i></div>
       <div class="val">${c.val}</div>
       <div class="lbl">${c.lbl}</div>
@@ -1032,11 +1255,135 @@ function initDashboard() {
       <td class="date-cell">${o.deadline ? fmtDate(o.deadline) : '—'}</td>
     </tr>`).join('') : `<tr><td colspan="3" class="text-soft text-center py-4">No opportunities yet.</td></tr>`;
 
-  /* calendar widget */
+  /* calendar widget + reminder list */
   renderCalendar();
+  renderReminderList();
+  const addRemBtn = document.getElementById('addReminderBtn');
+  if (addRemBtn) addRemBtn.onclick = () => openReminderModal(null);
 }
 
 /* ---------- CALENDAR (dashboard widget) ---------- */
+/* ==========================================================
+   REMINDERS — one model shared by the calendar, the list panel
+   and EON. A reminder fires at `date` + `time` (time defaults to
+   09:00). The watcher (startReminderWatcher) speaks through EON,
+   raises a toast and a desktop notification when one comes due.
+   ========================================================== */
+
+/* canonical fire time (ms) for a reminder — date + time (09:00 default) */
+function reminderFireMs(r) {
+  if (!r || !r.date) return NaN;
+  const key = `${r.date}T${(r.time && /^\d{1,2}:\d{2}$/.test(r.time)) ? r.time : '09:00'}`;
+  return Date.parse(key);
+}
+function reminderFireKey(r) { return `${r.date}T${r.time || '09:00'}`; }
+
+/* Normalize an old/loose reminder shape into the unified model.
+   Migrates the legacy {date, text} records in place. */
+function normalizeReminders() {
+  const list = DB.data.reminders || [];
+  let changed = false;
+  list.forEach(r => {
+    if (r.text && !r.title) { r.title = r.text; delete r.text; changed = true; }
+    if (!r.status) { r.status = 'active'; changed = true; }
+    if (r.title == null) { r.title = '(reminder)'; changed = true; }
+  });
+  return changed;
+}
+
+/* Public reminder API — EON and the app both go through this so there is
+   a single source of truth that shows on the calendar AND really fires. */
+window.AppReminders = {
+  list() { return (DB.data.reminders || []).slice().sort((a, b) => reminderFireMs(a) - reminderFireMs(b)); },
+  create(data) {
+    // Accept either {date,time} or a precise {remindAt} ISO (used by EON).
+    const out = { id: uid(), status: 'active', source: data.source || 'me', createdAt: new Date().toISOString() };
+    out.title = (data.title || data.text || 'Reminder').toString().trim();
+    if (data.remindAt && !Number.isNaN(Date.parse(data.remindAt))) {
+      const d = new Date(data.remindAt);
+      out.date = d.toISOString().slice(0, 10);
+      out.time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    } else {
+      out.date = data.date || new Date().toISOString().slice(0, 10);
+      out.time = data.time || '';
+    }
+    out.note = data.note || '';
+    out.link = data.link || '';
+    (DB.data.reminders = DB.data.reminders || []).push(out);
+    DB.save();
+    ensureNotifyPermission();
+    if (document.body.dataset.page === 'dashboard') { renderCalendar(); renderReminderList(); }
+    return out;
+  },
+  update(id, patch) {
+    const r = (DB.data.reminders || []).find(x => x.id === id); if (!r) return null;
+    Object.assign(r, patch);
+    if (patch.date || patch.time) r.firedKey = '';   // rescheduled → allow it to fire again
+    DB.save();
+    if (document.body.dataset.page === 'dashboard') { renderCalendar(); renderReminderList(); }
+    return r;
+  },
+  remove(id) {
+    DB.data.reminders = (DB.data.reminders || []).filter(x => x.id !== id);
+    DB.save();
+    if (document.body.dataset.page === 'dashboard') { renderCalendar(); renderReminderList(); }
+  },
+  toggle(id) {
+    const r = (DB.data.reminders || []).find(x => x.id === id); if (!r) return;
+    this.update(id, { status: r.status === 'done' ? 'active' : 'done' });
+  }
+};
+
+/* Ask for desktop-notification permission once (owner only, on first use). */
+function ensureNotifyPermission() {
+  try {
+    if (!('Notification' in window) || !Security.isOwner()) return;
+    if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  } catch {}
+}
+
+/* The watcher: fires due reminders through EON + toast + desktop notify.
+   Runs only for the owner. A reminder fires once per (date+time) value, so
+   editing the time lets it fire again. Very-old due reminders (>24h late,
+   e.g. on first load) are shown in the list but not popped up. */
+let _reminderWatch = null;
+function startReminderWatcher() {
+  if (_reminderWatch) return;
+  const tick = () => {
+    try {
+      if (!Security.isOwner()) return;
+      const now = Date.now();
+      (DB.data.reminders || []).forEach(r => {
+        if (r.status === 'done') return;
+        const fireMs = reminderFireMs(r);
+        if (Number.isNaN(fireMs) || fireMs > now) return;
+        const key = reminderFireKey(r);
+        if (r.firedKey === key) return;             // already announced this time
+        if (now - fireMs > 24 * 3600 * 1000) { r.firedKey = key; return; }   // too old → don't pop
+        r.firedKey = key; DB.save();
+        fireReminder(r);
+      });
+    } catch {}
+  };
+  _reminderWatch = setInterval(tick, 15000);
+  setTimeout(tick, 4000);   // an early check after load
+}
+
+/* Deliver one reminder: EON speaks it, a toast shows, and (if granted) a
+   real desktop notification pops — so it reaches the owner even in another tab. */
+function fireReminder(r) {
+  const msg = r.title || 'Reminder';
+  try { window.EON?.ai?.speak(`⏰ Reminder: ${msg}`, 8000); } catch {}
+  try { window.EON?.character?.playEmote?.('point'); } catch {}
+  toast(`⏰ Reminder: ${msg}`, 'ok');
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const n = new Notification('EON reminder ⏰', { body: msg, tag: r.id });
+      n.onclick = () => { try { window.focus(); } catch {}; if (r.link) location.href = r.link; };
+    }
+  } catch {}
+}
+
 let calRef = new Date();
 function renderCalendar() {
   const host = document.getElementById('calendar');
@@ -1047,10 +1394,12 @@ function renderCalendar() {
   const days = new Date(y, m + 1, 0).getDate();
   const monthName = calRef.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
-  // collect events: opportunity deadlines + saved reminders
-  const events = {};
-  DB.getAll('opportunities').forEach(o => { if (o.deadline) (events[o.deadline] = events[o.deadline] || []).push('deadline'); });
-  DB.getAll('reminders').forEach(r => { if (r.date) (events[r.date] = events[r.date] || []).push('reminder'); });
+  // per-date events: opportunity deadlines (one marker) + each reminder (its own dot).
+  // Reminders are private — only the owner sees their dots.
+  const isOwner = Security.isOwner();
+  const deadlines = {}, reminders = {};
+  DB.getAll('opportunities').forEach(o => { if (o.deadline) deadlines[o.deadline] = (deadlines[o.deadline] || 0) + 1; });
+  if (isOwner) DB.getAll('reminders').forEach(r => { if (r.date) reminders[r.date] = (reminders[r.date] || 0) + 1; });
 
   const todayStr = new Date().toISOString().slice(0, 10);
   let cells = '';
@@ -1058,8 +1407,13 @@ function renderCalendar() {
   for (let d = 1; d <= days; d++) {
     const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const isToday = ds === todayStr;
-    cells += `<div class="cal-cell ${isToday ? 'today' : ''}" data-date="${ds}" title="${ds}">
-      ${d}${events[ds] ? '<span class="ev-dot"></span>' : ''}
+    const nRem = reminders[ds] || 0, hasDl = !!deadlines[ds];
+    // up to 3 reminder dots + a distinct deadline dot
+    let dots = '';
+    for (let k = 0; k < Math.min(nRem, 3); k++) dots += '<span class="ev-dot rem"></span>';
+    if (hasDl) dots += '<span class="ev-dot dl"></span>';
+    cells += `<div class="cal-cell ${isToday ? 'today' : ''} ${nRem || hasDl ? 'has-ev' : ''}" data-date="${ds}" title="${ds}${nRem ? ` · ${nRem} reminder${nRem > 1 ? 's' : ''}` : ''}">
+      <span class="cd-n">${d}</span>${dots ? `<span class="cd-dots">${dots}</span>` : ''}
     </div>`;
   }
 
@@ -1080,17 +1434,85 @@ function renderCalendar() {
   document.getElementById('calPrev').onclick = () => { calRef.setMonth(m - 1); renderCalendar(); };
   document.getElementById('calNext').onclick = () => { calRef.setMonth(m + 1); renderCalendar(); };
   document.getElementById('calToday').onclick = () => { calRef = new Date(); renderCalendar(); };
-  host.querySelectorAll('.cal-cell[data-date]').forEach(c => c.onclick = () => addReminder(c.dataset.date));
+  host.querySelectorAll('.cal-cell[data-date]').forEach(c => c.onclick = () => openDayReminders(c.dataset.date));
 }
-function addReminder(date) {
-  if (!Security.guard('add reminders')) return;
-  const text = prompt(`Add a reminder for ${date}:`);
-  if (text && text.trim()) {
-    DB.data.reminders.push({ id: uid(), date, text: text.trim() });
-    DB.save();
-    toast('Reminder added.', 'ok');
-    renderCalendar();
+
+/* Reminder list panel beside the calendar — full CRUD + status toggle. */
+function renderReminderList() {
+  const host = document.getElementById('reminderList');
+  if (!host) return;
+  if (!Security.isOwner()) { host.innerHTML = ''; return; }   // reminders are private
+  const now = Date.now();
+  const items = (DB.data.reminders || []).slice().sort((a, b) => (reminderFireMs(a) || 0) - (reminderFireMs(b) || 0));
+  if (!items.length) {
+    host.innerHTML = `<p class="text-soft mb-0" style="font-size:13px">No reminders yet. Click a date or “Add”, or just ask EON: “remind me in 5 minutes to…”.</p>`;
+    return;
   }
+  host.innerHTML = items.map(r => {
+    const fire = reminderFireMs(r);
+    const overdue = r.status !== 'done' && fire && fire < now;
+    const when = r.date ? `${fmtDate(r.date)}${r.time ? ' · ' + r.time : ''}` : 'No date';
+    return `<div class="rem-row ${r.status === 'done' ? 'done' : ''}">
+      <button class="rem-check ${r.status === 'done' ? 'on' : ''}" title="Toggle done" onclick="AppReminders.toggle('${r.id}')"><i class="bi bi-${r.status === 'done' ? 'check-circle-fill' : 'circle'}"></i></button>
+      <div class="rem-body">
+        <b>${escapeHtml(r.title || 'Reminder')}</b>
+        <small class="num ${overdue ? 'text-danger' : 'text-faint'}"><i class="bi bi-clock me-1"></i>${when}${overdue ? ' · overdue' : ''}${r.source === 'eon' ? ' · set by EON' : ''}</small>
+      </div>
+      <div class="rem-tools owner-only">
+        <button title="Edit" onclick="openReminderModal('${r.id}')"><i class="bi bi-pencil"></i></button>
+        <button class="del" title="Delete" onclick="AppReminders.remove('${r.id}')"><i class="bi bi-trash3"></i></button>
+      </div>
+    </div>`;
+  }).join('');
+  Security.applyMode();
+}
+
+/* Open the add/edit reminder modal (reuses the generic entity modal). */
+function openReminderModal(id, date) {
+  const after = () => { renderCalendar(); renderReminderList(); ensureNotifyPermission(); };
+  if (id) { openEntityModal('reminders', id, after); return; }
+  openEntityModal('reminders', null, after, { date: date || new Date().toISOString().slice(0, 10), status: 'active' });
+}
+
+/* Day popover: list every reminder on a date + add a new one for that day. */
+function openDayReminders(date) {
+  const items = (Security.isOwner() ? (DB.data.reminders || []) : []).filter(r => r.date === date)
+    .sort((a, b) => (reminderFireMs(a) || 0) - (reminderFireMs(b) || 0));
+  const dls = DB.getAll('opportunities').filter(o => o.deadline === date);
+  document.getElementById('entityModal')?.remove();
+  const wrap = document.createElement('div');
+  const rowsHtml = items.map(r => `
+    <div class="rem-row ${r.status === 'done' ? 'done' : ''}">
+      <button class="rem-check ${r.status === 'done' ? 'on' : ''}" onclick="AppReminders.toggle('${r.id}');openDayReminders('${date}')"><i class="bi bi-${r.status === 'done' ? 'check-circle-fill' : 'circle'}"></i></button>
+      <div class="rem-body"><b>${escapeHtml(r.title || 'Reminder')}</b><small class="num text-faint">${r.time ? '<i class=\"bi bi-clock me-1\"></i>' + r.time : 'All day'}${r.source === 'eon' ? ' · EON' : ''}</small></div>
+      <div class="rem-tools owner-only">
+        <button onclick="bootstrap.Modal.getInstance(document.getElementById('entityModal'))?.hide();openReminderModal('${r.id}')"><i class="bi bi-pencil"></i></button>
+        <button class="del" onclick="AppReminders.remove('${r.id}');openDayReminders('${date}')"><i class="bi bi-trash3"></i></button>
+      </div>
+    </div>`).join('');
+  const dlHtml = dls.map(o => `<a class="rem-row" href="opportunity-details.html?id=${o.id}"><span class="rem-check" style="color:var(--red)"><i class="bi bi-flag-fill"></i></span><div class="rem-body"><b>${escapeHtml(o.name)}</b><small class="text-faint">Deadline</small></div></a>`).join('');
+  wrap.innerHTML = `
+  <div class="modal fade" id="entityModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header">
+      <div class="d-flex align-items-center gap-2"><span class="stat-ico"><i class="bi bi-calendar-event"></i></span>
+        <h5 class="modal-title">${fmtDate(date)}</h5></div>
+      <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body">
+      ${dlHtml}${rowsHtml || (dlHtml ? '' : '<p class="text-soft">Nothing on this day yet.</p>')}
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Close</button>
+      <button type="button" class="btn btn-primary owner-only" id="dayAddRem"><i class="bi bi-plus-lg me-1"></i>Add reminder</button>
+    </div>
+  </div></div></div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('entityModal');
+  const modal = new bootstrap.Modal(modalEl); modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+  Security.applyMode();
+  const addBtn = document.getElementById('dayAddRem');
+  if (addBtn) addBtn.onclick = () => { modal.hide(); openReminderModal(null, date); };
 }
 
 /* ---------- OPPORTUNITIES (list + filters) ---------- */
@@ -1382,23 +1804,112 @@ function initAchievements() {
       const np = collectImages(item).length, nf = collectFiles(item).length;
       return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
     };
-    host.innerHTML = `<div class="gal-grid">${items.map(a => `
-      <div class="gal-card pf-clickable" data-detail="achievements:${a.id}">
+    const metaLine = (a) => [a.competition, a.issuer].filter(Boolean).map(escapeHtml).join(' · ');
+    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(a => `
+      <div class="gal-card ach-card pf-clickable" data-detail="achievements:${a.id}">
         <div class="gc-media">${mediaCollage(a, typeIcon(a.category) || 'trophy-fill')}${photoBadge(a)}${a.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
         <div class="gc-body">
-          <div class="d-flex align-items-center gap-2 mb-1"><span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || 'Achievement')}</span><small class="text-faint num ms-auto">${fmtDate(a.date)}</small></div>
-          <b>${escapeHtml(a.title)}</b>
-          <p>${escapeHtml(a.description || '')}</p>
-          <div class="d-flex gap-2">
-            ${a.certLink ? `<a class="btn btn-soft btn-sm" href="${escapeHtml(a.certLink)}" target="_blank" rel="noopener"><i class="bi bi-patch-check me-1"></i>Certificate</a>` : ''}
-            <button class="btn btn-ghost btn-sm owner-only" onclick="openEntityModal('achievements','${a.id}')"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-ghost btn-sm text-danger owner-only" onclick="confirmDelete('achievements','${a.id}')"><i class="bi bi-trash3"></i></button>
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || 'Achievement')}</span>
+            ${a.position ? `<span class="chip chip-outline ach-pos">${escapeHtml(a.position)}</span>` : ''}
+            <small class="text-faint num ms-auto">${fmtDate(a.date)}</small>
+          </div>
+          <b class="ach-title">${escapeHtml(a.title)}</b>
+          ${metaLine(a) ? `<div class="ach-meta">${metaLine(a)}</div>` : ''}
+          ${a.description ? `<p class="ach-desc">${escapeHtml(mdStrip(a.description))}</p>` : ''}
+          <div class="ach-foot">
+            <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+            <span class="ach-tools">
+              ${a.certLink ? `<a class="btn btn-ghost btn-sm" title="Certificate" href="${escapeHtml(a.certLink)}" target="_blank" rel="noopener"><i class="bi bi-patch-check"></i></a>` : ''}
+              <button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('achievements','${a.id}')"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('achievements','${a.id}')"><i class="bi bi-trash3"></i></button>
+            </span>
           </div>
         </div>
       </div>`).join('')}</div>`;
     host.onclick = portfolioDetailDelegate;
   };
   document.getElementById('achAdd').onclick = () => openEntityModal('achievements', null, draw);
+  draw();
+}
+
+/* ---------- TRAINING & CERTIFICATION ---------- */
+function initTraining() {
+  const host = document.getElementById('trainHost');
+  const draw = () => {
+    const items = DB.getAll('training');
+    if (!items.length) { host.innerHTML = emptyState('mortarboard', 'No training yet', 'Add courses, certifications, workshops and bootcamps — their skills flow into your portfolio.', 'Add training', () => openEntityModal('training', null, draw), true); return; }
+    const photoBadge = (item) => {
+      const np = collectImages(item).length, nf = collectFiles(item).length;
+      return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
+    };
+    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(t => {
+      const meta = [t.issuer, t.length].filter(Boolean).map(escapeHtml).join(' · ');
+      const skills = Array.isArray(t.skills) ? t.skills : [];
+      return `
+      <div class="gal-card ach-card pf-clickable" data-detail="training:${t.id}">
+        <div class="gc-media">${mediaCollage(t, 'mortarboard-fill')}${photoBadge(t)}${t.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+        <div class="gc-body">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="chip t-${statusTone(t.type)}">${escapeHtml(t.type || 'Training')}</span>
+            <small class="text-faint num ms-auto">${fmtDate(t.date)}</small>
+          </div>
+          <b class="ach-title">${escapeHtml(t.name)}</b>
+          ${meta ? `<div class="ach-meta">${meta}</div>` : ''}
+          ${skills.length ? `<div class="ach-tags">${skills.slice(0, 4).map(s => `<span class="chip chip-mini">${escapeHtml(s)}</span>`).join('')}${skills.length > 4 ? `<span class="chip chip-mini">+${skills.length - 4}</span>` : ''}</div>` : (t.description ? `<p class="ach-desc">${escapeHtml(mdStrip(t.description))}</p>` : '')}
+          <div class="ach-foot">
+            <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+            <span class="ach-tools">
+              ${t.certLink ? `<a class="btn btn-ghost btn-sm" title="Certificate" href="${escapeHtml(t.certLink)}" target="_blank" rel="noopener"><i class="bi bi-patch-check"></i></a>` : ''}
+              <button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('training','${t.id}')"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('training','${t.id}')"><i class="bi bi-trash3"></i></button>
+            </span>
+          </div>
+        </div>
+      </div>`; }).join('')}</div>`;
+    host.onclick = portfolioDetailDelegate;
+  };
+  document.getElementById('trainAdd').onclick = () => openEntityModal('training', null, draw);
+  draw();
+}
+
+/* ---------- SOCIAL ACTIVITIES / VOLUNTEERING ---------- */
+function initVolunteering() {
+  const host = document.getElementById('volHost');
+  const draw = () => {
+    const items = DB.getAll('volunteering');
+    if (!items.length) { host.innerHTML = emptyState('heart', 'No social activities yet', 'Add volunteering and community work — your role, cause and the skills you used.', 'Add activity', () => openEntityModal('volunteering', null, draw), true); return; }
+    const photoBadge = (item) => {
+      const np = collectImages(item).length, nf = collectFiles(item).length;
+      return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
+    };
+    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(v => {
+      const meta = [v.organization, v.location].filter(Boolean).map(escapeHtml).join(' · ');
+      const skills = Array.isArray(v.skills) ? v.skills : [];
+      return `
+      <div class="gal-card ach-card pf-clickable" data-detail="volunteering:${v.id}">
+        <div class="gc-media">${mediaCollage(v, 'heart-fill')}${photoBadge(v)}${v.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+        <div class="gc-body">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            ${v.cause ? `<span class="chip t-pink">${escapeHtml(v.cause)}</span>` : '<span class="chip t-pink">Volunteering</span>'}
+            ${v.role ? `<span class="chip chip-outline ach-pos">${escapeHtml(v.role)}</span>` : ''}
+            <small class="text-faint num ms-auto">${fmtDate(v.date)}</small>
+          </div>
+          <b class="ach-title">${escapeHtml(v.title)}</b>
+          ${meta ? `<div class="ach-meta">${meta}</div>` : ''}
+          ${skills.length ? `<div class="ach-tags">${skills.slice(0, 4).map(s => `<span class="chip chip-mini">${escapeHtml(s)}</span>`).join('')}${skills.length > 4 ? `<span class="chip chip-mini">+${skills.length - 4}</span>` : ''}</div>` : (v.description ? `<p class="ach-desc">${escapeHtml(mdStrip(v.description))}</p>` : '')}
+          <div class="ach-foot">
+            <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+            <span class="ach-tools">
+              <button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('volunteering','${v.id}')"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('volunteering','${v.id}')"><i class="bi bi-trash3"></i></button>
+            </span>
+          </div>
+        </div>
+      </div>`; }).join('')}</div>`;
+    host.onclick = portfolioDetailDelegate;
+  };
+  document.getElementById('volAdd').onclick = () => openEntityModal('volunteering', null, draw);
   draw();
 }
 
@@ -1543,11 +2054,12 @@ function initProfile() {
   const research = DB.getAll('research');
   const wins = opps.filter(o => ['Won', 'Accepted', 'Completed'].includes(o.status));
   const stats = {
+    opportunities: opps.length,
     applied: opps.filter(o => !['New', 'Researching'].includes(o.status)).length,
     wins: wins.length,
     projects: projects.length,
-    certs: DB.getAll('achievements').filter(a => a.category === 'Certification').length,
-    research: research.length
+    research: research.length,
+    training: DB.getAll('training').length
   };
 
   // hero + about
@@ -1566,7 +2078,15 @@ function initProfile() {
     ? `<span class="pf-role-badge"><i class="bi bi-briefcase-fill me-1"></i>${escapeHtml(current.role)}${current.company ? ' · ' + escapeHtml(current.company) : ''}</span>` : '';
 
   // skills + interests
-  document.getElementById('pfSkills').innerHTML = (p.skills || []).map(s => `<span class="chip t-primary">${escapeHtml(s)}</span>`).join('');
+  // Skills = profile skills + every skill gained from training & social work
+  // (deduped, case-insensitive). Training/volunteering skills flow in here
+  // automatically so the portfolio stays in sync with what was logged.
+  const skillSet = new Map();
+  const addSkills = (arr) => (arr || []).forEach(s => { const k = String(s).trim().toLowerCase(); if (k && !skillSet.has(k)) skillSet.set(k, String(s).trim()); });
+  addSkills(p.skills);
+  DB.getAll('training').forEach(t => addSkills(t.skills));
+  DB.getAll('volunteering').forEach(v => addSkills(v.skills));
+  document.getElementById('pfSkills').innerHTML = [...skillSet.values()].map(s => `<span class="chip t-primary">${escapeHtml(s)}</span>`).join('');
   document.getElementById('pfInterests').innerHTML = (p.interests || []).map(s => `<span class="chip chip-outline">${escapeHtml(s)}</span>`).join('');
 
   // hero social buttons
@@ -1595,8 +2115,8 @@ function initProfile() {
   // stats row — each card is clickable and opens the list behind the number
   const statEl = document.getElementById('pfStats');
   statEl.innerHTML = [
-    ['Applied', stats.applied, 'applied'], ['Wins', stats.wins, 'wins'], ['Projects', stats.projects, 'projects'],
-    ['Certifications', stats.certs, 'certs'], ['Research', stats.research, 'research']
+    ['Opportunities', stats.opportunities, 'opportunities'], ['Applied', stats.applied, 'applied'], ['Wins', stats.wins, 'wins'],
+    ['Projects', stats.projects, 'projects'], ['Research', stats.research, 'research'], ['Training', stats.training, 'training']
   ].map(([l, v, k]) => `<button type="button" class="pf-stat" data-stat="${k}"><div class="v">${v}</div><div class="l">${l}</div><span class="pf-stat-cue"><i class="bi bi-arrow-right-short"></i></span></button>`).join('');
   statEl.querySelectorAll('[data-stat]').forEach(b => b.onclick = () => openStatList(b.dataset.stat));
 
@@ -1645,10 +2165,35 @@ function initProfile() {
 
   // showcase: achievements
   document.getElementById('pfAchievements').innerHTML = featured(DB.getAll('achievements'), 6).map(a => `
-    <div class="gal-card pf-clickable" data-detail="achievements:${a.id}">
+    <div class="gal-card ach-card pf-clickable" data-detail="achievements:${a.id}">
       <div class="gc-media">${mediaCollage(a, 'trophy-fill')}${photoBadge(a)}${cardTools('achievements', a.id)}</div>
-      <div class="gc-body"><span class="chip t-${statusTone(a.category)} mb-2 d-inline-flex">${escapeHtml(a.category || '')}</span><b>${escapeHtml(a.title)}</b><p>${escapeHtml(a.description || '')}</p></div>
+      <div class="gc-body">
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || '')}</span>
+          ${a.position ? `<span class="chip chip-outline ach-pos">${escapeHtml(a.position)}</span>` : ''}
+        </div>
+        <b class="ach-title">${escapeHtml(a.title)}</b>
+        ${[a.competition, a.issuer].filter(Boolean).length ? `<div class="ach-meta">${[a.competition, a.issuer].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+        ${a.description ? `<p class="ach-desc">${escapeHtml(mdStrip(a.description))}</p>` : ''}
+        <div class="ach-foot"><span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span></div>
+      </div>
     </div>`).join('') || '<p class="text-soft">No achievements to show yet.</p>';
+
+  // showcase: training & certifications
+  const trainEl = document.getElementById('pfTraining');
+  if (trainEl) trainEl.innerHTML = featured(DB.getAll('training'), 6).map(t => {
+    const skills = Array.isArray(t.skills) ? t.skills : [];
+    return `
+    <div class="gal-card ach-card pf-clickable" data-detail="training:${t.id}">
+      <div class="gc-media">${mediaCollage(t, 'mortarboard-fill')}${photoBadge(t)}${cardTools('training', t.id)}</div>
+      <div class="gc-body">
+        <div class="d-flex align-items-center gap-2 mb-1"><span class="chip t-${statusTone(t.type)}">${escapeHtml(t.type || 'Training')}</span><small class="text-faint num ms-auto">${fmtDate(t.date)}</small></div>
+        <b class="ach-title">${escapeHtml(t.name)}</b>
+        ${t.issuer ? `<div class="ach-meta">${escapeHtml(t.issuer)}</div>` : ''}
+        ${skills.length ? `<div class="ach-tags">${skills.slice(0, 4).map(s => `<span class="chip chip-mini">${escapeHtml(s)}</span>`).join('')}${skills.length > 4 ? `<span class="chip chip-mini">+${skills.length - 4}</span>` : ''}</div>` : ''}
+        <div class="ach-foot"><span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span></div>
+      </div>
+    </div>`; }).join('') || '<p class="text-soft">No training to show yet.</p>';
 
   // wins & recognition (won / accepted / completed opportunities)
   const winsEl = document.getElementById('pfWins');
@@ -1704,8 +2249,24 @@ function initProfile() {
       <div class="pf-card-cta"><span><i class="bi bi-eye me-1"></i>View details</span></div>
     </div>`).join('') : '<p class="text-soft">No research to show yet.</p>'; }
 
+  // showcase: social activities / volunteering
+  const volEl = document.getElementById('pfVolunteering');
+  if (volEl) volEl.innerHTML = featured(DB.getAll('volunteering'), 6).map(v => {
+    const skills = Array.isArray(v.skills) ? v.skills : [];
+    return `
+    <div class="gal-card ach-card pf-clickable" data-detail="volunteering:${v.id}">
+      <div class="gc-media">${mediaCollage(v, 'heart-fill')}${photoBadge(v)}${cardTools('volunteering', v.id)}</div>
+      <div class="gc-body">
+        <div class="d-flex align-items-center gap-2 mb-1">${v.cause ? `<span class="chip t-pink">${escapeHtml(v.cause)}</span>` : ''}${v.role ? `<span class="chip chip-outline ach-pos">${escapeHtml(v.role)}</span>` : ''}<small class="text-faint num ms-auto">${fmtDate(v.date)}</small></div>
+        <b class="ach-title">${escapeHtml(v.title)}</b>
+        ${v.organization ? `<div class="ach-meta">${escapeHtml(v.organization)}</div>` : ''}
+        ${skills.length ? `<div class="ach-tags">${skills.slice(0, 4).map(s => `<span class="chip chip-mini">${escapeHtml(s)}</span>`).join('')}${skills.length > 4 ? `<span class="chip chip-mini">+${skills.length - 4}</span>` : ''}</div>` : ''}
+        <div class="ach-foot"><span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span></div>
+      </div>
+    </div>`; }).join('') || '<p class="text-soft">No social activities to show yet.</p>';
+
   // make portfolio cards open a detail view (ignoring clicks on owner tools / links)
-  ['pfAchievements', 'pfWins', 'pfProjects', 'pfResearch'].forEach(cid => {
+  ['pfAchievements', 'pfTraining', 'pfWins', 'pfProjects', 'pfResearch', 'pfVolunteering'].forEach(cid => {
     const c = document.getElementById(cid);
     if (c) c.onclick = portfolioDetailDelegate;
   });
@@ -1745,8 +2306,8 @@ function initProfile() {
   // owner-only "Add" buttons per section (open the same guarded modals,
   // then re-render the portfolio in place).
   const addHooks = {
-    pfAddWin: 'opportunities', pfAddAch: 'achievements',
-    pfAddProj: 'projects', pfAddRes: 'research'
+    pfAddWin: 'opportunities', pfAddAch: 'achievements', pfAddTrain: 'training',
+    pfAddProj: 'projects', pfAddRes: 'research', pfAddVol: 'volunteering'
   };
   Object.entries(addHooks).forEach(([id, entity]) => {
     const b = document.getElementById(id);
@@ -1976,6 +2537,7 @@ function openReferencesEditor() {
 function openStatList(kind) {
   const opps = DB.getAll('opportunities');
   const CFG = {
+    opportunities: { title: 'Opportunities', entity: 'opportunities', icon: 'compass-fill', items: opps },
     applied: { title: 'Applied & in progress', entity: 'opportunities', icon: 'send-fill',
       items: opps.filter(o => !['New', 'Researching'].includes(o.status)) },
     wins: { title: 'Wins & recognition', entity: 'opportunities', icon: 'trophy-fill',
@@ -1983,6 +2545,7 @@ function openStatList(kind) {
     projects: { title: 'Projects', entity: 'projects', icon: 'diagram-3-fill', items: DB.getAll('projects') },
     certs: { title: 'Certifications', entity: 'achievements', icon: 'patch-check-fill',
       items: DB.getAll('achievements').filter(a => a.category === 'Certification') },
+    training: { title: 'Training & certifications', entity: 'training', icon: 'mortarboard-fill', items: DB.getAll('training') },
     research: { title: 'Research', entity: 'research', icon: 'lightbulb-fill', items: DB.getAll('research') }
   }[kind];
   if (!CFG) return;
@@ -2112,23 +2675,30 @@ function openPortfolioDetail(entity, id) {
   const rich = entity === 'projects' || entity === 'research';
 
   const titleOf = item.name || item.title || 'Details';
+  const skillsStr = Array.isArray(item.skills) ? item.skills.join(', ') : '';
   const icon = entity === 'projects' ? 'diagram-3-fill'
     : entity === 'research' ? 'lightbulb-fill'
-      : entity === 'achievements' ? 'trophy-fill' : typeIcon(item.type);
+      : entity === 'achievements' ? 'trophy-fill'
+        : entity === 'training' ? 'mortarboard-fill'
+          : entity === 'volunteering' ? 'heart-fill' : typeIcon(item.type);
 
   const chipsArr = entity === 'projects' ? [item.status, item.category]
     : entity === 'research' ? [item.field, item.stage]
       : entity === 'achievements' ? [item.category, fmtDate(item.date)]
-        : [item.status, item.type, item.subType];
+        : entity === 'training' ? [item.type, fmtDate(item.date)]
+          : entity === 'volunteering' ? [item.cause, item.role, fmtDate(item.date)]
+            : [item.status, item.type, item.subType];
   const chips = chipsArr.filter(c => c && c !== '—').map(c => `<span class="chip chip-outline">${escapeHtml(c)}</span>`).join('');
 
   const rowsArr = entity === 'projects' ? [['Technologies', item.technologies], ['Team', item.team]]
     : entity === 'research' ? [['Field', item.field], ['Stage', item.stage], ['References', item.references]]
       : entity === 'opportunities' ? [['Organizer', item.organizer], ['Country', item.country], ['Funding', item.fundingType], ['Deadline', fmtDate(item.deadline)], ['Event', fmtDate(item.eventDate)]]
-        : [['Date', fmtDate(item.date)]];
+        : entity === 'training' ? [['Issuer', item.issuer], ['Type', item.type], ['Length', item.length], ['Credential ID', item.credentialId], ['Skills', skillsStr], ['Date', fmtDate(item.date)]]
+          : entity === 'volunteering' ? [['Role', item.role], ['Organization', item.organization], ['Cause', item.cause], ['Location', item.location], ['Skills', skillsStr], ['Date', fmtDate(item.date)]]
+            : [['Position', item.position], ['Competition', item.competition], ['Issuer', item.issuer], ['Date', fmtDate(item.date)]];
   const rows = rowsArr.filter(([, v]) => v && v !== '—').map(([l, v]) => `<dt>${l}</dt><dd>${escapeHtml(v)}</dd>`).join('');
 
-  const linksArr = entity === 'achievements' ? [[item.certLink, 'Certificate', 'patch-check']]
+  const linksArr = (entity === 'achievements' || entity === 'training') ? [[item.certLink, 'Certificate', 'patch-check']]
     : [[item.link, entity === 'opportunities' ? 'Official page' : 'Open link', 'box-arrow-up-right']];
   const links = linksArr.filter(([href]) => href).map(([href, label, ico]) => `<a class="btn btn-soft btn-sm" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="bi bi-${ico} me-1"></i>${label}</a>`).join('');
 
@@ -2166,7 +2736,7 @@ function openPortfolioDetail(entity, id) {
       </div>
       ${chips ? `<div class="d-flex flex-wrap gap-2 mt-3 mb-1">${chips}</div>` : ''}
       ${item.abstract ? `<p class="pf-detail-abstract">${escapeHtml(item.abstract)}</p>` : ''}
-      ${body ? `<p class="pf-detail-text">${escapeHtml(body)}</p>` : ''}
+      ${body ? `<div class="pf-detail-text rt-render">${mdToHtml(body)}</div>` : ''}
       ${blocksHtml ? `<div class="pf-blocks">${blocksHtml}</div>` : ''}
       ${contribHtml}
       ${galleryHtml}
@@ -2524,6 +3094,8 @@ const PAGE_INIT = {
   tasks: initTasks,
   documents: initDocuments,
   achievements: initAchievements,
+  training: initTraining,
+  volunteering: initVolunteering,
   contacts: initContacts,
   research: initResearch,
   projects: initProjects,
@@ -2547,7 +3119,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   DB.loadLocal();        // instant first paint from the local cache
   await DB.loadCloud();  // then the shared cloud copy (source of truth)
 
+  if (normalizeReminders()) DB.save();   // migrate legacy reminder records
   renderActivePage(page);
+  startReminderWatcher();                // owner-only: fire reminders when due
 
   // Live sync: when another device changes the data, re-render — but
   // never yank a form out from under the owner while a modal is open.
@@ -2680,6 +3254,15 @@ function SEED_DATA() {
       { id: 'ac-2', title: 'Google Data Analytics Certificate', category: 'Certification', date: plus(-120), image: '', certLink: '', description: 'Completed the 8-course professional certificate covering data cleaning, analysis and visualization.' },
       { id: 'ac-3', title: 'Vice President — University Computer Club', category: 'Leadership', date: plus(-200), image: '', certLink: '', description: 'Led a 40-member team, organized 6 workshops and 2 inter-university hackathons.' },
       { id: 'ac-4', title: 'Runner-up — National Hackathon 2025', category: 'Competition', date: plus(-160), image: '', certLink: '', description: 'Built a real-time flood early-warning dashboard in 36 hours.' }
+    ],
+
+    training: [
+      { id: 'tr-1', name: 'Google Data Analytics Professional Certificate', issuer: 'Google / Coursera', type: 'Certification', date: plus(-120), length: '6 months', skills: ['Data Analysis', 'SQL', 'R', 'Data Visualization', 'Tableau'], certLink: '', credentialId: '', description: 'Eight-course professional certificate covering the full data analysis workflow.', featured: true },
+      { id: 'tr-2', name: 'Machine Learning Specialization', issuer: 'DeepLearning.AI / Stanford', type: 'Course', date: plus(-60), length: '3 months', skills: ['Machine Learning', 'Python', 'TensorFlow', 'Neural Networks'], certLink: '', credentialId: '', description: 'Supervised and unsupervised learning, recommender systems and best practices.', featured: true }
+    ],
+
+    volunteering: [
+      { id: 'vl-1', title: 'STEM Workshop Facilitator', role: 'Lead Facilitator', organization: 'University Computer Club', cause: 'Education', date: plus(-90), location: 'Dhaka, Bangladesh', skills: ['Public Speaking', 'Mentoring', 'Teaching'], description: 'Ran coding and robotics workshops for 200+ school students across 6 sessions.', featured: true }
     ],
 
     contacts: [

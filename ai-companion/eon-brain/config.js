@@ -21,6 +21,11 @@ export const BRAIN_CONFIG = {
   // Falls back to window.OWNER_EMAIL when present.
   ownerEmail: (typeof window !== 'undefined' && window.OWNER_EMAIL) || 'me.imran.personal@gmail.com',
 
+  // ── Which entities actually have an actionable deadline. Everything else
+  //    (achievements, projects, research, training, volunteering, contacts…)
+  //    carries historical/award dates that must NEVER be nagged as deadlines. ──
+  deadlineEntities: ['opportunities', 'tasks', 'reminders'],
+
   // ── Deadline warning windows, in days (descending). ──
   windows: [7, 3, 1, 0],
 
@@ -37,6 +42,8 @@ export const BRAIN_CONFIG = {
     tasks:         'tasks.html',
     documents:     'documents.html',
     achievements:  'achievements.html',
+    training:      'training.html',
+    volunteering:  'volunteering.html',
     research:      'research.html',
     projects:      'projects.html',
     contacts:      'contacts.html',

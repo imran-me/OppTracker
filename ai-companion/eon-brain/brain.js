@@ -63,7 +63,7 @@ export class Brain {
       // OppTrack wraps the dataset under `store`; unwrap if configured.
       const data = (this.cfg.sourceRoot && doc[this.cfg.sourceRoot] && typeof doc[this.cfg.sourceRoot] === 'object')
         ? doc[this.cfg.sourceRoot] : doc;
-      const entities = discover(data, this.cfg.overrides);
+      const entities = discover(data, this.cfg.overrides, this.cfg.deadlineEntities);
       console.info('[EON brain] meditating — entities found:', Object.keys(entities));
 
       const records = [];
@@ -99,8 +99,13 @@ export class Brain {
     const horizon = asc[asc.length - 1] ?? 7;
     const now = Date.now();
     const out = [];
+    // Anything already resolved is not a live deadline — never nag about a
+    // won/lost/closed/completed item even if its date is in the past.
+    const DONE = /done|complete|closed|won|lost|accept|reject|success|approved|paid|submitted|finished|archiv|cancel|irrelevant|withdraw/i;
     for (const r of records) {
       if (!r.deadlineAt) continue;
+      const st = String(r.payload?.status || r.payload?.stage || '');
+      if (DONE.test(st)) continue;
       const ts = Date.parse(r.deadlineAt);
       if (Number.isNaN(ts)) continue;
       const days = Math.floor((ts - now) / 86400000);
@@ -217,7 +222,7 @@ export class Brain {
       const doc = snap.exists ? (snap.data() || {}) : {};
       const data = (this.cfg.sourceRoot && doc[this.cfg.sourceRoot] && typeof doc[this.cfg.sourceRoot] === 'object')
         ? doc[this.cfg.sourceRoot] : doc;
-      const entities = discover(data, this.cfg.overrides);
+      const entities = discover(data, this.cfg.overrides, this.cfg.deadlineEntities);
       const records = [];
       for (const e of Object.keys(entities)) records.push(...extractRecords(data, e, entities[e]));
       this._data = data; this._records = records; this._entities = entities;
