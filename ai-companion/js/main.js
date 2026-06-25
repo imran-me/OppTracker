@@ -23,6 +23,7 @@ import { AskEon }             from '../eon-brain/owner/ask.js';
 import { Motivation }         from '../eon-brain/owner/motivation.js';
 import { Nudger }             from '../eon-brain/owner/nudger.js';
 import { Resume }             from '../eon-brain/owner/resume.js';
+import { Coach }              from '../eon-brain/owner/coach.js';
 import { Couch }              from './couch.js';
 import { Personality, ARCHETYPES } from './personality.js';
 
@@ -109,6 +110,8 @@ class Eon {
     catch (e) { console.warn('[EON] nudger failed to start:', e); this.nudger = null; }
     try { this.resume = new Resume(this.ctx); this.resume.start(); }                 // owner-mode: where-was-I resume
     catch (e) { console.warn('[EON] resume failed to start:', e); this.resume = null; }
+    try { this.coach = new Coach(this.ctx); this.coach.start(); }                    // owner-mode: section-aware coaching
+    catch (e) { console.warn('[EON] coach failed to start:', e); this.coach = null; }
     try { this._buildCouch(); this._wireCouch(); }                                   // optional couch (settings → Couch)
     catch (e) { console.warn('[EON] couch failed to start:', e); }
     this._setSize(this._userScale || 1);     // apply saved size now the model exists
@@ -677,6 +680,7 @@ class Eon {
     try { this.motiv?.update(); } catch (e) { /* motivation must never break the loop */ }
     try { this.nudger?.update(); } catch (e) { /* nudger must never break the loop */ }
     try { this.resume?.update(); } catch (e) { /* resume must never break the loop */ }
+    try { this.coach?.update(); } catch (e) { /* coach must never break the loop */ }
 
     // DOM overlays follow EON
     this._syncOverlays();

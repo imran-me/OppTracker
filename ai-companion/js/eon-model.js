@@ -47,6 +47,17 @@ const EMOTE_DEF = {
   sleepy:   { dur: 2.8, face: { eL: 'closed', eR: 'closed', mouth: 'smile' } },
   sad:      { dur: 2.2, face: { eL: 'open', eR: 'open', mouth: 'o' } },
   nod:      { dur: 1.6, face: { mouth: 'smile' } },
+  // Owner-coach set (section-aware reactions).
+  lookWatch:  { dur: 2.6, face: { mouth: 'smile', tilt: 0.10, hx: 0.14 } },   // checks wrist — deadlines
+  salute:     { dur: 2.0, face: { eL: 'open', eR: 'open', mouth: 'smile' } }, // ready / acknowledge
+  thumbsUp:   { dur: 2.2, face: { eL: 'happy', eR: 'happy', mouth: 'smile' } },
+  heartHands: { dur: 2.6, face: { eL: 'happy', eR: 'happy', mouth: 'smile' } },
+  bow:        { dur: 2.2, face: { mouth: 'smile' } },
+  wink:       { dur: 1.8, face: { eL: 'closed', eR: 'happy', mouth: 'smile' } },
+  surprised:  { dur: 2.0, face: { eL: 'open', eR: 'open', mouth: 'o' } },
+  ponder:     { dur: 3.2, face: { mouth: 'smile', tilt: 0.16, hx: 0.14 } },
+  typing:     { dur: 3.2, face: { mouth: 'smile', hx: 0.18 } },
+  fistPump:   { dur: 1.8, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
 };
 
 export class EonModel {
@@ -562,6 +573,65 @@ export class EonModel {
       case 'nod':                                                                // yes, yes
         this.head.rotation.x = 0.1 + Math.sin(t * 7) * 0.16;
         break;
+      case 'lookWatch':                                                          // raises wrist, checks the time
+        eon.position.y = base + Math.sin(t * 1.6) * 0.02;
+        this.head.rotation.x = 0.22;
+        aL.shoulder.rotation.set(-1.25, 0, 0.45); aL.elbow.rotation.x = -2.05;   // wrist up to face
+        aR.shoulder.rotation.set(0.12, 0, -0.4);
+        break;
+      case 'salute':                                                             // hand to brow, ready
+        eon.position.y = base + Math.sin(t * 3) * 0.02;
+        aR.shoulder.rotation.set(-1.5, 0, -0.18); aR.elbow.rotation.x = -2.1;
+        aL.shoulder.rotation.set(0.12, 0, 0.42);
+        break;
+      case 'thumbsUp': {                                                         // arm forward, approving bob
+        const k = Math.abs(Math.sin(t * 5));
+        eon.position.y = base + 0.04 * k;
+        aR.shoulder.rotation.set(-1.0, 0, -0.28); aR.elbow.rotation.x = -0.9;
+        aL.shoulder.rotation.set(0.1, 0, 0.4);
+        break;
+      }
+      case 'heartHands':                                                         // hands together at chest
+        eon.position.y = base + Math.sin(t * 2) * 0.03;
+        eon.rotation.z = Math.sin(t * 1.6) * 0.04;
+        aL.shoulder.rotation.set(-0.7, 0, 0.62); aL.elbow.rotation.x = -1.7;
+        aR.shoulder.rotation.set(-0.7, 0, -0.62); aR.elbow.rotation.x = -1.7;
+        break;
+      case 'bow': {                                                              // respectful bow
+        const b = Math.sin(Math.min(1, ep * 1.6) * Math.PI);
+        eon.rotation.x = 0.5 * b; eon.position.y = base - 0.02 * b;
+        aL.shoulder.rotation.set(0.2, 0, 0.5); aR.shoulder.rotation.set(0.2, 0, -0.5);
+        break;
+      }
+      case 'wink':                                                               // cheeky head tilt
+        eon.position.y = base + Math.sin(t * 4) * 0.02;
+        this.head.rotation.z = 0.13; eon.rotation.z = Math.sin(t * 3) * 0.04;
+        aR.shoulder.rotation.set(0, 0, -0.5);
+        break;
+      case 'surprised': {                                                        // little jolt, arms out
+        const s = Math.sin(Math.min(1, ep * 2) * Math.PI);
+        eon.position.y = base + 0.05 * s; this.head.rotation.x = -0.12 * s;
+        aL.shoulder.rotation.set(-0.2, 0, 1.2); aR.shoulder.rotation.set(-0.2, 0, -1.2);
+        break;
+      }
+      case 'ponder':                                                             // chin in hand, slow pacing sway
+        eon.position.y = base + Math.sin(t * 1.2) * 0.03;
+        eon.rotation.z = Math.sin(t * 0.8) * 0.05;
+        this.head.rotation.x = 0.14; this.head.rotation.y = Math.sin(t * 0.7) * 0.12;
+        aR.shoulder.rotation.set(-1.1, 0, -0.85); aR.elbow.rotation.x = -1.3;
+        break;
+      case 'typing':                                                             // hunched at a tiny laptop
+        eon.position.y = base - 0.04; this.head.rotation.x = 0.18;
+        aL.shoulder.rotation.set(-0.55, 0, 0.5); aL.elbow.rotation.x = -1.3 + Math.sin(t * 20) * 0.08;
+        aR.shoulder.rotation.set(-0.55, 0, -0.5); aR.elbow.rotation.x = -1.3 + Math.cos(t * 20) * 0.08;
+        break;
+      case 'fistPump': {                                                         // "yes!" elbow pull
+        const k = Math.abs(Math.sin(t * 6));
+        eon.position.y = base + 0.05 * k;
+        aR.shoulder.rotation.set(-0.3, 0, -1.4); aR.elbow.rotation.x = -2.2 + k * 0.3;
+        aL.shoulder.rotation.set(0.1, 0, 0.4);
+        break;
+      }
     }
   }
 
