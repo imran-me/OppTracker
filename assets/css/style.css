@@ -360,6 +360,9 @@ a:hover { color: var(--primary-700); }
 .rt-toolbar .rt-b { border: 0; background: transparent; color: var(--text-soft); cursor: pointer;
   width: 28px; height: 26px; border-radius: 7px; display: grid; place-items: center; font-size: 14px; }
 .rt-toolbar .rt-b:hover { background: #fff; color: var(--primary); }
+.rt-toolbar .rt-sep { width: 1px; align-self: stretch; margin: 3px 2px; background: var(--line); }
+.rt-toolbar .rt-fix { width: auto; gap: 4px; padding: 0 9px; color: var(--primary-700); font: 700 11.5px var(--font-ui); }
+.rt-toolbar .rt-fix:hover { background: var(--primary-soft); }
 .rt-wrap textarea { border-radius: 0 0 10px 10px !important; }
 /* Rendered rich text in the detail view */
 .rt-render p { margin: 0 0 8px; }
