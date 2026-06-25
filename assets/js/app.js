@@ -180,6 +180,12 @@ const DB = {
   upsert(entity, record) {
     if (!Security.guard('save changes')) return null;
     const list = this.data[entity];
+    // capture prior state so the Signal Layer can event-source the change
+    let before = null;
+    if (entity === 'opportunities' && record.id) {
+      const prev = list.find(r => r.id === record.id);
+      if (prev) before = { status: prev.status, deadline: prev.deadline, priority: prev.priority };
+    }
     if (!record.id) {
       record.id = uid();
       record.createdAt = new Date().toISOString();
@@ -189,7 +195,9 @@ const DB = {
       if (i > -1) list[i] = Object.assign(list[i], record);
       else list.push(record);
     }
+    if (entity === 'opportunities') { try { logOppEvents(before, this.get('opportunities', record.id)); } catch {} }
     this.save();
+    if (entity === 'opportunities') { try { computeSignals(); } catch {} }
     return record;
   },
 
@@ -1521,6 +1529,9 @@ function initDashboard() {
       <td>${statusChip(o.status)}</td>
       <td class="date-cell">${o.deadline ? fmtDate(o.deadline) : '—'}</td>
     </tr>`).join('') : `<tr><td colspan="3" class="text-soft text-center py-4">No opportunities yet.</td></tr>`;
+
+  /* signal radar (read-only derived intelligence) */
+  try { computeSignals(); renderSignalPanel(); } catch {}
 
   /* calendar widget + reminder list */
   renderCalendar();
@@ -3352,6 +3363,248 @@ function initIndex() {
 }
 
 /* ==========================================================
+   6.5  SIGNAL LAYER — read-only derived intelligence
+   A separate tier that models each opportunity as a TRAJECTORY through
+   time (not a row) and emits scored signals with a confidence and a
+   plain-English "why". It never writes to or alters anything else; the
+   dashboard panel + EON read the signals it publishes on window.EonSignals.
+   Toggle: localStorage 'eon-signals' = 'off' makes it inert.
+
+   Fuel = an append-only event stream of opportunity state-changes
+   (DB.data._events), logged on every save. Each signal is a transparent
+   function over that stream — explainable today, learnable later.
+   ========================================================== */
+
+const SIGNAL_THRESHOLD = 0.42;   // confidence below this stays quiet (be silent, not wrong)
+function signalsEnabled() { try { return localStorage.getItem('eon-signals') !== 'off'; } catch { return true; } }
+
+// Opportunity status → progress index along the pipeline (the "position").
+const OPP_LADDER = ['New', 'Researching', 'Preparing', 'Documents Ready', 'Shortlisted', 'Applied', 'Interview', 'Won'];
+const OPP_WIN = ['Won', 'Accepted', 'Completed'];
+const OPP_LOSS = ['Lost', 'Rejected', 'Irrelevant', 'Missed', 'Withdrawn'];
+function stageIndex(status) {
+  if (OPP_WIN.includes(status)) return OPP_LADDER.length - 1;     // 7 = closed-won
+  if (OPP_LOSS.includes(status)) return -1;                       // terminal-loss
+  const i = OPP_LADDER.indexOf(status);
+  return i >= 0 ? i : 0;
+}
+const isClosed = (s) => OPP_WIN.includes(s) || OPP_LOSS.includes(s);
+const daysBetween = (a, b) => (Date.parse(b) - Date.parse(a)) / 86400000;
+
+/* ---- event sourcing: append state-changes to the stream ---- */
+function logOppEvents(before, after) {
+  if (!after) return;
+  const ev = (DB.data._events = DB.data._events || []);
+  const at = new Date().toISOString();
+  const push = (type, from, to) => ev.push({ opp: after.id, type, from: from ?? null, to: to ?? null, at });
+  if (!before) { push('created', null, after.status || 'New'); }
+  else {
+    if ((before.status || '') !== (after.status || '')) push('status', before.status || '', after.status || '');
+    if ((before.deadline || '') !== (after.deadline || '')) push('deadline', before.deadline || '', after.deadline || '');
+    if ((before.priority || '') !== (after.priority || '')) push('priority', before.priority || '', after.priority || '');
+  }
+  if (ev.length > 3000) DB.data._events = ev.slice(-3000);
+}
+/* Seed a baseline 'created' event for any opportunity that predates the
+   event log, so its trajectory has a start point (low confidence until real
+   changes accumulate). */
+function ensureOppBaseline() {
+  const ev = (DB.data._events = DB.data._events || []);
+  const have = new Set(ev.filter(e => e.type === 'created').map(e => e.opp));
+  let added = false;
+  DB.getAll('opportunities').forEach(o => {
+    if (have.has(o.id)) return;
+    ev.push({ opp: o.id, type: 'created', from: null, to: 'New', at: o.createdAt || o.openDate || new Date().toISOString() });
+    added = true;
+  });
+  return added;
+}
+
+/* ---- the single computation pass (per load / per save) ---- */
+let _signalsTimer = null;
+function computeSignals() {
+  if (!signalsEnabled()) { window.EonSignals = { enabled: false, ranked: [], byId: {}, coefficients: null, at: Date.now() }; return; }
+  const opps = DB.getAll('opportunities');
+  const events = (DB.data._events || []).slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const evByOpp = {};
+  events.forEach(e => (evByOpp[e.opp] = evByOpp[e.opp] || []).push(e));
+
+  // ----- personal coefficients (learned from closed deals) -----
+  const closed = opps.filter(o => isClosed(o.status));
+  const wins = closed.filter(o => OPP_WIN.includes(o.status));
+  const coeff = {
+    sampleClosed: closed.length,
+    winRate: closed.length ? wins.length / closed.length : null,
+    winRateByType: {}, leakStage: null, medianTimeToCloseDays: null,
+  };
+  // win-rate by type
+  const byType = {};
+  closed.forEach(o => { const t = o.type || 'Other'; (byType[t] = byType[t] || { w: 0, n: 0 }); byType[t].n++; if (OPP_WIN.includes(o.status)) byType[t].w++; });
+  Object.entries(byType).forEach(([t, v]) => { if (v.n >= 2) coeff.winRateByType[t] = v.w / v.n; });
+  // leak stage: the stage most lost deals were last in before loss
+  const leak = {};
+  closed.filter(o => OPP_LOSS.includes(o.status)).forEach(o => {
+    const hist = evByOpp[o.id] || []; const lastStatus = [...hist].reverse().find(e => e.type === 'status' && !OPP_LOSS.includes(e.to));
+    const st = lastStatus ? lastStatus.to : 'Applied'; leak[st] = (leak[st] || 0) + 1;
+  });
+  coeff.leakStage = Object.entries(leak).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  // median time-to-close for wins (created → won)
+  const ttc = wins.map(o => { const h = evByOpp[o.id] || []; const c = h.find(e => e.type === 'created'); return c ? daysBetween(c.at, o.eventDate || (h[h.length - 1] || c).at) : null; }).filter(x => x != null && x >= 0).sort((a, b) => a - b);
+  if (ttc.length) coeff.medianTimeToCloseDays = Math.round(ttc[Math.floor(ttc.length / 2)]);
+
+  // ----- dwell distribution per stage (across all opps) -----
+  const dwellByStage = {};
+  opps.forEach(o => {
+    const h = evByOpp[o.id] || [];
+    for (let i = 0; i < h.length; i++) {
+      if (h[i].type !== 'status' && h[i].type !== 'created') continue;
+      const stage = h[i].to, start = h[i].at;
+      const next = h.slice(i + 1).find(e => e.type === 'status');
+      const end = next ? next.at : new Date().toISOString();
+      const d = daysBetween(start, end);
+      if (d >= 0 && stage) (dwellByStage[stage] = dwellByStage[stage] || []).push(d);
+    }
+  });
+  const percentileOf = (arr, x) => { if (!arr || arr.length < 4) return null; const s = [...arr].sort((a, b) => a - b); let c = 0; for (const v of s) if (v <= x) c++; return c / s.length; };
+
+  // ----- winning signature (for resonance) -----
+  const winSig = (() => {
+    const vels = [], ttcs = ttc;
+    wins.forEach(o => { const h = evByOpp[o.id] || []; const c = h.find(e => e.type === 'created'); const lastIdx = stageIndex('Won'); if (c) { const span = Math.max(1, daysBetween(c.at, (h[h.length - 1] || c).at)); vels.push(lastIdx / span); } });
+    const med = (a) => a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] : null;
+    return { velocity: med(vels), ttc: med(ttcs), n: wins.length };
+  })();
+
+  // ----- per-opportunity signals -----
+  const now = Date.now();
+  const out = {};
+  const ranked = [];
+  for (const o of opps) {
+    if (isClosed(o.status)) continue;                 // only live deals get coached
+    const h = evByOpp[o.id] || [];
+    const idx = stageIndex(o.status);
+    const created = h.find(e => e.type === 'created');
+    const ageDays = created ? Math.max(0, daysBetween(created.at, new Date(now).toISOString())) : null;
+
+    // velocity = stages advanced per day; acceleration = recent vs earlier velocity
+    const statusEv = h.filter(e => e.type === 'status' || e.type === 'created');
+    let velocity = null, acceleration = null;
+    if (created && ageDays > 0) velocity = idx / ageDays;
+    if (statusEv.length >= 3) {
+      const mid = statusEv[statusEv.length - 2];
+      const recentSpan = Math.max(0.5, daysBetween(mid.at, new Date(now).toISOString()));
+      const recentVel = (stageIndex(o.status) - stageIndex(mid.to)) / recentSpan;
+      const earlySpan = Math.max(0.5, daysBetween(created.at, mid.at));
+      const earlyVel = (stageIndex(mid.to) - stageIndex(created.to)) / earlySpan;
+      acceleration = recentVel - earlyVel;
+    }
+    const momentum = velocity == null ? 0 : Math.max(0, Math.min(1, velocity / 0.25));
+
+    // dwell anomaly: how long in current stage vs the stage's own distribution
+    const lastStatusEv = [...statusEv].reverse()[0];
+    const dwellDays = lastStatusEv ? daysBetween(lastStatusEv.at, new Date(now).toISOString()) : (ageDays || 0);
+    const dwellPct = percentileOf(dwellByStage[o.status], dwellDays);
+    const dwellAnomaly = dwellPct != null && dwellPct >= 0.9;
+
+    // decay proxy: days since last touch vs typical cadence (median inter-event gap)
+    const gaps = []; for (let i = 1; i < h.length; i++) gaps.push(daysBetween(h[i - 1].at, h[i].at));
+    const cadence = gaps.length ? gaps.sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : null;
+    const lastTouch = h.length ? h[h.length - 1].at : (created?.at || null);
+    const daysSinceTouch = lastTouch ? daysBetween(lastTouch, new Date(now).toISOString()) : null;
+    const cadenceDev = (cadence && daysSinceTouch != null) ? daysSinceTouch / cadence : null;
+    const cooling = cadenceDev != null && cadenceDev >= 1.8;
+
+    // deadline pressure
+    const dl = daysUntil(o.deadline);
+    const deadlineClose = dl != null && dl >= 0 && dl <= 10;
+
+    // resonance: similarity of this deal's velocity to the winning signature
+    let resonance = 0;
+    if (winSig.velocity && velocity != null) resonance = Math.max(0, 1 - Math.abs(velocity - winSig.velocity) / (winSig.velocity + 0.0001));
+    resonance = Math.max(0, Math.min(1, resonance));
+
+    // inflection: acceleration crossed below zero (was advancing, now slowing)
+    const inflection = acceleration != null && acceleration < -0.02;
+
+    // effort-yield: priority × (resonance + momentum) ÷ stages-remaining
+    const prW = { Critical: 1.6, High: 1.3, Medium: 1.0, Low: 0.7 }[o.priority] || 1.0;
+    const stagesLeft = Math.max(1, (OPP_LADDER.length - 1) - Math.max(0, idx));
+    const effortYield = prW * (0.45 + 0.55 * resonance + 0.5 * momentum) / stagesLeft * (deadlineClose ? 1.3 : 1);
+
+    // confidence: grows with evidence (events, dwell sample, won sample)
+    const evConf = Math.min(1, statusEv.length / 4);
+    const dwellConf = dwellByStage[o.status] ? Math.min(1, dwellByStage[o.status].length / 6) : 0;
+    const resConf = Math.min(1, winSig.n / 3);
+    const confidence = Math.max(evConf * 0.5 + dwellConf * 0.3 + resConf * 0.2, deadlineClose ? 0.5 : 0);
+
+    // recommendation + plain-English why
+    const why = [];
+    let recommend = 'watch';
+    if (deadlineClose) { recommend = 'press'; why.push(`Deadline in ${dl} day${dl === 1 ? '' : 's'}.`); }
+    if (resonance >= 0.6 && resConf >= 0.5) { recommend = 'press'; why.push(`Looks like the ones you close (${Math.round(resonance * 100)}% match).`); }
+    if (cooling) { recommend = recommend === 'press' ? 'press' : 'revive'; why.push(`${cadenceDev.toFixed(1)}× past its own healthy cadence.`); }
+    if (dwellAnomaly) { recommend = recommend === 'watch' ? 'intervene' : recommend; why.push(`In "${o.status}" longer than ${Math.round(dwellPct * 100)}% of your deals.`); }
+    if (inflection) { recommend = recommend === 'watch' ? 'intervene' : recommend; why.push('Momentum just turned down — an inflection point.'); }
+    if (coeff.medianTimeToCloseDays && ageDays > coeff.medianTimeToCloseDays * 1.3 && resConf >= 0.5) why.push(`Older than your typical ${coeff.medianTimeToCloseDays}-day close.`);
+    if (!why.length) why.push(momentum > 0.4 ? 'Moving at a healthy clip.' : 'Quietly sitting — could use a touch.');
+
+    const sig = {
+      id: o.id, name: o.name, status: o.status, stageIdx: idx,
+      velocity, acceleration, momentum, resonance,
+      dwellDays: Math.round(dwellDays), dwellAnomaly, cooling, cadenceDev,
+      daysSinceTouch: daysSinceTouch == null ? null : Math.round(daysSinceTouch),
+      deadlineDays: dl, inflection, effortYield, confidence, recommend, why,
+      pointTo: `opportunity-details.html?id=${o.id}`,
+    };
+    out[o.id] = sig;
+    if (confidence >= SIGNAL_THRESHOLD) ranked.push(sig);
+  }
+  ranked.sort((a, b) => b.effortYield - a.effortYield);
+
+  window.EonSignals = {
+    enabled: true, at: Date.now(), byId: out, ranked, coefficients: coeff,
+    get(id) { return out[id] || null; },
+    top(n = 1) { return ranked.slice(0, n); },
+  };
+  return window.EonSignals;
+}
+
+/* Owner-only dashboard consumer: "Signal radar" — today's highest-return
+   moves, each with the plain-English why + a confidence bar + Open. */
+function renderSignalPanel() {
+  const host = document.getElementById('signalPanel');
+  if (!host) return;
+  if (!Security.isOwner() || !signalsEnabled()) { host.closest('.card')?.style.setProperty('display', 'none'); return; }
+  const S = window.EonSignals;
+  if (!S || !S.ranked) { host.innerHTML = '<p class="text-soft mb-0" style="font-size:13px">Signals warming up…</p>'; return; }
+  const REC = {
+    press: { t: 'green', ico: 'lightning-charge-fill', label: 'Press now' },
+    intervene: { t: 'amber', ico: 'exclamation-triangle-fill', label: 'Intervene' },
+    revive: { t: 'red', ico: 'arrow-counterclockwise', label: 'Revive' },
+    watch: { t: 'slate', ico: 'eye', label: 'Watch' },
+  };
+  const top = S.ranked.slice(0, 4);
+  const co = S.coefficients || {};
+  const edge = [];
+  if (co.winRate != null && co.sampleClosed >= 2) edge.push(`${Math.round(co.winRate * 100)}% win rate`);
+  if (co.leakStage) edge.push(`deals leak at "${co.leakStage}"`);
+  if (co.medianTimeToCloseDays) edge.push(`~${co.medianTimeToCloseDays}d to close`);
+
+  host.innerHTML = `
+    ${top.length ? top.map(s => {
+      const r = REC[s.recommend] || REC.watch;
+      const conf = Math.round(s.confidence * 100);
+      return `<a class="sig-row" href="${s.pointTo}">
+        <span class="chip t-${r.t} sig-rec"><i class="bi bi-${r.ico} me-1"></i>${r.label}</span>
+        <span class="sig-body"><b>${escapeHtml(s.name)}</b><small>${escapeHtml(s.why[0] || '')}</small></span>
+        <span class="sig-conf" title="confidence ${conf}%"><span style="width:${conf}%"></span></span>
+        <i class="bi bi-chevron-right text-faint"></i>
+      </a>`;
+    }).join('') : '<p class="text-soft mb-0" style="font-size:13px">No strong signals yet — they sharpen as your opportunities move through stages.</p>'}
+    ${edge.length ? `<div class="sig-edge"><i class="bi bi-graph-up-arrow me-1"></i>Your edge: ${edge.join(' · ')}.</div>` : ''}`;
+}
+
+/* ==========================================================
    7. ROUTER — map page name → initializer, run on load
    ========================================================== */
 const PAGE_INIT = {
@@ -3387,6 +3640,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await DB.loadCloud();  // then the shared cloud copy (source of truth)
 
   if (normalizeReminders()) DB.save();   // migrate legacy reminder records
+  if (Security.isOwner() && ensureOppBaseline()) DB.save();   // seed event-stream baselines
+  try { computeSignals(); } catch {}     // Signal Layer: one pass over the pipeline
   renderActivePage(page);
   startReminderWatcher();                // owner-only: fire reminders when due
   loadLanguageData();                    // load spelling library + wordlist (async)
