@@ -71,6 +71,7 @@ export class Nudger {
   _accept() {
     const item = this._active; this._hide();
     if (!item) return;
+    try { window.EonMind?.record('act', item.entity); } catch {}     // learn: you valued this
     try { window.EonCompanion?.escortTo?.(item); } catch {}
   }
   /** "Later" → snooze this item; it resurfaces after a while. */
@@ -87,6 +88,7 @@ export class Nudger {
       // explicit Dismiss → never show this item again + learn to ease off
       this._dismissed.add(this._dkey(item)); this._saveDismissed();
       try { this.cb.noteDismiss(item.entity); } catch {}
+      try { window.EonMind?.record('dismiss', item.entity); } catch {}   // learn: ease off this kind
     }
   }
   _loadDismissed() { try { return new Set(JSON.parse(localStorage.getItem('eon-nudge-dismissed') || '[]')); } catch { return new Set(); } }
