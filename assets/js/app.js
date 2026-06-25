@@ -396,9 +396,11 @@ const CONTRACTIONS = {
   werent: "weren't", didnt: "didn't", doesnt: "doesn't", couldnt: "couldn't", shouldnt: "shouldn't",
   wouldnt: "wouldn't", havent: "haven't", hasnt: "hasn't", hadnt: "hadn't", wouldve: "would've",
   couldve: "could've", shouldve: "should've", im: "I'm", ive: "I've", youre: "you're", youve: "you've",
-  youll: "you'll", theyre: "they're", theyve: "they've", theyll: "they'll", weve: "we've", well: "we'll",
+  youll: "you'll", theyre: "they're", theyve: "they've", theyll: "they'll", weve: "we've",
   thats: "that's", whats: "what's", whos: "who's", heres: "here's", theres: "there's", whens: "when's",
-  wheres: "where's", hows: "how's", lets: "let's", dont: "don't", aint: "isn't",
+  wheres: "where's",
+  // NOTE: "well", "lets", "its", "were", "id", "hes", "shes" are deliberately
+  // excluded — they are valid common words, so auto-fixing them causes errors.
 };
 
 /* Common phrase-level grammar slips → fix [pattern, replacement, label]. */
@@ -463,8 +465,9 @@ function proofread(text) {
   s = s.replace(/[A-Za-z][A-Za-z'-]*/g, (w) => {
     const lw = w.toLowerCase();
     if (/^i'(m|ve|ll|d|re)$/i.test(w)) { if (w[0] !== 'I') note('capitalization'); return 'I' + w.slice(1).toLowerCase(); }
-    if (CONTRACTIONS[lw]) { note('grammar'); return matchCase(w, CONTRACTIONS[lw]); }
-    if (COMMON_TYPOS[lw]) { note('spelling'); return matchCase(w, COMMON_TYPOS[lw]); }
+    if (CONTRACTIONS[lw]) { const rep = matchCase(w, CONTRACTIONS[lw]); if (rep !== w) note('grammar'); return rep; }
+    const typo = COMMON_TYPOS[lw] || LEXICON[lw];     // core map + the big library
+    if (typo) { const rep = matchCase(w, typo); if (rep !== w) note('spelling'); return rep; }
     if (PROPER_CAPS[lw] && w !== PROPER_CAPS[lw]) { note('capitalization'); return PROPER_CAPS[lw]; }
     if (lw.length >= 5 && !dict.has(lw)) {
       for (const [term, display] of dict) {
@@ -505,6 +508,20 @@ function fixField(el) {
   const summary = changes.slice(0, 4).join(', ');
   toast(`Fixed: ${summary}${changes.length > 4 ? '…' : ''} ✨`, 'ok');
   try { window.EON?.ai?.speak('Tidied that up for you. ✍️', 3200); } catch {}
+}
+
+/* The big spelling library (~3.4k misspelling→correction pairs) lives in its
+   own file and is fetched once at startup, then merged into the proofreader. */
+let LEXICON = {};
+async function loadLexicon() {
+  try {
+    const res = await fetch('./assets/js/lexicon.json', { cache: 'force-cache' });
+    if (!res.ok) return;
+    const data = await res.json();
+    delete data._comment;
+    LEXICON = data;
+    console.info(`[EON] spelling library loaded — ${Object.keys(LEXICON).length} entries.`);
+  } catch { /* offline / file:// — core typo map still works */ }
 }
 
 /* ---- EON spell-assist: gentle blur hint. Flags a common English typo or a
@@ -563,8 +580,9 @@ function spellAssist(el) {
     };
     for (const w of words) {
       const lw = w.toLowerCase();
-      // 1) a common English typo or missing-apostrophe contraction
-      if (COMMON_TYPOS[lw]) { suggest(matchCase(w, COMMON_TYPOS[lw])); return; }
+      // 1) a common English typo (core + library) or missing-apostrophe contraction
+      const typo = COMMON_TYPOS[lw] || LEXICON[lw];
+      if (typo && matchCase(w, typo) !== w) { suggest(matchCase(w, typo)); return; }
       if (CONTRACTIONS[lw]) { suggest(matchCase(w, CONTRACTIONS[lw])); return; }
       // 2) a near-miss of one of your own terms
       if (lw.length >= 5 && dict.size && !dict.has(lw)) {
@@ -3310,6 +3328,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (normalizeReminders()) DB.save();   // migrate legacy reminder records
   renderActivePage(page);
   startReminderWatcher();                // owner-only: fire reminders when due
+  loadLexicon();                         // load the big spelling library (async)
 
   // Live sync: when another device changes the data, re-render — but
   // never yank a form out from under the owner while a modal is open.
