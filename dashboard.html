@@ -60,28 +60,31 @@
           </div>
         </div>
 
-        <!-- Right column: notifications + calendar -->
+        <!-- Right column: notifications -->
         <div class="stack-16">
           <!-- Notifications panel -->
           <div class="card card-pad">
             <div class="section-title">Notifications</div>
             <div id="notifPanel" class="feed"></div>
           </div>
+        </div>
+      </div>
 
-          <!-- Calendar widget (click a day to see / add reminders) -->
-          <div class="card card-pad">
-            <div id="calendar"></div>
-            <p class="text-faint mt-2 mb-0" style="font-size:11.5px"><i class="bi bi-info-circle me-1"></i>Click any date to see its reminders or add one. Green dots = reminders, red = deadline.</p>
-          </div>
+      <!-- Calendar + Reminders side by side (stacks on mobile) -->
+      <div class="grid-2 mb-4">
+        <!-- Calendar widget (click a day to see / add reminders) -->
+        <div class="card card-pad">
+          <div id="calendar"></div>
+          <p class="text-faint mt-2 mb-0" style="font-size:11.5px"><i class="bi bi-info-circle me-1"></i>Click any date to see its reminders or add one. Green dots = reminders, red = deadline.</p>
+        </div>
 
-          <!-- Reminder list (full CRUD + status) — private, owner only -->
-          <div class="card card-pad owner-only">
-            <div class="d-flex align-items-center mb-2">
-              <div class="section-title mb-0">Reminders</div>
-              <button class="btn btn-soft btn-sm owner-only ms-auto" id="addReminderBtn"><i class="bi bi-plus-lg me-1"></i>Add</button>
-            </div>
-            <div id="reminderList" class="rem-list"></div>
+        <!-- Reminder list (full CRUD + status) — private, owner only -->
+        <div class="card card-pad owner-only">
+          <div class="d-flex align-items-center mb-2">
+            <div class="section-title mb-0">Reminders</div>
+            <button class="btn btn-soft btn-sm owner-only ms-auto" id="addReminderBtn"><i class="bi bi-plus-lg me-1"></i>Add</button>
           </div>
+          <div id="reminderList" class="rem-list"></div>
         </div>
       </div>
 

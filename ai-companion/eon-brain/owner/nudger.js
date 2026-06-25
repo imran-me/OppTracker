@@ -14,6 +14,7 @@ import { OWNER, ownerFirstName } from '../../js/owner-config.js';
 const FIRST_DELAY = 75000;     // settle before the first nudge
 const GAP_MS = 9 * 60000;      // ~9 min between nudges
 const IDLE_MS = 40000;         // only when the owner's been quiet a bit
+const LATER_MS = 2 * 3600000;  // "Later" → resurface after ~2 hours
 
 export class Nudger {
   constructor(ctx) {
@@ -21,7 +22,9 @@ export class Nudger {
     this.cb = new CompanionBrain(() => (typeof window !== 'undefined' ? window.EonBrain : null));
     this._next = 0;
     this._active = null;
-    this._shown = new Set();
+    this._shown = new Set();              // soft-ignored this session
+    this._dismissed = this._loadDismissed();  // "Dismiss" → never again (persisted)
+    this._snoozed = new Map();            // "Later" → key → resurface-after timestamp
   }
 
   start() { this._injectStyle(); this._buildCard(); }
@@ -41,7 +44,13 @@ export class Nudger {
 
     try { window.EonBrain?.ensureData?.(); } catch {}
     const le = this.cb.looseEnds({ max: 8 });
-    const item = le.find((x) => !this._shown.has(this._key(x)));
+    const item = le.find((x) => {
+      if (this._shown.has(this._key(x))) return false;       // soft-ignored this session
+      if (this._dismissed.has(this._dkey(x))) return false;  // dismissed → never again
+      const sn = this._snoozed.get(this._dkey(x));
+      if (sn && sn > now) return false;                      // snoozed via "Later"
+      return true;
+    });
     if (!item) { this._next = now + 5 * 60000; return; }
     this._next = now + GAP_MS;
     this._show(item);
@@ -64,12 +73,25 @@ export class Nudger {
     if (!item) return;
     try { window.EonCompanion?.escortTo?.(item); } catch {}
   }
+  /** "Later" → snooze this item; it resurfaces after a while. */
+  _later() {
+    const item = this._active; this._hide();
+    if (!item) return;
+    this._snoozed.set(this._dkey(item), Date.now() + LATER_MS);
+  }
   _dismiss(soft) {
     const item = this._active; this._hide();
     if (!item) return;
     this._shown.add(this._key(item));
-    if (!soft) { try { this.cb.noteDismiss(item.entity); } catch {} }   // explicit dismiss → learn
+    if (!soft) {
+      // explicit Dismiss → never show this item again + learn to ease off
+      this._dismissed.add(this._dkey(item)); this._saveDismissed();
+      try { this.cb.noteDismiss(item.entity); } catch {}
+    }
   }
+  _loadDismissed() { try { return new Set(JSON.parse(localStorage.getItem('eon-nudge-dismissed') || '[]')); } catch { return new Set(); } }
+  _saveDismissed() { try { localStorage.setItem('eon-nudge-dismissed', JSON.stringify([...this._dismissed].slice(-300))); } catch {} }
+  _dkey(x) { return `${x.entity}:${x.recordId}`; }
   _hide() {
     if (this._timeout) { clearTimeout(this._timeout); this._timeout = null; }
     this._active = null; this._card?.classList.remove('show');
@@ -97,19 +119,21 @@ export class Nudger {
       #eon-nudge .en-t{font-size:11.5px;color:#C9A227;font-weight:800;letter-spacing:.2px}
       #eon-nudge .en-l{margin:3px 0 9px;color:#16203a}
       #eon-nudge .en-b{display:flex;gap:7px}
-      #eon-nudge button{flex:1;border:0;border-radius:8px;padding:5px 6px;cursor:pointer;font:700 11px system-ui}
+      #eon-nudge button{flex:1;border:0;border-radius:8px;padding:5px 5px;cursor:pointer;font:700 10.5px system-ui;white-space:nowrap}
       #eon-nudge .en-go{background:#1f6dff;color:#fff}#eon-nudge .en-go:hover{background:#1559d8}
-      #eon-nudge .en-no{background:#eef1f7;color:#52607a}#eon-nudge .en-no:hover{background:#e2e7f2}`;
+      #eon-nudge .en-later{background:#eef1f7;color:#52607a}#eon-nudge .en-later:hover{background:#e2e7f2}
+      #eon-nudge .en-no{background:#fff0f0;color:#c0392b}#eon-nudge .en-no:hover{background:#ffe2e2}`;
     document.head.appendChild(s);
   }
   _buildCard() {
     if (document.getElementById('eon-nudge')) { this._card = document.getElementById('eon-nudge'); return; }
     const el = document.createElement('div'); el.id = 'eon-nudge';
     el.innerHTML = `<div class="en-t"></div><div class="en-l"></div>
-      <div class="en-b"><button class="en-go">Show me</button><button class="en-no">Dismiss</button></div>`;
+      <div class="en-b"><button class="en-go">Show me</button><button class="en-later">Later</button><button class="en-no">Dismiss</button></div>`;
     document.body.appendChild(el);
     this._card = el; this._title = el.querySelector('.en-t'); this._line = el.querySelector('.en-l');
     el.querySelector('.en-go').onclick = (e) => { e.stopPropagation(); this._accept(); };
+    el.querySelector('.en-later').onclick = (e) => { e.stopPropagation(); this._later(); };
     el.querySelector('.en-no').onclick = (e) => { e.stopPropagation(); this._dismiss(false); };
   }
 
