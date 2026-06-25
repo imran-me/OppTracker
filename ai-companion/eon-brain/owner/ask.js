@@ -148,25 +148,87 @@ export class AskEon {
   }
 
   _remind(q) {
-    let task = q.replace(/.*?(remind me( to| about)?|don'?t let me forget( to)?|set a reminder( to| about)?)\s*/i, '').trim();
+    let task = q.replace(/.*?(remind me( to| about)?|don'?t let me forget( to)?|set (a )?reminder( to| about)?)\s*/i, '').trim();
     const parsed = this._parseWhen(task);
     task = (parsed.task || task).replace(/[?.!]+$/, '').trim();
-    if (!task) return { speak: 'Sure — what should I remind you about?' };
-    const when = parsed.date || new Date(Date.now() + 86400000);
-    try { const r = window.EonBrain?.createReminder?.({ title: task, remindAt: when.toISOString() }); if (r && r.catch) r.catch(() => {}); }
-    catch { return { speak: 'Sign in as owner and I’ll set reminders. 🔒' }; }
-    return { speak: `Done — I'll remind you to "${task}" on ${this._date(when.toISOString())}. ⏰` };
+    if (!task) return { speak: 'Sure — what should I remind you about, and when?' };
+    const when = parsed.date || (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; })();
+    try {
+      if (window.AppReminders?.create) window.AppReminders.create({ title: task, remindAt: when.toISOString(), source: 'eon' });
+      else if (window.EonBrain?.createReminder) { const r = window.EonBrain.createReminder({ title: task, remindAt: when.toISOString() }); if (r && r.catch) r.catch(() => {}); }
+      else return { speak: 'Sign in as owner and I’ll set reminders. 🔒' };
+    } catch { return { speak: 'Sign in as owner and I’ll set reminders. 🔒' }; }
+    return { speak: `Done — I'll remind you to "${task}" ${this._whenLabel(when)}. ⏰` };
   }
+
+  /* Parse a natural "when" out of a reminder phrase. Understands:
+     in/after N sec|min|hour|day|week · today/tonight/tomorrow/next week
+     · a date (YYYY-MM-DD or D/M/Y, day-first) · a weekday · a time (10pm,
+     22:00, 10:30 am), combinable e.g. "at 10pm on 26/06/2026". */
   _parseWhen(text) {
-    let task = text, date = null, m;
-    if (/\btomorrow\b/i.test(text)) { const d = new Date(); d.setDate(d.getDate() + 1); date = d; task = task.replace(/\btomorrow\b/i, ''); }
-    else if (/\btonight\b|\btoday\b/i.test(text)) { date = new Date(); task = task.replace(/\btonight\b|\btoday\b/i, ''); }
-    else if (/next week/i.test(text)) { const d = new Date(); d.setDate(d.getDate() + 7); date = d; task = task.replace(/next week/i, ''); }
-    else if ((m = text.match(/in (\d+) days?/i))) { const d = new Date(); d.setDate(d.getDate() + parseInt(m[1], 10)); date = d; task = task.replace(m[0], ''); }
-    else if ((m = text.match(/on (\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?)/i))) { const tt = Date.parse(m[1]); if (!Number.isNaN(tt)) { date = new Date(tt); task = task.replace(m[0], ''); } }
-    else { const wm = text.toLowerCase().match(/\b(?:on |next )?(sun|mon|tue|wed|thu|fri|sat)[a-z]*/); if (wm) { const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']; const idx = days.indexOf(wm[1]); if (idx >= 0) { const d = new Date(); let add = (idx - d.getDay() + 7) % 7; if (add === 0) add = 7; d.setDate(d.getDate() + add); date = d; task = task.replace(wm[0], ''); } } }
-    task = task.replace(/^(to|about)\s+/i, '').trim();
+    let task = ' ' + text + ' ';
+    let base = null, timeH = null, timeM = 0, rel = null, m;
+
+    // relative offset: "in 5 min", "after 2 hours", "in 90 seconds", "in 3 days"
+    if ((m = task.match(/\b(?:in|after|within)\s+(\d+)\s*(sec(?:ond)?|min(?:ute)?|hour|hr|day|week)s?\b/i))) {
+      const n = parseInt(m[1], 10), u = m[2].toLowerCase();
+      const mult = u.startsWith('sec') ? 1000 : u.startsWith('min') ? 60000
+        : (u.startsWith('hour') || u === 'hr') ? 3600000 : u.startsWith('day') ? 86400000 : 604800000;
+      rel = n * mult; task = task.replace(m[0], ' ');
+    }
+    // explicit date anywhere (ISO or day-first D/M/Y)
+    if ((m = task.match(/\b(\d{4}-\d{1,2}-\d{1,2})\b/)) || (m = task.match(/\b(\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?)\b/))) {
+      const dd = this._parseDateStr(m[1]); if (dd) { base = dd; task = task.replace(m[0], ' '); }
+    }
+    // relative day words (only if no explicit date)
+    if (!base && rel == null) {
+      if (/\btomorrow\b/i.test(task)) { base = new Date(); base.setDate(base.getDate() + 1); task = task.replace(/\btomorrow\b/i, ' '); }
+      else if (/\bnext week\b/i.test(task)) { base = new Date(); base.setDate(base.getDate() + 7); task = task.replace(/\bnext week\b/i, ' '); }
+      else if (/\btonight\b/i.test(task)) { base = new Date(); timeH = timeH ?? 20; task = task.replace(/\btonight\b/i, ' '); }
+      else if (/\btoday\b/i.test(task)) { base = new Date(); task = task.replace(/\btoday\b/i, ' '); }
+      else { const wm = task.toLowerCase().match(/\b(?:on |next )?(sun|mon|tue|wed|thu|fri|sat)[a-z]*/); if (wm) { const dn = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'], idx = dn.indexOf(wm[1]); if (idx >= 0) { const d = new Date(); let add = (idx - d.getDay() + 7) % 7; if (add === 0) add = 7; d.setDate(d.getDate() + add); base = d; task = task.replace(wm[0], ' '); } } }
+    }
+    // time of day: "at 10pm", "at 22:00", "10:30 am", "at 7"
+    if ((m = task.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i)) ||
+        (m = task.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i)) ||
+        (m = task.match(/\b(\d{1,2})\s*(am|pm)\b/i))) {
+      let h = parseInt(m[1], 10); const mins = /^\d{2}$/.test(m[2] || '') ? parseInt(m[2], 10) : 0;
+      const ap = (m[3] || m[2] || '').toString().toLowerCase();
+      if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0;
+      if (h >= 0 && h <= 23) { timeH = h; timeM = (mins >= 0 && mins < 60) ? mins : 0; task = task.replace(m[0], ' '); }
+    }
+
+    let date = null;
+    if (rel != null) date = new Date(Date.now() + rel);
+    else if (base || timeH != null) {
+      date = base || new Date();
+      if (timeH != null) date.setHours(timeH, timeM, 0, 0); else date.setHours(9, 0, 0, 0);
+      // a bare time already past today → assume the owner means tomorrow
+      if (!base && timeH != null && date.getTime() < Date.now()) date.setDate(date.getDate() + 1);
+    }
+    task = task.replace(/^\s*(to|that|about)\s+/i, '').replace(/\s+/g, ' ').trim();
     return { date, task };
+  }
+  /* Parse a date token. ISO stays ISO; D/M/Y is read day-first. */
+  _parseDateStr(s) {
+    s = String(s).trim();
+    let m;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) return new Date(+m[1], +m[2] - 1, +m[3]);
+    if ((m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?$/))) {
+      let y = m[3] ? +m[3] : new Date().getFullYear(); if (y < 100) y += 2000;
+      return new Date(y, +m[2] - 1, +m[1]);   // day-first
+    }
+    const t = Date.parse(s); return Number.isNaN(t) ? null : new Date(t);
+  }
+  /* Human label: "in 5 minutes" stays relative; dated reminders show date (+time). */
+  _whenLabel(d) {
+    const ms = d.getTime() - Date.now();
+    if (ms > 0 && ms < 3600000) return `in ${Math.max(1, Math.round(ms / 60000))} minute${Math.round(ms / 60000) === 1 ? '' : 's'}`;
+    const hasTime = d.getHours() !== 0 || d.getMinutes() !== 0;
+    const date = d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+    if (!hasTime) return `on ${date}`;
+    const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    return `on ${date} at ${time}`;
   }
 
   _list(items, lead) {
