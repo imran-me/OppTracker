@@ -212,6 +212,10 @@ export class Coach {
     if (['dashboard', 'opportunities', 'opportunityDetails'].includes(this.key) && Math.random() < 0.25) {
       const sl = this._signalLine(); if (sl) return sl;
     }
+    // Productivity Layer: on task/dashboard pages, voice the top alert.
+    if (['dashboard', 'tasks'].includes(this.key) && Math.random() < 0.3) {
+      const pl = this._productivityLine(); if (pl) return pl;
+    }
     // ~40% a real data callout, otherwise rotate observe → prompt → tip, with
     // the odd encouragement / bit of banter mixed in for personality.
     if (Math.random() < 0.4) { const d = this._dataLine(); if (d) return d; }
@@ -235,6 +239,16 @@ export class Coach {
       const emote = { press: 'fistPump', intervene: 'point', revive: 'lookWatch', watch: 'ponder' }[s.recommend] || 'point';
       const text = `${verb} "${this._short(s.name)}". ${s.why[0] || ''}`.trim();
       return { text, emote };
+    } catch { return null; }
+  }
+
+  /** Voice the top Productivity-Layer alert (stall, neglect, unstick, drift…). */
+  _productivityLine() {
+    try {
+      const P = window.EonProductivity; if (!P || !P.enabled || !P.alerts || !P.alerts.length) return null;
+      const a = P.alerts[0];
+      const emote = { overdue: 'point', promise: 'point', neglect: 'lookWatch', drift: 'ponder', unstick: 'idea', overcommit: 'lookWatch', stall: 'think', streak: 'fistPump' }[a.type] || 'point';
+      return { text: a.text, emote };
     } catch { return null; }
   }
 
