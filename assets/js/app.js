@@ -182,9 +182,9 @@ const DB = {
     const list = this.data[entity];
     // capture prior state so the Signal Layer can event-source the change
     let before = null;
-    if (entity === 'opportunities' && record.id) {
+    if ((entity === 'opportunities' || entity === 'tasks') && record.id) {
       const prev = list.find(r => r.id === record.id);
-      if (prev) before = { status: prev.status, deadline: prev.deadline, priority: prev.priority };
+      if (prev) before = { status: prev.status, deadline: prev.deadline, dueDate: prev.dueDate, priority: prev.priority };
     }
     if (!record.id) {
       record.id = uid();
@@ -196,8 +196,10 @@ const DB = {
       else list.push(record);
     }
     if (entity === 'opportunities') { try { logOppEvents(before, this.get('opportunities', record.id)); } catch {} }
+    if (entity === 'tasks') { try { logTaskEvents(before, this.get('tasks', record.id)); } catch {} }
     this.save();
     if (entity === 'opportunities') { try { computeSignals(); } catch {} }
+    if (entity === 'tasks') { try { computeProductivity(); celebrateIfCompleted(before, this.get('tasks', record.id)); } catch {} }
     return record;
   },
 
@@ -1012,6 +1014,7 @@ const SCHEMAS = {
       { key: 'priority', label: 'Priority', type: 'select', opts: 'priorities' },
       { key: 'category', label: 'Category', type: 'select', opts: 'taskCategories' },
       { key: 'dueDate', label: 'Due date', type: 'date' },
+      { key: 'owedTo', label: 'Promised to', type: 'text', hint: 'A person you committed this to — EON tracks it separately' },
       { key: 'linkedOpportunity', label: 'Linked opportunity', type: 'select', opts: '@opportunities' },
       { key: 'notes', label: 'Notes', type: 'textarea', span: true }
     ]
@@ -1531,8 +1534,9 @@ function initDashboard() {
       <td class="date-cell">${o.deadline ? fmtDate(o.deadline) : '—'}</td>
     </tr>`).join('') : `<tr><td colspan="3" class="text-soft text-center py-4">No opportunities yet.</td></tr>`;
 
-  /* signal radar (read-only derived intelligence) */
+  /* signal radar + productivity layer (read-only derived intelligence) */
   try { computeSignals(); renderSignalPanel(); } catch {}
+  try { computeProductivity(); renderRealisticDay(); renderTracksPanel(); renderPulsePanel(); } catch {}
 
   /* calendar widget + reminder list */
   renderCalendar();
@@ -3683,6 +3687,261 @@ function renderSignalPanel() {
 }
 
 /* ==========================================================
+   6.6  PRODUCTIVITY SIGNAL LAYER — your work as a trajectory
+   Read-only derived intelligence over TASKS and "tracks" (categories).
+   One pass per load/save over an append-only task event stream
+   (DB.data._taskEvents) emits: follow-through, rot/aging, drift, promise
+   ledger, unstick prompts, multi-track/neglect/balance, momentum/streak,
+   time-of-day fingerprint, load/capacity, a realistic day, personal
+   coefficients, a counterfactual, and a weekly retro — all on
+   window.EonProductivity, confidence-gated and quiet by default.
+   Shares the 'eon-signals' toggle. Touches nothing else.
+   ========================================================== */
+
+const TASK_DONE = 'Completed';
+const TASK_DEAD = ['Cancelled', 'Dropped'];
+const isTaskDone = (s) => s === TASK_DONE;
+const isTaskDead = (s) => TASK_DEAD.includes(s);
+const isTaskActive = (s) => !isTaskDone(s) && !isTaskDead(s);
+const median = (a) => { if (!a || !a.length) return null; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+const dayKey = (iso) => String(iso).slice(0, 10);
+
+function logTaskEvents(before, after) {
+  if (!after) return;
+  const ev = (DB.data._taskEvents = DB.data._taskEvents || []);
+  const at = new Date().toISOString();
+  const push = (type, from, to) => ev.push({ task: after.id, type, from: from ?? null, to: to ?? null, at });
+  if (!before) push('created', null, after.status || 'To Do');
+  else {
+    if ((before.status || '') !== (after.status || '')) push('status', before.status || '', after.status || '');
+    if ((before.dueDate || '') !== (after.dueDate || '')) push('due', before.dueDate || '', after.dueDate || '');
+  }
+  if (ev.length > 4000) DB.data._taskEvents = ev.slice(-4000);
+}
+function ensureTaskBaseline() {
+  const ev = (DB.data._taskEvents = DB.data._taskEvents || []);
+  const have = new Set(ev.filter(e => e.type === 'created').map(e => e.task));
+  let added = false;
+  DB.getAll('tasks').forEach(t => {
+    if (have.has(t.id)) return;
+    ev.push({ task: t.id, type: 'created', from: null, to: 'To Do', at: t.createdAt || new Date().toISOString() });
+    // if a legacy task is already completed, seed that too so streaks/history exist
+    if (isTaskDone(t.status)) ev.push({ task: t.id, type: 'status', from: 'To Do', to: TASK_DONE, at: t.createdAt || new Date().toISOString() });
+    added = true;
+  });
+  return added;
+}
+function celebrateIfCompleted(before, after) {
+  if (!after || !before) return;
+  if (before.status !== TASK_DONE && after.status === TASK_DONE) {
+    const P = window.EonProductivity, st = (P && P.streak) ? P.streak.current : 0;
+    const line = st > 1 ? `Done! 🎉 ${st}-day streak — keep it alive!` : 'Done! 🎉 One down — nice work.';
+    try { window.EON?.ai?.speak(line, 4200); window.EON?.character?.playEmote?.('cheer'); } catch {}
+    toast('✅ Task complete!', 'ok');
+  }
+}
+
+function computeProductivity() {
+  if (!signalsEnabled()) { window.EonProductivity = { enabled: false }; return; }
+  const tasks = DB.getAll('tasks');
+  const ev = (DB.data._taskEvents || []).slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const byTask = {}; ev.forEach(e => (byTask[e.task] = byTask[e.task] || []).push(e));
+  const now = Date.now(), nowIso = new Date(now).toISOString();
+  const trackOf = (t) => t.category || 'General';
+
+  // ---- completion history (events) → streak + time-of-day + capacity ----
+  const completions = ev.filter(e => e.type === 'status' && e.to === TASK_DONE);
+  const compDays = [...new Set(completions.map(e => dayKey(e.at)))].sort();
+  // current streak: consecutive days ending today/yesterday
+  let streak = 0; {
+    const set = new Set(compDays); let d = new Date();
+    if (!set.has(dayKey(d.toISOString()))) d.setDate(d.getDate() - 1);   // grace: yesterday still counts
+    while (set.has(dayKey(d.toISOString()))) { streak++; d.setDate(d.getDate() - 1); }
+  }
+  const lastComp = completions.length ? completions[completions.length - 1].at : null;
+  const daysSinceComp = lastComp ? Math.floor(daysBetween(lastComp, nowIso)) : null;
+  const stalled = daysSinceComp != null && daysSinceComp >= 2;
+
+  // time-of-day fingerprint (hour histogram of completions)
+  const hours = new Array(24).fill(0); completions.forEach(e => hours[new Date(e.at).getHours()]++);
+  const bestHour = completions.length >= 4 ? hours.indexOf(Math.max(...hours)) : null;
+  const beforeNoon = completions.filter(e => new Date(e.at).getHours() < 12).length;
+  const afterNoon = completions.length - beforeNoon;
+
+  // capacity: median completions per active day
+  const perDay = {}; completions.forEach(e => { const k = dayKey(e.at); perDay[k] = (perDay[k] || 0) + 1; });
+  const capacityPerDay = Object.keys(perDay).length >= 3 ? Math.max(1, Math.round(median(Object.values(perDay)))) : null;
+
+  // ---- per-task signals: rot, drift, stuck, unstick ----
+  // category time-to-complete distribution (for rot tail)
+  const ttcByCat = {};
+  tasks.forEach(t => {
+    if (!isTaskDone(t.status)) return; const h = byTask[t.id] || []; const c = h.find(e => e.type === 'created');
+    const done = [...h].reverse().find(e => e.type === 'status' && e.to === TASK_DONE);
+    if (c && done) { const d = daysBetween(c.at, done.at); if (d >= 0) (ttcByCat[trackOf(t)] = ttcByCat[trackOf(t)] || []).push(d); }
+  });
+  const taskSig = {};
+  const guessUnstick = (t, ageDays) => {
+    const title = String(t.title || ''); const words = title.split(/\s+/).length;
+    if (words >= 8 || /\band\b|,|\//.test(title)) return { reason: 'it\'s too big', step: 'Split it into the first 10-minute slice and do only that.' };
+    if (t.status === 'Waiting') return { reason: 'it\'s blocked', step: 'Send one nudge to whoever you\'re waiting on.' };
+    if (!t.notes) return { reason: 'it\'s unclear', step: 'Write one line: what does "done" look like?' };
+    return { reason: 'it\'s easy to avoid', step: 'Set a 10-minute timer and just start — momentum will carry you.' };
+  };
+  tasks.forEach(t => {
+    if (!isTaskActive(t.status)) return;
+    const h = byTask[t.id] || [];
+    const created = h.find(e => e.type === 'created');
+    const ageDays = created ? Math.floor(daysBetween(created.at, nowIso)) : 0;
+    const lastStatusEv = [...h].reverse().find(e => e.type === 'status' || e.type === 'created');
+    const dwellDays = lastStatusEv ? Math.floor(daysBetween(lastStatusEv.at, nowIso)) : ageDays;
+    const driftCount = h.filter(e => e.type === 'due').length;
+    const catTtc = ttcByCat[trackOf(t)];
+    const catMed = median(catTtc);
+    const rot = catMed != null && catTtc.length >= 3 ? ageDays > catMed * 2 : ageDays > 21;
+    const stuck = dwellDays >= 10;
+    const sig = { id: t.id, title: t.title, track: trackOf(t), ageDays, dwellDays, driftCount, rot, stuck };
+    if (stuck || rot) sig.unstick = guessUnstick(t, ageDays);
+    taskSig[t.id] = sig;
+  });
+
+  // ---- follow-through index (per track + overall) ----
+  const ft = {}; let ftDone = 0, ftTot = 0;
+  tasks.forEach(t => { const k = trackOf(t); (ft[k] = ft[k] || { done: 0, tot: 0 }); ft[k].tot++; ftTot++; if (isTaskDone(t.status)) { ft[k].done++; ftDone++; } });
+  const followThrough = { overall: ftTot ? ftDone / ftTot : null, byTrack: {} };
+  Object.entries(ft).forEach(([k, v]) => { if (v.tot >= 2) followThrough.byTrack[k] = v.done / v.tot; });
+
+  // ---- tracks: open / activity / neglect + week balance ----
+  const weekAgo = now - 7 * 86400000;
+  const lastActByTrack = {}, openByTrack = {}, weekByTrack = {};
+  tasks.forEach(t => {
+    const k = trackOf(t);
+    if (isTaskActive(t.status)) openByTrack[k] = (openByTrack[k] || 0) + 1;
+    const h = byTask[t.id] || []; const last = h.length ? h[h.length - 1].at : t.createdAt;
+    if (last && (!lastActByTrack[k] || Date.parse(last) > Date.parse(lastActByTrack[k]))) lastActByTrack[k] = last;
+  });
+  ev.forEach(e => { if (Date.parse(e.at) >= weekAgo) { const t = tasks.find(x => x.id === e.task); if (t) weekByTrack[trackOf(t)] = (weekByTrack[trackOf(t)] || 0) + 1; } });
+  const tracks = [...new Set(tasks.map(trackOf))].map(k => {
+    const last = lastActByTrack[k]; const neglectDays = last ? Math.floor(daysBetween(last, nowIso)) : null;
+    return { key: k, label: k, open: openByTrack[k] || 0, week: weekByTrack[k] || 0, lastActivity: last, neglectDays, neglected: (openByTrack[k] || 0) > 0 && neglectDays != null && neglectDays >= 9 };
+  }).sort((a, b) => b.open - a.open);
+  const weekTotal = Object.values(weekByTrack).reduce((a, b) => a + b, 0);
+
+  // ---- load / overcommit ----
+  const activeTasks = tasks.filter(t => isTaskActive(t.status));
+  const dueToday = activeTasks.filter(t => daysUntil(t.dueDate) === 0).length;
+  const overdue = activeTasks.filter(t => { const d = daysUntil(t.dueDate); return d != null && d < 0; });
+  const dueWeek = activeTasks.filter(t => { const d = daysUntil(t.dueDate); return d != null && d >= 0 && d <= 7; }).length;
+  const overcommit = capacityPerDay != null && dueToday > capacityPerDay;
+
+  // ---- realistic day: overdue → due-today → high-priority, capped at capacity ----
+  const prRank = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+  const cap = Math.max(3, Math.min(6, capacityPerDay || 4));
+  const realisticDay = activeTasks.map(t => ({ t, d: daysUntil(t.dueDate), pr: prRank[t.priority] ?? 2 }))
+    .sort((a, b) => {
+      const aw = a.d != null && a.d < 0 ? 0 : a.d === 0 ? 1 : 2, bw = b.d != null && b.d < 0 ? 0 : b.d === 0 ? 1 : 2;
+      return aw - bw || a.pr - b.pr || ((a.d ?? 99) - (b.d ?? 99));
+    }).slice(0, cap).map(x => ({ id: x.t.id, title: x.t.title, due: x.t.dueDate, overdue: x.d != null && x.d < 0, priority: x.t.priority }));
+
+  // ---- promise ledger (commitments to people) ----
+  const promises = activeTasks.filter(t => t.owedTo && String(t.owedTo).trim())
+    .map(t => ({ id: t.id, title: t.title, who: t.owedTo, due: t.dueDate, overdue: (daysUntil(t.dueDate) ?? 99) < 0 }))
+    .sort((a, b) => (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1));
+
+  // ---- coefficients (learned) ----
+  const avoided = Object.entries(followThrough.byTrack).filter(([, v]) => v < 0.4).map(([k]) => k);
+  const coefficients = { capacityPerDay, bestHour, followThroughByTrack: followThrough.byTrack, avoidedTracks: avoided };
+
+  // ---- counterfactual (from your own data) ----
+  let counterfactual = null;
+  if (completions.length >= 6 && beforeNoon > afterNoon * 1.5) counterfactual = `You finish ${(beforeNoon / Math.max(1, afterNoon)).toFixed(1)}× more tasks before noon — schedule the hard one for the morning.`;
+  else if (bestHour != null) counterfactual = `Your sharpest hour is around ${bestHour}:00 — drop your top task there.`;
+
+  // ---- alerts (the prioritised feed EON + dashboard consume) ----
+  const alerts = [];
+  if (overdue.length) alerts.push({ type: 'overdue', sev: 5, text: `${overdue.length} task${overdue.length > 1 ? 's' : ''} overdue — clear one?`, pointTo: 'tasks.html' });
+  promises.filter(p => p.overdue).slice(0, 1).forEach(p => alerts.push({ type: 'promise', sev: 4.6, text: `You promised "${p.title}" to ${p.who} — it's overdue.`, pointTo: 'tasks.html' }));
+  tracks.filter(t => t.neglected).slice(0, 1).forEach(t => alerts.push({ type: 'neglect', sev: 4, text: `You haven't touched "${t.label}" in ${t.neglectDays} days — parked or slipping?`, pointTo: 'tasks.html' }));
+  Object.values(taskSig).filter(s => s.driftCount >= 3).slice(0, 1).forEach(s => alerts.push({ type: 'drift', sev: 3.6, text: `"${s.title}" has been rescheduled ${s.driftCount}× — break it down, delegate, or drop it?`, pointTo: 'tasks.html' }));
+  Object.values(taskSig).filter(s => s.unstick).slice(0, 1).forEach(s => alerts.push({ type: 'unstick', sev: 3.4, text: `"${s.title}" is stuck — maybe ${s.unstick.reason}. ${s.unstick.step}`, pointTo: 'tasks.html' }));
+  if (overcommit) alerts.push({ type: 'overcommit', sev: 3.2, text: `${dueToday} due today but you usually finish ~${capacityPerDay}. Trim the plan?`, pointTo: 'tasks.html' });
+  if (stalled && daysSinceComp != null) alerts.push({ type: 'stall', sev: 3, text: `${daysSinceComp} days since your last finish — one quick win restarts momentum.`, pointTo: 'tasks.html' });
+  else if (streak >= 2) alerts.push({ type: 'streak', sev: 1.8, text: `${streak}-day streak going — one quick thing keeps it alive! 🔥`, pointTo: 'tasks.html' });
+  alerts.sort((a, b) => b.sev - a.sev);
+
+  window.EonProductivity = {
+    enabled: true, at: now,
+    followThrough, streak: { current: streak, daysSinceCompletion: daysSinceComp, stalled, lastCompletionAt: lastComp },
+    bestHour, capacity: { perDay: capacityPerDay, dueToday, dueWeek, overdue: overdue.length, overcommit },
+    tracks, balance: { byTrack: weekByTrack, total: weekTotal },
+    taskSignals: taskSig, realisticDay, promises, coefficients, counterfactual, alerts,
+    topAlert() { return alerts[0] || null; },
+  };
+  return window.EonProductivity;
+}
+
+/* ---- Dashboard consumers ---- */
+function renderRealisticDay() {
+  const host = document.getElementById('realisticDay'); if (!host) return;
+  if (!Security.isOwner() || !signalsEnabled()) { host.closest('.card')?.style.setProperty('display', 'none'); return; }
+  const P = window.EonProductivity; if (!P || !P.realisticDay) { host.innerHTML = '<p class="text-soft mb-0" style="font-size:13px">Warming up…</p>'; return; }
+  const cap = P.capacity || {};
+  const items = P.realisticDay;
+  host.innerHTML = `
+    <div class="rd-cap">${cap.perDay ? `You usually finish ~<b>${cap.perDay}</b>/day` : 'Top moves for today'}${cap.overcommit ? ` · <span class="text-danger">${cap.dueToday} due — trim it</span>` : ''}${P.bestHour != null ? ` · sharpest ~<b>${P.bestHour}:00</b>` : ''}</div>
+    ${items.length ? items.map((t, i) => `<a class="rd-row" href="tasks.html">
+        <span class="rd-n">${i + 1}</span>
+        <span class="rd-body"><b>${escapeHtml(t.title)}</b>${t.due ? `<small class="${t.overdue ? 'text-danger' : 'text-faint'}">${t.overdue ? 'overdue · ' : 'due '}${fmtDate(t.due)}</small>` : ''}</span>
+        ${t.priority ? `<span class="chip chip-outline">${escapeHtml(t.priority)}</span>` : ''}
+      </a>`).join('') : '<p class="text-soft mb-0" style="font-size:13px">Nothing pressing — you\'re clear. 🌿</p>'}
+    ${P.counterfactual ? `<div class="rd-cf"><i class="bi bi-lightbulb me-1"></i>${escapeHtml(P.counterfactual)}</div>` : ''}`;
+}
+function renderTracksPanel() {
+  const host = document.getElementById('tracksPanel'); if (!host) return;
+  if (!Security.isOwner() || !signalsEnabled()) { host.closest('.card')?.style.setProperty('display', 'none'); return; }
+  const P = window.EonProductivity; if (!P || !P.tracks) { host.innerHTML = '<p class="text-soft mb-0" style="font-size:13px">Warming up…</p>'; return; }
+  const tot = P.balance.total || 0;
+  host.innerHTML = P.tracks.length ? P.tracks.map(t => {
+    const share = tot ? Math.round((t.week || 0) / tot * 100) : 0;
+    return `<div class="trk-row ${t.neglected ? 'neglect' : ''}">
+      <div class="trk-head"><b>${escapeHtml(t.label)}</b><span class="trk-meta">${t.open} open${t.neglected ? ` · <span class="text-danger">${t.neglectDays}d quiet</span>` : t.neglectDays != null ? ` · ${t.neglectDays}d ago` : ''}</span></div>
+      <div class="trk-bar"><span style="width:${share}%"></span></div>
+    </div>`;
+  }).join('') : '<p class="text-soft mb-0" style="font-size:13px">Add tasks with categories and your tracks appear here.</p>';
+}
+function renderPulsePanel() {
+  const host = document.getElementById('pulsePanel'); if (!host) return;
+  if (!Security.isOwner() || !signalsEnabled()) { host.closest('.card')?.style.setProperty('display', 'none'); return; }
+  const P = window.EonProductivity; if (!P) { host.innerHTML = ''; return; }
+  const ft = P.followThrough.overall;
+  const cells = [
+    ['Follow-through', ft != null ? Math.round(ft * 100) + '%' : '—', 'check2-circle'],
+    ['Streak', (P.streak.current || 0) + 'd', 'fire'],
+    ['Due this week', P.capacity.dueWeek ?? 0, 'calendar-week'],
+    ['Best hour', P.bestHour != null ? P.bestHour + ':00' : '—', 'clock'],
+  ];
+  const promises = P.promises || [];
+  host.innerHTML = `
+    <div class="pulse-grid">${cells.map(c => `<div class="pulse-cell"><span class="pc-ico"><i class="bi bi-${c[2]}"></i></span><div><div class="pc-v">${c[1]}</div><div class="pc-l">${c[0]}</div></div></div>`).join('')}</div>
+    ${promises.length ? `<div class="pulse-promise"><div class="section-title" style="margin:10px 0 6px"><i class="bi bi-hand-thumbs-up me-1"></i>Promise ledger</div>${promises.slice(0, 4).map(p => `<div class="pl-row ${p.overdue ? 'over' : ''}"><b>${escapeHtml(p.title)}</b><small>to ${escapeHtml(p.who)}${p.due ? ' · ' + fmtDate(p.due) : ''}${p.overdue ? ' · overdue' : ''}</small></div>`).join('')}</div>` : ''}`;
+}
+/* Weekly retrospective — shown once a week on the dashboard. */
+function maybeWeeklyRetro() {
+  try {
+    if (!Security.isOwner() || !signalsEnabled()) return;
+    const wk = (() => { const d = new Date(); const onejan = new Date(d.getFullYear(), 0, 1); return d.getFullYear() + '-' + Math.ceil((((d - onejan) / 86400000) + onejan.getDay() + 1) / 7); })();
+    if (localStorage.getItem('eon-retro-week') === wk) return;
+    const P = window.EonProductivity; if (!P) return;
+    const ev = (DB.data._taskEvents || []); const weekAgo = Date.now() - 7 * 86400000;
+    const advanced = ev.filter(e => e.type === 'status' && e.to === TASK_DONE && Date.parse(e.at) >= weekAgo).length;
+    const slipped = (P.capacity.overdue || 0) + Object.values(P.taskSignals).filter(s => s.driftCount >= 3).length;
+    const habit = P.counterfactual || (P.coefficients.avoidedTracks[0] ? `You keep stalling on "${P.coefficients.avoidedTracks[0]}" — try one tiny step there this week.` : 'Protect your sharpest hour for your hardest task.');
+    localStorage.setItem('eon-retro-week', wk);
+    setTimeout(() => { try { window.EON?.ai?.speak(`Weekly check-in: you advanced ${advanced} task${advanced === 1 ? '' : 's'}, ${slipped} slipped. One habit: ${habit}`, 8000); window.EON?.character?.playEmote?.('ponder'); } catch {} }, 9000);
+  } catch {}
+}
+
+/* ==========================================================
    7. ROUTER — map page name → initializer, run on load
    ========================================================== */
 const PAGE_INIT = {
@@ -3718,9 +3977,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   await DB.loadCloud();  // then the shared cloud copy (source of truth)
 
   if (normalizeReminders()) DB.save();   // migrate legacy reminder records
-  if (Security.isOwner() && ensureOppBaseline()) DB.save();   // seed event-stream baselines
-  try { computeSignals(); } catch {}     // Signal Layer: one pass over the pipeline
+  if (Security.isOwner() && (ensureOppBaseline() | ensureTaskBaseline())) DB.save();   // seed event-stream baselines
+  try { computeSignals(); } catch {}         // opportunity Signal Layer
+  try { computeProductivity(); } catch {}    // productivity Signal Layer
   renderActivePage(page);
+  try { maybeWeeklyRetro(); } catch {}       // weekly retrospective (once a week)
   startReminderWatcher();                // owner-only: fire reminders when due
   loadLanguageData();                    // load spelling library + wordlist (async)
 
