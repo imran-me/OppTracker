@@ -136,8 +136,13 @@ export class CompanionBrain {
       else if (days === 1 && !done) out.push(this._le(r, 'due tomorrow', 3.4));
     }
 
+    // Showcase / archive entities are historical — never nag about them
+    // (achievements, awards, training, volunteering, projects, research).
+    const NO_NAG = new Set(['achievements', 'training', 'volunteering', 'projects', 'research']);
+
     // stale: a created/added/updated date long in the past, not finished
     for (const [entity, arr] of Object.entries(data)) {
+      if (NO_NAG.has(entity)) continue;
       if (!Array.isArray(arr) || !arr.length) continue;
       const desc = ents[entity] || {};
       const sf = this._staleField(arr, desc.deadlineField);
