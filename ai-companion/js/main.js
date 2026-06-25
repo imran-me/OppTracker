@@ -25,6 +25,7 @@ import { Nudger }             from '../eon-brain/owner/nudger.js';
 import { Resume }             from '../eon-brain/owner/resume.js';
 import { Coach }              from '../eon-brain/owner/coach.js';
 import { Games }              from '../eon-brain/owner/games.js';
+import { Mind }               from '../eon-brain/owner/mind.js';
 import { Couch }              from './couch.js';
 import { Personality, ARCHETYPES } from './personality.js';
 
@@ -109,6 +110,8 @@ class Eon {
     catch (e) { console.warn('[EON] motivation failed to start:', e); this.motiv = null; }
     try { this.nudger = new Nudger(this.ctx); this.nudger.start(); }                 // owner-mode: forgot/loose-ends nudges
     catch (e) { console.warn('[EON] nudger failed to start:', e); this.nudger = null; }
+    try { this.mind = new Mind(this.ctx); this.mind.start(); }                        // owner-mode: judgment / memory / learning
+    catch (e) { console.warn('[EON] mind failed to start:', e); this.mind = null; }
     try { this.resume = new Resume(this.ctx); this.resume.start(); }                 // owner-mode: where-was-I resume
     catch (e) { console.warn('[EON] resume failed to start:', e); this.resume = null; }
     try { this.coach = new Coach(this.ctx); this.coach.start(); }                    // owner-mode: section-aware coaching
@@ -683,6 +686,7 @@ class Eon {
     try { this.motiv?.update(); } catch (e) { /* motivation must never break the loop */ }
     try { this.nudger?.update(); } catch (e) { /* nudger must never break the loop */ }
     try { this.resume?.update(); } catch (e) { /* resume must never break the loop */ }
+    try { this.mind?.update(); } catch (e) { /* mind must never break the loop */ }
     try { this.coach?.update(); } catch (e) { /* coach must never break the loop */ }
     try { this.games?.update(); } catch (e) { /* games must never break the loop */ }
 

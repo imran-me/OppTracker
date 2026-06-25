@@ -104,6 +104,7 @@ export class OwnerCompanion {
   // button actions
   _showMe() {
     const item = this.agenda[this.idx]; if (!item) return;
+    try { window.EonMind?.record('act', item.entity); } catch {}     // learn: you acted on this
     this._hideBoard();
     this._escort(item);
   }
@@ -115,6 +116,7 @@ export class OwnerCompanion {
   _dismiss() {
     const item = this.agenda[this.idx];
     try { this.cb.noteDismiss(item.entity); } catch {}     // learn: ease off this kind next time
+    try { window.EonMind?.record('dismiss', item.entity); } catch {}
     try { window.EonBrain?.dismiss?.(item.id); } catch {}
     this._next();
   }

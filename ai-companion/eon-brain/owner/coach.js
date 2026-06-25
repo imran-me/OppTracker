@@ -208,7 +208,16 @@ export class Coach {
   }
   _ambientLine() {
     this._rot++;
-    // Signal Layer first: on pipeline pages, voice the top derived move.
+    // The Mind first: a self-evaluated "smart" remark (ripple / memory /
+    // theme / a good clarifying question), already confidence-gated.
+    if (Math.random() < 0.28) {
+      try {
+        const ins = window.EonMind?.insight?.();
+        if (ins) { window.EonMind.noteSpoke(); if (ins.key) window.EonMind.remember(ins.key, 'asked');
+          return { text: ins.text, emote: { ripple: 'idea', memory: 'ponder', theme: 'point', curiosity: 'think' }[ins.type] || 'think' }; }
+      } catch {}
+    }
+    // Signal Layer: on pipeline pages, voice the top derived move.
     if (['dashboard', 'opportunities', 'opportunityDetails'].includes(this.key) && Math.random() < 0.25) {
       const sl = this._signalLine(); if (sl) return sl;
     }
@@ -242,13 +251,21 @@ export class Coach {
     } catch { return null; }
   }
 
-  /** Voice the top Productivity-Layer alert (stall, neglect, unstick, drift…). */
+  /** Voice the top Productivity-Layer alert (stall, neglect, unstick, drift…),
+      filtered through the Mind's judgment: skip if down-weighted/unsure, hedge
+      when not certain, and trim to your current register. */
   _productivityLine() {
     try {
       const P = window.EonProductivity; if (!P || !P.enabled || !P.alerts || !P.alerts.length) return null;
       const a = P.alerts[0];
       const emote = { overdue: 'point', promise: 'point', neglect: 'lookWatch', drift: 'ponder', unstick: 'idea', overcommit: 'lookWatch', stall: 'think', streak: 'fistPump' }[a.type] || 'point';
-      return { text: a.text, emote };
+      const M = window.EonMind;
+      if (!M) return { text: a.text, emote };
+      const conf = Math.min(1, 0.5 + (a.sev || 2) * 0.1);
+      if (!M.shouldSpeak({ type: a.type, sev: a.sev, confidence: conf })) return null;
+      const pre = M.hedge(conf); if (pre == null) return null;
+      M.noteSpoke();
+      return { text: M.fit(pre + a.text), emote };
     } catch { return null; }
   }
 
