@@ -12,6 +12,10 @@ import { discover, extractRecords } from './discovery.js';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowIso = () => new Date().toISOString();
 
+// Bump when the deadline/scan logic changes so a stale persisted brain
+// (saved by an older version) is force-recomputed instead of trusted.
+const BRAIN_VERSION = 2;
+
 export class Brain {
   constructor(cfg) {
     this.cfg = cfg;
@@ -47,7 +51,8 @@ export class Brain {
   async tick() {
     if (!this.isOwner()) { await this._loadStore(); return; }
     const last = this._memory?.lastCycleAt ? Date.parse(this._memory.lastCycleAt) : 0;
-    if (Date.now() - last >= this.cfg.intervalMs - 5000) await this.cycle();
+    const stale = (this._memory?.brainVersion || 0) !== BRAIN_VERSION;   // logic changed → recompute now
+    if (stale || Date.now() - last >= this.cfg.intervalMs - 5000) await this.cycle();
   }
 
   // ---- one meditation cycle (owner only) ----
@@ -74,7 +79,7 @@ export class Brain {
         records.push(...extractRecords(data, e, entities[e]));
         if (this.cfg.meditationPauseMs) await sleep(this.cfg.meditationPauseMs);
       }
-      this._memory = { lastCycleAt: nowIso(), entities: keys, learned: records.length };
+      this._memory = { lastCycleAt: nowIso(), entities: keys, learned: records.length, brainVersion: BRAIN_VERSION };
       this._data = data; this._records = records; this._entities = entities;   // cache for lookups/fetch/ask
 
       const alerts = this._scanDeadlines(records);
@@ -183,12 +188,29 @@ export class Brain {
       if (d.exists) {
         const b = d.data() || {};
         this.state = b.state || this.state;
-        this.feed = b.alerts || [];
+        this.feed = this._sanitizeFeed(b.alerts || []);
         this._statuses = b.statuses || {};
         this._reminders = b.reminders || [];
         this._memory = b.memory || {};
+        // A brain saved by an older version may carry a stale "deadline"
+        // insight for a non-deadline item (e.g. an achievement). Drop it;
+        // the owner's next cycle (forced by the version bump) recomputes.
+        if ((this._memory.brainVersion || 0) !== BRAIN_VERSION && this.state?.state === 'insight') {
+          this.state = { ...this.state, state: 'idle', message: null, pointTo: null };
+        }
       }
     } catch (e) { console.warn('[EON brain] read store failed:', e); }
+  }
+
+  /** Keep only real deadline alerts (allowed entities) + reminders. Protects
+      against a stale persisted feed surfacing achievements/projects/etc. */
+  _sanitizeFeed(feed) {
+    const allow = this.cfg.deadlineEntities;
+    return (Array.isArray(feed) ? feed : []).filter((a) => {
+      if (!a) return false;
+      if (a.type === 'reminder') return true;
+      return !Array.isArray(allow) || allow.includes(a.entity);
+    });
   }
   async _persist() {
     if (!this.isOwner()) return;
@@ -206,7 +228,7 @@ export class Brain {
     if (s.state === 'insight' && s.insightUntil && Date.now() > s.insightUntil) s.state = 'idle';
     return s;
   }
-  getAlerts() { return this.feed; }
+  getAlerts() { return this._sanitizeFeed(this.feed); }
 
   // ---- knowledge bridge (owner-only): raw records for fetch/lookups/ask ----
   getRecords() { return this._records || []; }
