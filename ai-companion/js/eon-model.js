@@ -58,6 +58,10 @@ const EMOTE_DEF = {
   ponder:     { dur: 3.2, face: { mouth: 'smile', tilt: 0.16, hx: 0.14 } },
   typing:     { dur: 3.2, face: { mouth: 'smile', hx: 0.18 } },
   fistPump:   { dur: 1.8, face: { eL: 'happy', eR: 'happy', mouth: 'open' } },
+  // Play-physics set (grab / drag / dizzy reactions).
+  held:       { dur: 1.4, face: { eL: 'open', eR: 'open', mouth: 'o' } },        // startled, dangling
+  grumpy:     { dur: 2.6, face: { eL: 'open', eR: 'open' } },                     // arms crossed, cross
+  stretchY:   { dur: 0.9, face: { eL: 'open', eR: 'open', mouth: 'o' } },         // yanked → elastic
 };
 
 export class EonModel {
@@ -457,6 +461,9 @@ export class EonModel {
     if (this._meditating && !(this._emote && this._emote.name === 'point')) {
       this._applyMeditation(t);
     }
+    // play-physics: knock-out wins over all body; otherwise dizzy stagger.
+    if (this._knockedOut) this._applyKnockout(t);
+    else if (this._stagger > 0.02) this._applyStagger(t, this._stagger);
     // covering his eyes while a password is typed wins over all
     if (this._covering) this._applyCoverEyes(t);
   }
@@ -632,7 +639,48 @@ export class EonModel {
         aL.shoulder.rotation.set(0.1, 0, 0.4);
         break;
       }
+      case 'held': {                                                             // picked up — limbs dangle & flail
+        const f = Math.sin(t * 13);
+        aL.shoulder.rotation.set(0.25, 0, 0.65 + f * 0.5); aL.elbow.rotation.x = -0.4;
+        aR.shoulder.rotation.set(0.25, 0, -0.65 - f * 0.5); aR.elbow.rotation.x = -0.4;
+        lL.rotation.x = 0.45 + f * 0.35; lR.rotation.x = 0.45 - f * 0.35;
+        break;
+      }
+      case 'grumpy':                                                             // arms crossed, annoyed shake
+        eon.rotation.z = Math.sin(t * 12) * 0.03; this.head.rotation.x = 0.08;
+        aL.shoulder.rotation.set(-0.32, 0, 0.5); aL.elbow.rotation.x = -1.75;
+        aR.shoulder.rotation.set(-0.32, 0, -0.5); aR.elbow.rotation.x = -1.75;
+        break;
+      case 'stretchY': {                                                         // yanked → stretches like elastic
+        const s = Math.sin(ep * Math.PI);
+        eon.scale.y = 1 + s * 0.5; eon.scale.x = 1 - s * 0.22;
+        aL.shoulder.rotation.set(0.1, 0, 0.3); aR.shoulder.rotation.set(0.1, 0, -0.3);
+        if (ep > 0.98) { eon.scale.y = 1; eon.scale.x = 1; }
+        break;
+      }
     }
+  }
+
+  /* ---- play-physics sustained poses (dizzy stagger → knock-out) ---- */
+  setStagger(level) { this._stagger = Math.max(0, Math.min(1, level || 0)); }
+  setKnockedOut(on) { this._knockedOut = !!on; }
+  _applyStagger(t, lv) {
+    const eon = this.eon;
+    eon.rotation.z += Math.sin(t * (3 + lv * 4)) * 0.20 * lv;
+    eon.position.x += Math.sin(t * (1.7 + lv * 2)) * 0.05 * lv;
+    this.head.rotation.z += Math.sin(t * (2.4 + lv * 3)) * 0.32 * lv;
+    this.head.rotation.x += Math.sin(t * 1.7) * 0.10 * lv;
+    this.armL.shoulder.rotation.set(0.1, 0, 0.5 + Math.sin(t * 3) * 0.25 * lv);
+    this.armR.shoulder.rotation.set(0.1, 0, -0.5 - Math.sin(t * 3.2) * 0.25 * lv);
+  }
+  _applyKnockout(t) {
+    const eon = this.eon;
+    eon.rotation.z = 1.45;                                  // toppled flat on his back
+    eon.position.y = 0.03 + Math.sin(t * 2) * 0.012;        // on the ground, gentle breathing
+    this.head.rotation.set(0, 0, 0);
+    this.armL.shoulder.rotation.set(0, 0, 0.85); this.armR.shoulder.rotation.set(0, 0, -0.85);
+    this.legL.rotation.x = 0.12; this.legR.rotation.x = 0.12;
+    this._setEye(this.eyeL, 'closed', 1, 0, 0, 1); this._setEye(this.eyeR, 'closed', 1, 0, 0, 1);
   }
 
   /** Sustained meditation pose (seated, hands in lap, eyes closed, gentle float). */

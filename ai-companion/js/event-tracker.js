@@ -63,12 +63,32 @@ export class EventTracker {
       if (this.ctx.drag.active && this._press) {
         const w = this.ctx.screenToWorld(e.clientX, e.clientY);
         this.ctx.drag.x = w.x; this.ctx.drag.y = w.y;
+        // physics: circular dragging (heading turn rate) → dizziness; fast yank → stretch
+        const dx = e.clientX - this._mv0x, dy = e.clientY - this._mv0y;
+        const sp = Math.hypot(dx, dy) / dtm;                 // px/ms
+        this._lastSpeed = sp;
+        if (sp > 0.25) {
+          const heading = Math.atan2(dy, dx);
+          if (this._prevHeading != null) {
+            let dH = heading - this._prevHeading; dH = Math.atan2(Math.sin(dH), Math.cos(dH));
+            if (Math.abs(dH) > 0.04) this.ctx.play?.onSwirl(dH);
+          }
+          this._prevHeading = heading;
+          this.ctx.play?.onYank(sp);
+        }
+      }
+      this._mv0x = e.clientX; this._mv0y = e.clientY;
+
+      // physics: flinch when grumpy / low-trust and the cursor sidles up to him
+      if (!this._press && this.ctx.play && (this.ctx.play.grumpy || this.ctx.play.trust < 32)) {
+        const h = this._hit(e.clientX, e.clientY);
+        if (h.on && now - (this._lastFlinch || 0) > 2500) { this._lastFlinch = now; character.face(e.clientX > h.head.x ? -1 : 1); this.ctx.particles?.emote('💢', character._worldHead(0, 0.7)); }
       }
 
-      // high-five: a quick upward flick of the cursor over EON → jump
+      // high-five: a quick upward flick of the cursor over EON → jump (gentle play)
       if (!this._press && vy < -1.6 && now - this._lastHi5 > 1500) {
         const h = this._hit(e.clientX, e.clientY);
-        if (h.on) { this._lastHi5 = now; emotion.react('excited', { priority: 2, speak: false }); this.ctx.particles?.heart(character._worldHead(0, 0.7)); }
+        if (h.on) { this._lastHi5 = now; emotion.react('excited', { priority: 2, speak: false }); this.ctx.particles?.heart(character._worldHead(0, 0.7)); this.ctx.play?.onGentle(); }
       }
     }, { passive: true, capture: false });
 
@@ -84,6 +104,8 @@ export class EventTracker {
       e.preventDefault();                          // don't start a text selection
       document.body.style.userSelect = 'none';
       this._press = { x: e.clientX, y: e.clientY, dragging: false };
+      this._prevHeading = null; this._lastSpeed = 0;
+      this.ctx.play?.onGrab();                          // physics: picked up → startled / annoyed
       // long-press (held still) → curl up to sleep
       this._press.lp = setTimeout(() => {
         if (this._press && !this._press.dragging) { character.setState('sleep'); this._suppressClick = true; }
@@ -97,10 +119,11 @@ export class EventTracker {
       if (this._press && this._press.dragging) {
         this.ctx.drag.active = false;
         this._suppressClick = true;
+        this.ctx.play?.onDrop(this._lastSpeed || 0);   // physics: drop / slam / fling
         activity.startSulk();                 // dropped → sulk, then sleep
         this.ctx.particles?.footstep(character.worldFeet());
       }
-      this._press = null;
+      this._press = null; this._prevHeading = null;
     }, { passive: true, capture: false });
 
     // ---- Double-click EON: release him → wake + resume roaming ----
@@ -109,6 +132,7 @@ export class EventTracker {
       const near = h.on || Math.abs(e.clientX - h.head.x) < (h.feet.y - h.head.y) * 0.6;
       if (near) {
         this._suppressClick = true;
+        this.ctx.play?.revive();              // physics: snap him out of dizzy/KO faster
         activity.wake();
         character.setState('wakeUp', () => emotion.react('waving', { priority: 2, speak: false }));
         this.ctx.particles?.emote('👋', character._worldHead(0, 0.7));
@@ -172,6 +196,7 @@ export class EventTracker {
     const { emotion, character, ai, particles, personality } = this.ctx;
     const now = performance.now();
     personality?.nudge(2);
+    this.ctx.play?.revive();                  // a poke also helps him shake it off
     const emote = (ch) => particles?.emote(ch, character._worldHead(0, 0.7));
     const react = (e) => emotion.react(e, { priority: 2, speak: false });
 

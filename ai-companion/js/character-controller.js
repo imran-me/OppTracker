@@ -415,6 +415,10 @@ export class CharacterController {
   /** Sustained meditation pose on/off (detailed model only). */
   setMeditating(on) { if (this.detailed && this.modelObj) this.modelObj.setMeditating(on); }
 
+  /** Play-physics: dizzy stagger (0..1) and knocked-out pose (detailed only). */
+  setStagger(level) { if (this.detailed && this.modelObj) this.modelObj.setStagger(level); }
+  setKnockedOut(on) { if (this.detailed && this.modelObj) this.modelObj.setKnockedOut(on); }
+
   /** Cover his eyes (while a password is typed) on/off. */
   setCoverEyes(on) { if (this.detailed && this.modelObj) this.modelObj.setCoverEyes(on); }
 

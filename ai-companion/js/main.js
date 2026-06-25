@@ -14,6 +14,7 @@ import { Navigator }          from './pathfinding.js';
 import { EmotionEngine }      from './emotion-engine.js';
 import { ActivityEngine }     from './activity-engine.js';
 import { EventTracker }       from './event-tracker.js';
+import { PlayState }          from './physics.js';
 import { AiCore }             from './ai-core.js';
 import { HomeSystem }         from './home-system.js';
 import { HypeMan }            from './hype-man.js';
@@ -78,6 +79,8 @@ class Eon {
     this.home     = new HomeSystem(ctx);
     this.activity = new ActivityEngine(ctx);
     this.tracker  = new EventTracker(ctx);
+    this.play     = new PlayState(ctx);           // physical-handling reactions (dizzy/temper/trust)
+    ctx.play = this.play;
 
     // fill ctx with everything + helpers
     Object.assign(ctx, {
@@ -127,6 +130,7 @@ class Eon {
     this._restoreOrEnter(saved);
 
     this.tracker.start();
+    this.play.start();
     this._bindLifecycle();
 
     // cover his eyes while a password is being typed (login) — "not peeking!"
@@ -643,9 +647,20 @@ class Eon {
 
     // being dragged: snap to the cursor, flail, skip normal nav/activity
     if (this.ctx.drag.active) {
+      this.play.update(dt);
       this.nav.set(this.ctx.drag.x, this.ctx.drag.y);
       this.character.root.position.x = this.nav.x;
       this.character.root.position.y = this.nav.y;
+      this.character.update(dt, t, this.ctx);
+      this.particles.update(dt);
+      this._syncOverlays();
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+
+    // knocked out: he lies where he fell, recovering — skip normal nav/activity
+    if (this.play.knockedOut) {
+      this.play.update(dt);
       this.character.update(dt, t, this.ctx);
       this.particles.update(dt);
       this._syncOverlays();
@@ -671,6 +686,7 @@ class Eon {
     }
 
     // subsystems
+    this.play.update(dt);
     this.character.update(dt, t, this.ctx);
     this.activity.update(dt);
     this.particles.update(dt);
