@@ -995,6 +995,7 @@ const SCHEMAS = {
       { key: 'openDate', label: 'Open date', type: 'date' },
       { key: 'deadline', label: 'Deadline', type: 'date' },
       { key: 'eventDate', label: 'Event date', type: 'date' },
+      { key: 'nextAction', label: 'Next step', type: 'text', span: true, hint: 'The one thing to do next — EON nudges this' },
       { key: 'notes', label: 'Notes', type: 'textarea', span: true },
       { key: 'image', label: 'Cover image URL', type: 'url', span: true },
       { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
@@ -1877,6 +1878,46 @@ function initOpportunities() {
 }
 
 /* ---------- OPPORTUNITY DETAILS ---------- */
+/* ---- opportunity activity log (worklog of what you actually did) ----
+   Each entry is a real "touch": it timestamps progress AND feeds the Signal
+   Layer's cadence/decay so EON knows when a deal is genuinely going quiet. */
+const ACT_KINDS = [
+  { v: 'worked', label: 'Worked on it', ico: 'pencil-fill' },
+  { v: 'submitted', label: 'Submitted', ico: 'send-fill' },
+  { v: 'email', label: 'Emailed', ico: 'envelope-fill' },
+  { v: 'call', label: 'Call / meeting', ico: 'telephone-fill' },
+  { v: 'followup', label: 'Followed up', ico: 'arrow-repeat' },
+  { v: 'note', label: 'Note', ico: 'sticky-fill' },
+];
+function logActivity(oppId, kind, note) {
+  if (!Security.guard('log activity')) return;
+  const o = DB.get('opportunities', oppId); if (!o) return;
+  note = String(note || '').trim();
+  if (!note) { toast('Write what you did first.', 'err'); return; }
+  o.activities = Array.isArray(o.activities) ? o.activities : [];
+  const at = new Date().toISOString();
+  o.activities.push({ id: uid(), at, kind: kind || 'worked', note });
+  (DB.data._events = DB.data._events || []).push({ opp: oppId, type: 'touch', from: null, to: kind || 'worked', at });
+  DB.save();
+  try { computeSignals(); } catch {}
+  toast('Logged. ✍️', 'ok');
+  initOpportunityDetails();
+}
+function addActivityFromForm(oppId) {
+  const note = document.getElementById('actNote');
+  const kind = document.getElementById('actKind');
+  if (note) logActivity(oppId, kind ? kind.value : 'worked', note.value);
+}
+function setNextAction(oppId) {
+  if (!Security.guard('set the next step')) return;
+  const el = document.getElementById('nextInput'); if (!el) return;
+  const o = DB.get('opportunities', oppId); if (!o) return;
+  o.nextAction = String(el.value || '').trim();
+  DB.save(); try { computeSignals(); } catch {}
+  toast(o.nextAction ? 'Next step set. 🎯' : 'Next step cleared.', 'ok');
+  initOpportunityDetails();
+}
+
 function initOpportunityDetails() {
   const id = new URLSearchParams(location.search).get('id');
   const o = id && DB.get('opportunities', id);
@@ -1886,7 +1927,22 @@ function initOpportunityDetails() {
   const linkedTasks = DB.getAll('tasks').filter(t => t.linkedOpportunity === o.name);
   const d = daysUntil(o.deadline);
 
+  // EON's read on THIS deal (Signal Layer), owner-only
+  const sig = (window.EonSignals && window.EonSignals.get) ? window.EonSignals.get(o.id) : null;
+  const REC = { press: ['green', 'Press now', 'lightning-charge-fill'], intervene: ['amber', 'Intervene', 'exclamation-triangle-fill'], revive: ['red', 'Revive', 'arrow-counterclockwise'], watch: ['slate', 'Watch', 'eye'] };
+  const sigBanner = sig ? (() => { const r = REC[sig.recommend] || REC.watch; return `
+    <div class="sig-banner owner-only t-${r[0]}">
+      <i class="bi bi-${r[2]}"></i>
+      <div class="sb-body"><b>EON: ${r[1]}</b><span>${escapeHtml(sig.why.join(' '))}</span></div>
+      <span class="sb-conf" title="confidence">${Math.round(sig.confidence * 100)}%</span>
+    </div>`; })() : '';
+
+  // activity log (most recent first)
+  const acts = Array.isArray(o.activities) ? [...o.activities].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)) : [];
+  const kindOf = (v) => ACT_KINDS.find(k => k.v === v) || ACT_KINDS[0];
+
   host.innerHTML = `
+    ${sigBanner}
     <div class="card card-pad mb-3">
       <div class="detail-head">
         <div class="dh-ico t-${statusTone(o.status)}"><i class="bi bi-${typeIcon(o.type)}"></i></div>
@@ -1906,6 +1962,11 @@ function initOpportunityDetails() {
         ${o.link ? `<a class="btn btn-soft btn-sm" href="${escapeHtml(o.link)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Official page</a>` : ''}
         <button class="btn btn-ghost btn-sm owner-only" onclick="openEntityModal('opportunities','${o.id}', () => location.reload())"><i class="bi bi-pencil me-1"></i>Edit</button>
         <button class="btn btn-ghost btn-sm owner-only" onclick="openEntityModal('tasks', null, ()=>location.reload())"><i class="bi bi-plus-lg me-1"></i>Add linked task</button>
+      </div>
+      <div class="next-step mt-3">
+        <i class="bi bi-flag-fill"></i>
+        <input id="nextInput" value="${escapeHtml(o.nextAction || '')}" placeholder="Next step — the one thing to do next…" ${Security.isOwner() ? '' : 'disabled'}>
+        <button class="btn btn-primary btn-sm owner-only" onclick="setNextAction('${o.id}')">Set</button>
       </div>
     </div>
 
@@ -1943,6 +2004,22 @@ function initOpportunityDetails() {
               <span style="font-size:13.5px;${t.status === 'Completed' ? 'text-decoration:line-through;color:var(--text-faint)' : ''}">${escapeHtml(t.title)}</span>
               <span class="ms-auto">${statusChip(t.status)}</span>
             </div>`).join('') : `<p class="text-soft mb-0" style="font-size:13px">No linked tasks yet. Use “Add linked task” above.</p>`}
+        </div>
+
+        <div class="card card-pad">
+          <div class="section-title">Activity log (${acts.length})</div>
+          <div class="act-add owner-only">
+            <select id="actKind">${ACT_KINDS.map(k => `<option value="${k.v}">${k.label}</option>`).join('')}</select>
+            <input id="actNote" placeholder="What did you do? (e.g. finished essay 2)" onkeydown="if(event.key==='Enter')addActivityFromForm('${o.id}')">
+            <button class="btn btn-primary btn-sm" onclick="addActivityFromForm('${o.id}')"><i class="bi bi-plus-lg"></i></button>
+          </div>
+          <div class="act-list">
+            ${acts.length ? acts.map(a => { const k = kindOf(a.kind); return `
+              <div class="act-item">
+                <span class="act-ico"><i class="bi bi-${k.ico}"></i></span>
+                <div class="act-body"><b>${escapeHtml(a.note)}</b><small>${k.label} · ${fmtDate(a.at)}</small></div>
+              </div>`; }).join('') : `<p class="text-soft mb-0" style="font-size:13px">No activity logged yet. Each entry tells EON the deal is alive — and sharpens his "going quiet" radar.</p>`}
+          </div>
         </div>
       </div>
     </div>`;
@@ -3547,6 +3624,7 @@ function computeSignals() {
     if (inflection) { recommend = recommend === 'watch' ? 'intervene' : recommend; why.push('Momentum just turned down — an inflection point.'); }
     if (coeff.medianTimeToCloseDays && ageDays > coeff.medianTimeToCloseDays * 1.3 && resConf >= 0.5) why.push(`Older than your typical ${coeff.medianTimeToCloseDays}-day close.`);
     if (!why.length) why.push(momentum > 0.4 ? 'Moving at a healthy clip.' : 'Quietly sitting — could use a touch.');
+    if (o.nextAction) why.unshift(`Next: ${o.nextAction}.`);   // the specific move to make
 
     const sig = {
       id: o.id, name: o.name, status: o.status, stageIdx: idx,
