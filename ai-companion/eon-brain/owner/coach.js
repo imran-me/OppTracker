@@ -208,6 +208,10 @@ export class Coach {
   }
   _ambientLine() {
     this._rot++;
+    // Signal Layer first: on pipeline pages, voice the top derived move.
+    if (['dashboard', 'opportunities', 'opportunityDetails'].includes(this.key) && Math.random() < 0.25) {
+      const sl = this._signalLine(); if (sl) return sl;
+    }
     // ~40% a real data callout, otherwise rotate observe → prompt → tip, with
     // the odd encouragement / bit of banter mixed in for personality.
     if (Math.random() < 0.4) { const d = this._dataLine(); if (d) return d; }
@@ -220,6 +224,18 @@ export class Coach {
     const S = SECTIONS[this.key] || SECTIONS.dashboard;
     const lines = S[pool] && S[pool].length ? S[pool] : S.observe;
     return { text: this._pick(lines), emote: this._pick(S.emotes) };
+  }
+
+  /** Voice the top Signal-Layer move (effort-yield ranked, confidence-gated). */
+  _signalLine() {
+    try {
+      const S = window.EonSignals; if (!S || !S.enabled || !S.ranked || !S.ranked.length) return null;
+      const s = S.ranked[0];
+      const verb = { press: 'Press now —', intervene: 'Heads up —', revive: 'Cooling off —', watch: '' }[s.recommend] || '';
+      const emote = { press: 'fistPump', intervene: 'point', revive: 'lookWatch', watch: 'ponder' }[s.recommend] || 'point';
+      const text = `${verb} "${this._short(s.name)}". ${s.why[0] || ''}`.trim();
+      return { text, emote };
+    } catch { return null; }
   }
 
   /** A specific, data-aware remark from the owner's records (or null). */

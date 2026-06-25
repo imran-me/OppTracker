@@ -40,6 +40,7 @@ export function toIso(v) {
 export function discover(data, overrides = {}, deadlineEntities = null) {
   const out = {};
   for (const [key, value] of Object.entries(data || {})) {
+    if (key.startsWith('_')) continue;          // system arrays (e.g. _events) are not entities
     if (!Array.isArray(value) || value.length === 0) continue;
     const sample = value.filter((x) => x && typeof x === 'object').slice(0, 50);
     if (!sample.length) continue;
