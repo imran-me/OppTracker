@@ -326,10 +326,189 @@ function rtApply(ta, kind) {
   ta.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-/* ---- EON spell-assist: learns YOUR vocabulary from your own data and
-   suggests the right spelling when a typed word is a near-miss of one of
-   your terms (names, skills, orgs, titles…). High-precision: it only flags
-   close matches to YOUR domain words, never generic English. ---- */
+/* ============================================================
+   EON LANGUAGE SKILLS — spelling, grammar & writing fixes (client-side).
+   A curated common-typo map + safe rule-based grammar fixes + near-miss
+   correction against YOUR own vocabulary. Powers the gentle blur hint
+   (spellAssist) and the toolbar "Fix" button (proofread).
+   ============================================================ */
+
+/* High-frequency English misspellings → correction (lowercase keys). */
+const COMMON_TYPOS = {
+  // articles / glue words & finger-slips
+  teh: 'the', thn: 'then', adn: 'and', nad: 'and', taht: 'that', wiht: 'with', hte: 'the', ot: 'to',
+  fo: 'of', fro: 'for', og: 'of', anf: 'and', ahve: 'have', wnat: 'want', jsut: 'just',
+  knwo: 'know', konw: 'know', wokr: 'work', wroking: 'working', liek: 'like', becuse: 'because',
+  // -ei-/-ie- and double letters
+  recieve: 'receive', recieved: 'received', recieving: 'receiving', reciept: 'receipt', beleive: 'believe',
+  beleived: 'believed', beleive: 'believe', acheive: 'achieve', acheived: 'achieved', acheiving: 'achieving',
+  achievment: 'achievement', achievments: 'achievements', wierd: 'weird', freind: 'friend', freinds: 'friends',
+  peice: 'piece', acheivement: 'achievement', concieve: 'conceive', decieve: 'deceive', percieve: 'perceive',
+  // common content words
+  seperate: 'separate', seperated: 'separated', seperately: 'separately', definately: 'definitely',
+  definatly: 'definitely', definetly: 'definitely', occured: 'occurred', occuring: 'occurring',
+  untill: 'until', wich: 'which', becuase: 'because', becasue: 'because', thier: 'their', truely: 'truly',
+  tommorow: 'tomorrow', tommorrow: 'tomorrow', enviroment: 'environment', goverment: 'government',
+  neccessary: 'necessary', necesary: 'necessary', necessery: 'necessary', occassion: 'occasion',
+  persue: 'pursue', persued: 'pursued', priviledge: 'privilege', recomend: 'recommend', recomended: 'recommended',
+  refered: 'referred', refering: 'referring', relevent: 'relevant', succesful: 'successful',
+  successfull: 'successful', sucessful: 'successful', succesfully: 'successfully', sucessfully: 'successfully',
+  writting: 'writing', begining: 'beginning', beggining: 'beginning', calender: 'calendar', collegue: 'colleague',
+  collegues: 'colleagues', commited: 'committed', commitee: 'committee', completly: 'completely',
+  concious: 'conscious', embarass: 'embarrass', embarassing: 'embarrassing', existance: 'existence',
+  experiance: 'experience', experianced: 'experienced', familar: 'familiar', finaly: 'finally',
+  foriegn: 'foreign', grammer: 'grammar', happend: 'happened', immediatly: 'immediately',
+  independant: 'independent', independance: 'independence', knowlege: 'knowledge', maintainance: 'maintenance',
+  occassionally: 'occasionally', oppurtunity: 'opportunity', oppertunity: 'opportunity', opportunites: 'opportunities',
+  oppurtunities: 'opportunities', posession: 'possession', prefered: 'preferred', publically: 'publicly',
+  responsability: 'responsibility', responsibile: 'responsible', similiar: 'similar', strenght: 'strength',
+  useable: 'usable', accomodate: 'accommodate', accomodation: 'accommodation', adress: 'address',
+  arguement: 'argument', assesment: 'assessment', basicly: 'basically', catagory: 'category',
+  curiousity: 'curiosity', dilema: 'dilemma', dissapoint: 'disappoint', dissapointed: 'disappointed',
+  enterpreneur: 'entrepreneur', entreprenuer: 'entrepreneur', garantee: 'guarantee', harrass: 'harass',
+  harrassment: 'harassment', intresting: 'interesting', interesting: 'interesting', liason: 'liaison',
+  millenium: 'millennium', noticable: 'noticeable', occurence: 'occurrence', paralel: 'parallel',
+  perseverence: 'perseverance', practise: 'practice', recepient: 'recipient', rythm: 'rhythm',
+  scholorship: 'scholarship', scholarhip: 'scholarship', tecnology: 'technology', techology: 'technology',
+  unfortunatly: 'unfortunately', volunteeer: 'volunteer', volunter: 'volunteer', certficate: 'certificate',
+  certifcate: 'certificate', certificaiton: 'certification', univercity: 'university', univeristy: 'university',
+  // academic / career vocabulary (relevant to opportunity-seeking)
+  curriculem: 'curriculum', resgistration: 'registration', registeration: 'registration', aplication: 'application',
+  applicaton: 'application', aplicant: 'applicant', canditate: 'candidate', acceptence: 'acceptance',
+  admited: 'admitted', admissons: 'admissions', deadlne: 'deadline', dedline: 'deadline', interveiw: 'interview',
+  intervew: 'interview', particpate: 'participate', participatd: 'participated', particpant: 'participant',
+  acheivements: 'achievements', resarch: 'research', reserch: 'research', reasearch: 'research',
+  goverment: 'government', interational: 'international', internatonal: 'international', nationaly: 'nationally',
+  competion: 'competition', competiton: 'competition', conferance: 'conference', conferene: 'conference',
+  fellowhip: 'fellowship', internsip: 'internship', interhsip: 'internship', mentorhip: 'mentorship',
+  prefession: 'profession', profesional: 'professional', profesionally: 'professionally', managment: 'management',
+  developement: 'development', enviromental: 'environmental', anaylsis: 'analysis', analiysis: 'analysis',
+  buisness: 'business', busniess: 'business', leadred: 'leader', leadersihp: 'leadership', leadershp: 'leadership',
+  // multi-word fixes (value contains a space)
+  alot: 'a lot', infront: 'in front', incase: 'in case', aswell: 'as well', inspite: 'in spite',
+  atleast: 'at least', infact: 'in fact', eventhough: 'even though', infrount: 'in front',
+};
+
+/* No-apostrophe contractions → with apostrophe (safe set only — words that are
+   almost never anything else; "were/lets/its/ill" are intentionally omitted). */
+const CONTRACTIONS = {
+  dont: "don't", cant: "can't", wont: "won't", isnt: "isn't", arent: "aren't", wasnt: "wasn't",
+  werent: "weren't", didnt: "didn't", doesnt: "doesn't", couldnt: "couldn't", shouldnt: "shouldn't",
+  wouldnt: "wouldn't", havent: "haven't", hasnt: "hasn't", hadnt: "hadn't", wouldve: "would've",
+  couldve: "could've", shouldve: "should've", im: "I'm", ive: "I've", youre: "you're", youve: "you've",
+  youll: "you'll", theyre: "they're", theyve: "they've", theyll: "they'll", weve: "we've", well: "we'll",
+  thats: "that's", whats: "what's", whos: "who's", heres: "here's", theres: "there's", whens: "when's",
+  wheres: "where's", hows: "how's", lets: "let's", dont: "don't", aint: "isn't",
+};
+
+/* Common phrase-level grammar slips → fix [pattern, replacement, label]. */
+const PHRASE_FIXES = [
+  [/\b(could|should|would|must|might) of\b/gi, '$1 have', 'grammar'],
+  [/\byour welcome\b/gi, "you're welcome", 'grammar'],
+  [/\banyways\b/gi, 'anyway', 'grammar'],
+  [/\birregardless\b/gi, 'regardless', 'grammar'],
+  [/\bsupposably\b/gi, 'supposedly', 'spelling'],
+  [/\bfor all intensive purposes\b/gi, 'for all intents and purposes', 'grammar'],
+  [/\beach other\b/gi, 'each other', 'grammar'], [/\beachother\b/gi, 'each other', 'spelling'],
+  [/\bnowdays\b/gi, 'nowadays', 'spelling'], [/\bcan not\b/g, 'cannot', 'grammar'],
+  [/\bi\.e\b(?!\.)/g, 'i.e.', 'grammar'], [/\be\.g\b(?!\.)/g, 'e.g.', 'grammar'],
+  [/\bect\b\.?/gi, 'etc.', 'spelling'],
+];
+
+/* Words always capitalized. Excludes May/March/August (also common words). */
+const PROPER_CAPS = (() => {
+  const out = {};
+  ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'january', 'february', 'april', 'june', 'july', 'september', 'october', 'november', 'december',
+    'english', 'bengali', 'bangla', 'arabic', 'spanish', 'french', 'german', 'chinese', 'japanese',
+    'i'].forEach(w => { out[w] = w === 'i' ? 'I' : w[0].toUpperCase() + w.slice(1); });
+  return out;
+})();
+
+/* Preserve the original word's case shape when substituting a correction. */
+function matchCase(src, repl) {
+  if (src.length > 1 && src === src.toUpperCase()) return repl.toUpperCase();
+  if (src[0] === src[0].toUpperCase()) return repl[0].toUpperCase() + repl.slice(1);
+  return repl;
+}
+
+/* Rule-based proofread. Returns cleaned text + a list of change labels.
+   Deliberately conservative — only fixes near-certain issues, and edits
+   words and spacing only (it leaves the bold / underline markers alone). */
+function proofread(text) {
+  let s = String(text == null ? '' : text);
+  const before = s;
+  const changes = new Set();
+  const note = (k) => changes.add(k);
+
+  // ---- whitespace hygiene ----
+  s = s.replace(/[ \t]+$/gm, '');                 // trailing spaces per line
+  if (/[ \t]{2,}/.test(s)) { s = s.replace(/[ \t]{2,}/g, ' '); note('extra spaces'); }
+  if (/\n{3,}/.test(s)) { s = s.replace(/\n{3,}/g, '\n\n'); note('blank lines'); }
+  s = s.trim();
+
+  // ---- phrase-level grammar slips ----
+  for (const [re, rep, label] of PHRASE_FIXES) {
+    if (re.test(s)) { s = s.replace(re, rep); note(label); }
+  }
+
+  // ---- punctuation spacing ----
+  if (/\s+([,.!?;:])/.test(s)) { s = s.replace(/\s+([,.!?;:])/g, '$1'); note('punctuation spacing'); }
+  if (/([,.!?;:])([A-Za-z])/.test(s)) { s = s.replace(/([,.!?;:])([A-Za-z])/g, '$1 $2'); note('punctuation spacing'); }
+  if (/([!?.,]){2,}(?![!?.])/.test(s)) { /* keep intentional !!/?? — only collapse 4+ */ }
+  if (/([.,]){2,}/.test(s)) { s = s.replace(/\.{4,}/g, '…').replace(/,{2,}/g, ','); }
+
+  // ---- word-level fixes (spelling, contractions, your terms, proper nouns) ----
+  const dict = (typeof Security !== 'undefined' && Security.isOwner && Security.isOwner()) ? buildSpellDict() : new Map();
+  s = s.replace(/[A-Za-z][A-Za-z'-]*/g, (w) => {
+    const lw = w.toLowerCase();
+    if (/^i'(m|ve|ll|d|re)$/i.test(w)) { if (w[0] !== 'I') note('capitalization'); return 'I' + w.slice(1).toLowerCase(); }
+    if (CONTRACTIONS[lw]) { note('grammar'); return matchCase(w, CONTRACTIONS[lw]); }
+    if (COMMON_TYPOS[lw]) { note('spelling'); return matchCase(w, COMMON_TYPOS[lw]); }
+    if (PROPER_CAPS[lw] && w !== PROPER_CAPS[lw]) { note('capitalization'); return PROPER_CAPS[lw]; }
+    if (lw.length >= 5 && !dict.has(lw)) {
+      for (const [term, display] of dict) {
+        if (term[0] === lw[0] && Math.abs(term.length - lw.length) <= 1 && editDistance(lw, term, 1) === 1) {
+          note('spelling'); return matchCase(w, display);
+        }
+      }
+    }
+    return w;
+  });
+
+  // ---- standalone "i" → "I" (after contraction handling) ----
+  if (/\bi\b/.test(s)) { s = s.replace(/\bi\b/g, 'I'); note('“i” → “I”'); }
+  // ---- repeated word (the the) ----
+  if (/\b(\w+)\s+\1\b/i.test(s)) { s = s.replace(/\b(\w+)\s+\1\b/gi, '$1'); note('repeated word'); }
+  // ---- a → an before a clear vowel-sound word ----
+  s = s.replace(/\b([Aa])\s+([aeio]\w+)/g, (m, a, w) => {
+    if (/^(one|once|eu)/i.test(w)) return m;       // "a one", "a European"
+    note('a → an'); return (a === 'A' ? 'An' : 'an') + ' ' + w;
+  });
+
+  // ---- capitalization: sentence starts + the start of each text line ----
+  s = s.replace(/(^\s*|[.!?]\s+)([a-z])/g, (m, p, c) => { note('capitalization'); return p + c.toUpperCase(); });
+  s = s.replace(/(\n[ \t]*)([a-z])/g, (m, p, c) => { note('capitalization'); return p + c.toUpperCase(); });
+
+  if (s === before) changes.clear();
+  return { text: s, changes: [...changes] };
+}
+
+/* Run proofread on a field, apply the result, and report what changed.
+   EON says it aloud for character; a toast lists the fixes. */
+function fixField(el) {
+  if (!el) return;
+  const { text, changes } = proofread(el.value);
+  if (!changes.length || text === el.value) { toast('Looks clean already. ✨', 'ok'); return; }
+  el.value = text;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  const summary = changes.slice(0, 4).join(', ');
+  toast(`Fixed: ${summary}${changes.length > 4 ? '…' : ''} ✨`, 'ok');
+  try { window.EON?.ai?.speak('Tidied that up for you. ✍️', 3200); } catch {}
+}
+
+/* ---- EON spell-assist: gentle blur hint. Flags a common English typo or a
+   near-miss of one of YOUR own terms (names, skills, orgs, titles…). ---- */
 let _spellDict = null, _spellSig = '', _lastSpell = '';
 function buildSpellDict() {
   const sig = String((DB.data.reminders || []).length) + ':' +
@@ -374,20 +553,25 @@ function spellAssist(el) {
   try {
     if (!Security.isOwner()) return;
     const text = String(el.value || ''); if (!text.trim()) return;
-    const dict = buildSpellDict(); if (!dict.size) return;
-    const words = text.match(/[A-Za-z][A-Za-z'-]{4,}/g) || [];
+    const dict = buildSpellDict();
+    const words = text.match(/[A-Za-z][A-Za-z'-]{2,}/g) || [];
+    const suggest = (display) => {
+      if (display.toLowerCase() === _lastSpell) return true;
+      _lastSpell = display.toLowerCase();
+      toast(`Did you mean “${display}”? ✍️`, 'ok');
+      return true;
+    };
     for (const w of words) {
       const lw = w.toLowerCase();
-      if (dict.has(lw)) continue;                 // spelled correctly
-      for (const [term, display] of dict) {
-        if (term[0] !== lw[0]) continue;          // cheap prefilter
-        if (Math.abs(term.length - lw.length) > 1) continue;
-        if (editDistance(lw, term, 1) === 1) {
-          if (display.toLowerCase() !== _lastSpell) {
-            _lastSpell = display.toLowerCase();
-            toast(`Did you mean “${display}”? ✍️`, 'ok');
+      // 1) a common English typo or missing-apostrophe contraction
+      if (COMMON_TYPOS[lw]) { suggest(matchCase(w, COMMON_TYPOS[lw])); return; }
+      if (CONTRACTIONS[lw]) { suggest(matchCase(w, CONTRACTIONS[lw])); return; }
+      // 2) a near-miss of one of your own terms
+      if (lw.length >= 5 && dict.size && !dict.has(lw)) {
+        for (const [term, display] of dict) {
+          if (term[0] === lw[0] && Math.abs(term.length - lw.length) <= 1 && editDistance(lw, term, 1) === 1) {
+            suggest(display); return;             // one gentle nudge at a time
           }
-          return;                                 // one gentle nudge at a time
         }
       }
     }
@@ -944,6 +1128,8 @@ function buildField(f, value) {
         <button type="button" class="rt-b" data-rt="italic" title="Italic"><i class="bi bi-type-italic"></i></button>
         <button type="button" class="rt-b" data-rt="underline" title="Underline"><i class="bi bi-type-underline"></i></button>
         <button type="button" class="rt-b" data-rt="list" title="Bullet list"><i class="bi bi-list-ul"></i></button>
+        <span class="rt-sep"></span>
+        <button type="button" class="rt-b rt-fix" data-rt="fix" title="Fix spelling &amp; grammar (EON)"><i class="bi bi-magic"></i><span>Fix</span></button>
       </div>
       <textarea name="${f.key}" placeholder="${f.label}">${escapeHtml(v)}</textarea>
     </div>`;
@@ -1020,7 +1206,9 @@ function openEntityModal(entity, id, afterSave, prefill) {
     const b = e.target.closest('.rt-b'); if (!b) return;
     e.preventDefault();
     const ta = b.closest('.rt-wrap')?.querySelector('textarea');
-    if (ta) rtApply(ta, b.dataset.rt);
+    if (!ta) return;
+    if (b.dataset.rt === 'fix') fixField(ta);     // EON proofread
+    else rtApply(ta, b.dataset.rt);
   });
   // EON spell-assist: gently suggest the right spelling of YOUR own terms.
   formEl.querySelectorAll('input[type="text"], textarea').forEach(el => {
