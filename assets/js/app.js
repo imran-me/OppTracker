@@ -60,7 +60,7 @@ const DB = {
   _hydrate(raw) {
     const data = (raw && typeof raw === 'object') ? raw : SEED_DATA();
     data.categories = Object.assign({}, DEFAULT_CATEGORIES, data.categories || {});
-    ['opportunities','tasks','documents','achievements','contacts','research','projects','reminders','training','volunteering']
+    ['opportunities','tasks','documents','achievements','contacts','research','projects','reminders','training','volunteering','education']
       .forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
     data.profile = Object.assign({}, SEED_DATA().profile, data.profile || {});
     if (!Array.isArray(data.profile.references)) data.profile.references = SEED_DATA().profile.references;
@@ -740,11 +740,11 @@ function setSync(state) {
 /* ---- map a status/priority to a colour "tone" class ---- */
 function statusTone(status) {
   const s = (status || '').toLowerCase();
-  if (['won', 'accepted', 'completed', 'ready', 'updated', 'documents ready', 'writing completed'].includes(s)) return 'green';
-  if (['rejected', 'lost', 'cancelled', 'irrelevant'].includes(s)) return 'red';
-  if (['applied', 'shortlisted', 'interview', 'submitted', 'in progress', 'review'].includes(s)) return 'blue';
-  if (['preparing', 'writing', 'waitlisted', 'draft', 'waiting', 'requirements collected', 'planning', 'development', 'testing'].includes(s)) return 'amber';
-  if (['researching', 'new', 'idea', 'need preparation', 'to do'].includes(s)) return 'slate';
+  if (['won', 'accepted', 'completed', 'ready', 'updated', 'documents ready', 'writing completed', 'admitted', 'enrolled', 'graduated', 'offer received', 'published', 'current'].includes(s)) return 'green';
+  if (['rejected', 'lost', 'cancelled', 'irrelevant', 'declined', 'withdrawn'].includes(s)) return 'red';
+  if (['applied', 'shortlisted', 'interview', 'submitted', 'in progress', 'review', 'interviewing', 'deferred'].includes(s)) return 'blue';
+  if (['preparing', 'writing', 'waitlisted', 'draft', 'drafting', 'waiting', 'requirements collected', 'planning', 'development', 'testing', 'literature review', 'problem defined'].includes(s)) return 'amber';
+  if (['researching', 'new', 'idea', 'need preparation', 'to do', 'considering', 'planning to apply'].includes(s)) return 'slate';
   return 'slate';
 }
 function priorityTone(p) {
@@ -837,7 +837,8 @@ const NAV = [
     { page: 'tasks',         href: 'tasks.html',         icon: 'kanban-fill',  label: 'Task Board',  countOf: 'tasks' },
     { page: 'documents',     href: 'documents.html',     icon: 'folder-fill',  label: 'Documents',   countOf: 'documents' },
     { page: 'achievements',  href: 'achievements.html',  icon: 'trophy-fill',  label: 'Achievements',countOf: 'achievements' },
-    { page: 'training',      href: 'training.html',      icon: 'mortarboard-fill',label: 'Training & Certification', countOf: 'training' },
+    { page: 'education',     href: 'education.html',     icon: 'mortarboard-fill',label: 'Education', countOf: 'education' },
+    { page: 'training',      href: 'training.html',      icon: 'patch-check-fill',label: 'Training & Certification', countOf: 'training' },
     { page: 'projects',      href: 'projects.html',      icon: 'diagram-3-fill',label: 'Projects',    countOf: 'projects' },
     { page: 'research',      href: 'research.html',      icon: 'lightbulb-fill',label: 'Research Hub', countOf: 'research' },
     { page: 'volunteering',  href: 'volunteering.html',  icon: 'heart-fill',    label: 'Social Activities', countOf: 'volunteering' },
@@ -1068,11 +1069,22 @@ const SCHEMAS = {
     fields: [
       { key: 'title', label: 'Idea / title', type: 'text', required: true, span: true },
       { key: 'subtitle', label: 'Subtitle / tagline', type: 'text', span: true },
-      { key: 'field', label: 'Field', type: 'select', opts: 'subTypes' },
-      { key: 'stage', label: 'Stage', type: 'select', opts: ['Idea', 'Literature Review', 'Problem Defined', 'In Progress', 'Drafting', 'Published'] },
+      { key: 'field', label: 'Field of study', type: 'select', opts: 'subTypes' },
+      { key: 'topic', label: 'Specific topic', type: 'text', hint: 'The precise question you are exploring' },
+      { key: 'researchType', label: 'Research type', type: 'select', opts: ['Empirical', 'Theoretical', 'Applied', 'Experimental', 'Qualitative', 'Quantitative', 'Mixed-methods', 'Review / Survey', 'Case Study'] },
+      { key: 'stage', label: 'Stage', type: 'select', opts: ['Idea', 'Literature Review', 'Problem Defined', 'In Progress', 'Data Collection', 'Analysis', 'Drafting', 'Under Review', 'Published'] },
+      { key: 'aspects', label: 'Key aspects / angles', type: 'tags', span: true, hint: 'The dimensions you are examining — comma separated' },
+      { key: 'technologies', label: 'Tools & technologies', type: 'tags', hint: 'Python, R, SPSS, TensorFlow…' },
+      { key: 'methods', label: 'Methods / techniques', type: 'tags', hint: 'Survey, regression, NLP, interviews…' },
+      { key: 'skills', label: 'Skills applied', type: 'tags', span: true, hint: 'Added to your portfolio skills automatically' },
+      { key: 'keywords', label: 'Keywords', type: 'tags', span: true, hint: 'Searchable terms for this work' },
+      { key: 'collaborators', label: 'Collaborators / supervisor', type: 'text', span: true },
       { key: 'abstract', label: 'Abstract', type: 'textarea', span: true },
       { key: 'problem', label: 'Problem statement', type: 'textarea', span: true },
+      { key: 'hypothesis', label: 'Hypothesis / research question', type: 'textarea', span: true },
+      { key: 'outcome', label: 'Expected outcome / impact', type: 'textarea', span: true },
       { key: 'references', label: 'References / links', type: 'textarea', span: true },
+      { key: 'link', label: 'Paper / publication link', type: 'url', span: true },
       { key: 'image', label: 'Cover image URL', type: 'url', span: true },
       { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
       { key: 'photos', label: 'Upload images / charts', type: 'photos', span: true },
@@ -1132,16 +1144,47 @@ const SCHEMAS = {
     label: 'Social activity', icon: 'heart',
     fields: [
       { key: 'title', label: 'Activity / title', type: 'text', required: true, span: true },
-      { key: 'role', label: 'My role', type: 'text' },
+      { key: 'role', label: 'My role', type: 'text', required: true, hint: 'e.g. Volunteer Lead, Coordinator, Mentor' },
       { key: 'organization', label: 'Organization', type: 'text' },
+      { key: 'orgLink', label: 'Organization link', type: 'url', hint: 'Website, page or profile of the org' },
       { key: 'cause', label: 'Cause / focus area', type: 'text' },
-      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'commitment', label: 'Commitment', type: 'select', opts: ['One-time', 'Weekly', 'Monthly', 'Seasonal', 'Ongoing', 'Project-based'] },
+      { key: 'startDate', label: 'Start date', type: 'date' },
+      { key: 'date', label: 'End date', type: 'date' },
       { key: 'location', label: 'Location', type: 'text' },
-      { key: 'skills', label: 'Skills', type: 'tags', span: true, hint: 'Added to your portfolio skills automatically' },
+      { key: 'hours', label: 'Hours contributed', type: 'text', hint: 'e.g. 40 hours' },
+      { key: 'impact', label: 'Impact / outcome', type: 'text', span: true, hint: 'e.g. 200 students reached, $5k raised — shown as a highlight' },
+      { key: 'skills', label: 'Skills used', type: 'tags', span: true, hint: 'Added to your portfolio skills automatically' },
+      { key: 'links', label: 'Reference links', type: 'images', span: true, hint: 'Articles, certificates or proof — one URL per line' },
       { key: 'description', label: 'Details', type: 'textarea', span: true },
       { key: 'gallery', label: 'Image URLs', type: 'images', span: true },
       { key: 'photos', label: 'Upload images', type: 'photos', span: true },
       { key: 'files', label: 'Upload files', type: 'files', span: true },
+      { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
+    ]
+  },
+  education: {
+    label: 'Education', icon: 'mortarboard',
+    fields: [
+      { key: 'institution', label: 'Institution / university', type: 'text', required: true, span: true },
+      { key: 'level', label: 'Level', type: 'select', required: true, opts: ['High School', 'College', 'Diploma', 'Undergraduate', 'Postgraduate', 'Masters', 'MPhil', 'PhD', 'Postdoc', 'Certificate Program', 'Exchange'] },
+      { key: 'program', label: 'Degree / program', type: 'text', span: true, hint: 'e.g. B.Sc. in Computer Science' },
+      { key: 'fieldOfStudy', label: 'Field of study / major', type: 'text' },
+      { key: 'status', label: 'Status', type: 'select', opts: ['Planning to Apply', 'Applied', 'Under Review', 'Interviewing', 'Offer Received', 'Admitted', 'Waitlisted', 'Deferred', 'Rejected', 'Declined', 'Enrolled', 'Graduated'] },
+      { key: 'location', label: 'Location', type: 'text' },
+      { key: 'startDate', label: 'Start date', type: 'date' },
+      { key: 'endDate', label: 'End / graduation date', type: 'date' },
+      { key: 'appliedDate', label: 'Date applied', type: 'date' },
+      { key: 'decisionDate', label: 'Decision date', type: 'date' },
+      { key: 'result', label: 'Result / GPA / grade', type: 'text', hint: 'e.g. CGPA 3.92 / 4.00, A Level: AAB' },
+      { key: 'scholarship', label: 'Scholarship / funding', type: 'text', hint: 'e.g. Full ride, 50% tuition waiver' },
+      { key: 'highlights', label: 'Highlights / honors', type: 'tags', span: true, hint: "Dean's list, thesis topic, key courses…" },
+      { key: 'description', label: 'Description / notes', type: 'textarea', span: true },
+      { key: 'link', label: 'Program / portal link', type: 'url' },
+      { key: 'offerLetter', label: 'Offer / admission letter', type: 'file', span: true, hint: 'Upload the PDF or image of your offer letter' },
+      { key: 'gallery', label: 'Image URLs (campus, certificate…)', type: 'images', span: true },
+      { key: 'photos', label: 'Upload images', type: 'photos', span: true },
+      { key: 'files', label: 'Upload documents (transcript, certificate…)', type: 'files', span: true },
       { key: 'featured', label: 'Portfolio', type: 'checkbox', span: true, hint: 'Show this on the public portfolio' }
     ]
   }
@@ -1313,7 +1356,11 @@ function openEntityModal(entity, id, afterSave, prefill) {
     const saveBtn = document.getElementById('entitySave');
     const out = id ? { id } : {};
     schema.fields.forEach(f => {
-      const el = form.elements[f.key];
+      // namedItem() — NOT form.elements[f.key] — because a field keyed like a
+      // reserved collection property ("length", "item", "namedItem") would
+      // otherwise return that property (e.g. the element COUNT) instead of the
+      // control, and crash on .value.trim(). namedItem always resolves by name.
+      const el = form.elements.namedItem(f.key);
       if (!el || f.type === 'file') return; // file fields handled asynchronously below
       if (f.type === 'checkbox') out[f.key] = el.checked;
       else if (f.type === 'images' || f.type === 'tags') out[f.key] = el.value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
@@ -1322,7 +1369,7 @@ function openEntityModal(entity, id, afterSave, prefill) {
 
     // validate required (text) fields
     const missing = schema.fields.find(f => f.required && f.type !== 'file' && !out[f.key]);
-    if (missing) { toast(`${missing.label} is required.`, 'err'); form.elements[missing.key].focus(); return; }
+    if (missing) { toast(`${missing.label} is required.`, 'err'); form.elements.namedItem(missing.key)?.focus(); return; }
 
     // Uploads (async): read newly picked file(s), honour "remove", else
     // preserve. Keys left off `out` are kept by DB.upsert's merge.
@@ -1333,7 +1380,8 @@ function openEntityModal(entity, id, afterSave, prefill) {
       for (const f of schema.fields.filter(x => x.type === 'file')) {
         const input = form.querySelector(`input[type="file"][name="${f.key}"]`);
         const file = input && input.files && input.files[0];
-        const remove = form.elements['__remove_' + f.key] && form.elements['__remove_' + f.key].checked;
+        const removeEl = form.elements.namedItem('__remove_' + f.key);
+        const remove = removeEl && removeEl.checked;
         if (file) {
           if (file.size > MAX_UPLOAD_BYTES) {
             toast(`“${file.name}” is too large (max ${fmtBytes(MAX_UPLOAD_BYTES)}). Use a Drive link instead.`, 'err');
@@ -1350,7 +1398,7 @@ function openEntityModal(entity, id, afterSave, prefill) {
       for (const f of schema.fields.filter(x => x.type === 'photos' || x.type === 'files')) {
         const existing = Array.isArray(record[f.key]) ? record[f.key] : [];
         const kept = existing.filter((_, i) => {
-          const cb = form.elements['__rm_' + f.key + '_' + i];
+          const cb = form.elements.namedItem('__rm_' + f.key + '_' + i);
           return !(cb && cb.checked);
         });
         const input = form.querySelector(`input[type="file"][name="${f.key}"]`);
@@ -2153,6 +2201,131 @@ function initDocuments() {
   draw();
 }
 
+/* ==========================================================
+   SHARED CARD BUILDERS — one compact "achievement-style" card per
+   entity, reused by BOTH the management page and the public portfolio
+   so every section has identical card width & height. Each card is
+   click-to-expand (data-detail → openPortfolioDetail) with the full
+   text revealed in the detail modal.
+   ========================================================== */
+
+/* Owner edit/delete tools shown inside a card foot (hidden from visitors). */
+function cardFootTools(entity, id) {
+  return `<span class="ach-tools">
+    <button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('${entity}','${id}')"><i class="bi bi-pencil"></i></button>
+    <button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('${entity}','${id}')"><i class="bi bi-trash3"></i></button>
+  </span>`;
+}
+function tagRow(arr, max = 4) {
+  const a = Array.isArray(arr) ? arr.filter(Boolean) : [];
+  if (!a.length) return '';
+  return `<div class="ach-tags">${a.slice(0, max).map(s => `<span class="chip chip-mini">${escapeHtml(s)}</span>`).join('')}${a.length > max ? `<span class="chip chip-mini">+${a.length - max}</span>` : ''}</div>`;
+}
+
+/* SOCIAL ACTIVITY card — role shown as a prominent badge, an impact
+   highlight callout, organization link, cause and skills. */
+function volCardHtml(v, photoBadge, withTools) {
+  const skills = Array.isArray(v.skills) ? v.skills : [];
+  const dates = [fmtDate(v.startDate), fmtDate(v.date)].filter(d => d && d !== '—');
+  const when = dates.length === 2 && dates[0] !== dates[1] ? `${dates[0]} – ${dates[1]}` : (dates[0] || '');
+  return `
+  <div class="gal-card ach-card pf-clickable" data-detail="volunteering:${v.id}">
+    <div class="gc-media">${mediaCollage(v, 'heart-fill')}${photoBadge ? photoBadge(v) : ''}${v.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+    <div class="gc-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <span class="chip t-pink">${escapeHtml(v.cause || 'Community')}</span>
+        ${v.commitment ? `<span class="chip chip-outline ach-pos">${escapeHtml(v.commitment)}</span>` : ''}
+        ${when ? `<small class="text-faint num ms-auto">${escapeHtml(when)}</small>` : ''}
+      </div>
+      <b class="ach-title">${escapeHtml(v.title)}</b>
+      ${v.role ? `<div class="ach-role-badge"><i class="bi bi-person-badge-fill"></i>${escapeHtml(v.role)}</div>` : ''}
+      ${(v.organization || v.location) ? `<div class="ach-meta">${[v.organization, v.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+      ${v.impact ? `<div class="ach-impact"><i class="bi bi-graph-up-arrow"></i><span>${escapeHtml(v.impact)}</span></div>` : ''}
+      ${skills.length ? tagRow(skills) : (v.description ? `<p class="ach-desc">${escapeHtml(mdStrip(v.description))}</p>` : '')}
+      <div class="ach-foot">
+        <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+        ${v.orgLink ? `<a class="btn btn-ghost btn-sm" title="Organization" href="${escapeHtml(v.orgLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="bi bi-box-arrow-up-right"></i></a>` : ''}
+        ${withTools ? cardFootTools('volunteering', v.id) : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* RESEARCH card — field + stage chips, topic line, aspects/tech tags. */
+function researchCardHtml(r, photoBadge, withTools) {
+  const tags = [...(Array.isArray(r.aspects) ? r.aspects : []), ...(Array.isArray(r.technologies) ? r.technologies : [])];
+  return `
+  <div class="gal-card ach-card pf-clickable" data-detail="research:${r.id}">
+    <div class="gc-media">${mediaCollage(r, 'lightbulb-fill')}${photoBadge ? photoBadge(r) : ''}${r.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+    <div class="gc-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        ${r.field ? `<span class="chip t-blue">${escapeHtml(r.field)}</span>` : '<span class="chip t-blue">Research</span>'}
+        ${r.stage ? `<span class="chip t-${statusTone(r.stage)} ach-pos">${escapeHtml(r.stage)}</span>` : ''}
+        ${r.researchType ? `<small class="text-faint num ms-auto">${escapeHtml(r.researchType)}</small>` : ''}
+      </div>
+      <b class="ach-title">${escapeHtml(r.title)}</b>
+      ${(r.topic || r.subtitle) ? `<div class="ach-meta">${escapeHtml(r.topic || r.subtitle)}</div>` : ''}
+      ${(r.abstract || r.problem) ? `<p class="ach-desc">${escapeHtml(mdStrip(r.abstract || r.problem))}</p>` : ''}
+      ${tagRow(tags)}
+      <div class="ach-foot">
+        <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+        ${r.link ? `<a class="btn btn-ghost btn-sm" title="Publication" href="${escapeHtml(r.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="bi bi-file-earmark-text"></i></a>` : ''}
+        ${withTools ? `<span class="ach-tools"><button class="btn btn-ghost btn-sm owner-only" title="Content studio" onclick="event.stopPropagation();openContentStudio('research','${r.id}', refreshCurrentPage)"><i class="bi bi-easel"></i></button><button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('research','${r.id}')"><i class="bi bi-pencil"></i></button><button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('research','${r.id}')"><i class="bi bi-trash3"></i></button></span>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* PROJECT card — order: name → subtitle → technology → description. */
+function projectCardHtml(p, photoBadge, withTools) {
+  return `
+  <div class="gal-card ach-card pf-clickable" data-detail="projects:${p.id}">
+    <div class="gc-media">${mediaCollage(p, 'diagram-3-fill')}${photoBadge ? photoBadge(p) : ''}${p.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+    <div class="gc-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <span class="chip t-${statusTone(p.status)}"><span class="dot"></span>${escapeHtml(p.status || 'Idea')}</span>
+        ${p.category ? `<span class="chip chip-outline ach-pos">${escapeHtml(p.category)}</span>` : ''}
+      </div>
+      <b class="ach-title">${escapeHtml(p.name)}</b>
+      ${p.subtitle ? `<div class="ach-meta">${escapeHtml(p.subtitle)}</div>` : ''}
+      ${p.technologies ? `<div class="ach-tech"><i class="bi bi-cpu"></i>${escapeHtml(p.technologies)}</div>` : ''}
+      ${(p.abstract || p.description) ? `<p class="ach-desc">${escapeHtml(mdStrip(p.abstract || p.description))}</p>` : ''}
+      <div class="ach-foot">
+        <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+        ${p.link ? `<a class="btn btn-ghost btn-sm" title="Open" href="${escapeHtml(p.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="bi bi-box-arrow-up-right"></i></a>` : ''}
+        ${withTools ? `<span class="ach-tools"><button class="btn btn-ghost btn-sm owner-only" title="Content studio" onclick="event.stopPropagation();openContentStudio('projects','${p.id}', refreshCurrentPage)"><i class="bi bi-easel"></i></button><button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('projects','${p.id}')"><i class="bi bi-pencil"></i></button><button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('projects','${p.id}')"><i class="bi bi-trash3"></i></button></span>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* EDUCATION card — admissions/enrolment status pipeline + offer-letter badge. */
+function educationCardHtml(ed, photoBadge, withTools) {
+  const hasOffer = ed.offerLetter && ed.offerLetter.data;
+  const when = [fmtDate(ed.startDate), ed.status === 'Graduated' || ed.endDate ? fmtDate(ed.endDate) : ''].filter(d => d && d !== '—');
+  const period = when.length === 2 ? `${when[0]} – ${when[1]}` : (when[0] || '');
+  return `
+  <div class="gal-card ach-card pf-clickable" data-detail="education:${ed.id}">
+    <div class="gc-media">${mediaCollage(ed, 'mortarboard-fill')}${photoBadge ? photoBadge(ed) : ''}${ed.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}${hasOffer ? '<span class="pf-feat-badge offer"><i class="bi bi-envelope-paper-fill"></i>Offer letter</span>' : ''}</div>
+    <div class="gc-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <span class="chip t-primary">${escapeHtml(ed.level || 'Education')}</span>
+        ${ed.status ? `<span class="chip t-${statusTone(ed.status)} ach-pos"><span class="dot"></span>${escapeHtml(ed.status)}</span>` : ''}
+        ${period ? `<small class="text-faint num ms-auto">${escapeHtml(period)}</small>` : ''}
+      </div>
+      <b class="ach-title">${escapeHtml(ed.institution)}</b>
+      ${(ed.program || ed.fieldOfStudy) ? `<div class="ach-meta">${[ed.program, ed.fieldOfStudy].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+      ${(ed.result || ed.scholarship) ? `<div class="ach-impact"><i class="bi bi-patch-check-fill"></i><span>${[ed.result, ed.scholarship].filter(Boolean).map(escapeHtml).join(' · ')}</span></div>` : ''}
+      ${tagRow(ed.highlights)}
+      <div class="ach-foot">
+        <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+        ${ed.link ? `<a class="btn btn-ghost btn-sm" title="Program" href="${escapeHtml(ed.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="bi bi-box-arrow-up-right"></i></a>` : ''}
+        ${withTools ? cardFootTools('education', ed.id) : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ---------- ACHIEVEMENTS (gallery) ---------- */
 function initAchievements() {
   const host = document.getElementById('achHost');
@@ -2237,35 +2410,8 @@ function initVolunteering() {
   const host = document.getElementById('volHost');
   const draw = () => {
     const items = DB.getAll('volunteering');
-    if (!items.length) { host.innerHTML = emptyState('heart', 'No social activities yet', 'Add volunteering and community work — your role, cause and the skills you used.', 'Add activity', () => openEntityModal('volunteering', null, draw), true); return; }
-    const photoBadge = (item) => {
-      const np = collectImages(item).length, nf = collectFiles(item).length;
-      return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
-    };
-    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(v => {
-      const meta = [v.organization, v.location].filter(Boolean).map(escapeHtml).join(' · ');
-      const skills = Array.isArray(v.skills) ? v.skills : [];
-      return `
-      <div class="gal-card ach-card pf-clickable" data-detail="volunteering:${v.id}">
-        <div class="gc-media">${mediaCollage(v, 'heart-fill')}${photoBadge(v)}${v.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
-        <div class="gc-body">
-          <div class="d-flex align-items-center gap-2 mb-1">
-            ${v.cause ? `<span class="chip t-pink">${escapeHtml(v.cause)}</span>` : '<span class="chip t-pink">Volunteering</span>'}
-            ${v.role ? `<span class="chip chip-outline ach-pos">${escapeHtml(v.role)}</span>` : ''}
-            <small class="text-faint num ms-auto">${fmtDate(v.date)}</small>
-          </div>
-          <b class="ach-title">${escapeHtml(v.title)}</b>
-          ${meta ? `<div class="ach-meta">${meta}</div>` : ''}
-          ${skills.length ? `<div class="ach-tags">${skills.slice(0, 4).map(s => `<span class="chip chip-mini">${escapeHtml(s)}</span>`).join('')}${skills.length > 4 ? `<span class="chip chip-mini">+${skills.length - 4}</span>` : ''}</div>` : (v.description ? `<p class="ach-desc">${escapeHtml(mdStrip(v.description))}</p>` : '')}
-          <div class="ach-foot">
-            <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
-            <span class="ach-tools">
-              <button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('volunteering','${v.id}')"><i class="bi bi-pencil"></i></button>
-              <button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('volunteering','${v.id}')"><i class="bi bi-trash3"></i></button>
-            </span>
-          </div>
-        </div>
-      </div>`; }).join('')}</div>`;
+    if (!items.length) { host.innerHTML = emptyState('heart', 'No social activities yet', 'Add volunteering and community work — your role, cause, impact and the skills you used.', 'Add activity', () => openEntityModal('volunteering', null, draw), true); return; }
+    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(v => volCardHtml(v, galPhotoBadge, true)).join('')}</div>`;
     host.onclick = portfolioDetailDelegate;
   };
   document.getElementById('volAdd').onclick = () => openEntityModal('volunteering', null, draw);
@@ -2300,30 +2446,20 @@ function initContacts() {
   draw();
 }
 
+/* photo/file count badge shared by the gallery pages */
+function galPhotoBadge(item) {
+  const np = collectImages(item).length, nf = collectFiles(item).length;
+  return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
+}
+
 /* ---------- RESEARCH HUB ---------- */
 function initResearch() {
   const host = document.getElementById('researchHost');
   const draw = () => {
     const items = DB.getAll('research');
-    if (!items.length) { host.innerHTML = emptyState('lightbulb', 'No research ideas yet', 'Capture problem statements, literature notes and references.', 'Add research idea', () => openEntityModal('research', null, draw), true); return; }
-    host.innerHTML = `<div class="stack-16">${items.map(r => `
-      <div class="card card-pad card-glow">
-        <div class="d-flex align-items-start gap-2">
-          <span class="stat-ico t-blue"><i class="bi bi-lightbulb-fill"></i></span>
-          <div class="flex-grow-1">
-            <div class="d-flex align-items-center gap-2 flex-wrap"><b style="font-size:15px">${escapeHtml(r.title)}</b>
-              ${r.field ? `<span class="chip chip-outline">${escapeHtml(r.field)}</span>` : ''}
-              ${r.stage ? `<span class="chip t-${statusTone(r.stage)}">${escapeHtml(r.stage)}</span>` : ''}</div>
-            ${r.problem ? `<p class="text-soft mt-2 mb-1" style="font-size:13.5px;white-space:pre-wrap">${escapeHtml(r.problem)}</p>` : ''}
-            ${r.references ? `<div class="mt-2" style="font-size:12.5px"><b class="text-soft">References:</b> <span class="text-soft" style="white-space:pre-wrap">${escapeHtml(r.references)}</span></div>` : ''}
-          </div>
-          <div class="row-actions owner-only" style="opacity:1">
-            <button title="Content studio" onclick="openContentStudio('research','${r.id}', refreshCurrentPage)"><i class="bi bi-easel"></i></button>
-            <button onclick="openEntityModal('research','${r.id}')"><i class="bi bi-pencil"></i></button>
-            <button class="del" onclick="confirmDelete('research','${r.id}')"><i class="bi bi-trash3"></i></button>
-          </div>
-        </div>
-      </div>`).join('')}</div>`;
+    if (!items.length) { host.innerHTML = emptyState('lightbulb', 'No research ideas yet', 'Capture problem statements, topics, aspects, methods and references.', 'Add research idea', () => openEntityModal('research', null, draw), true); return; }
+    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(r => researchCardHtml(r, galPhotoBadge, true)).join('')}</div>`;
+    host.onclick = portfolioDetailDelegate;
   };
   document.getElementById('researchAdd').onclick = () => openEntityModal('research', null, draw);
   draw();
@@ -2335,24 +2471,46 @@ function initProjects() {
   const draw = () => {
     const items = DB.getAll('projects');
     if (!items.length) { host.innerHTML = emptyState('diagram-3', 'No projects yet', 'Track project ideas and active builds with their tech stack.', 'Add project', () => openEntityModal('projects', null, draw), true); return; }
-    host.innerHTML = `<div class="gal-grid">${items.map(p => `
-      <div class="card card-pad card-glow">
-        <div class="d-flex align-items-center gap-2 mb-2"><span class="chip t-${statusTone(p.status)}"><span class="dot"></span>${escapeHtml(p.status || 'Idea')}</span>${p.category ? `<span class="chip chip-outline">${escapeHtml(p.category)}</span>` : ''}${p.featured ? '<span class="chip t-amber" title="Shown on portfolio"><i class="bi bi-star-fill"></i></span>' : ''}</div>
-        <b style="font-size:15px;display:block">${escapeHtml(p.name)}</b>
-        ${p.subtitle ? `<small class="text-soft d-block" style="font-size:12px">${escapeHtml(p.subtitle)}</small>` : ''}
-        <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(p.abstract || p.description || '')}</p>
-        ${p.technologies ? `<div class="mb-1" style="font-size:12px"><i class="bi bi-cpu me-1 text-soft"></i>${escapeHtml(p.technologies)}</div>` : ''}
-        ${p.team ? `<div class="mb-2" style="font-size:12px"><i class="bi bi-people me-1 text-soft"></i>${escapeHtml(p.team)}</div>` : ''}
-        ${(p.blocks && p.blocks.length) || (p.photos && p.photos.length) || (p.files && p.files.length) ? `<div class="mb-2" style="font-size:11.5px" class="text-faint">${(p.blocks && p.blocks.length) ? `<span class="me-2"><i class="bi bi-layout-text-window me-1"></i>${p.blocks.length} blocks</span>` : ''}${(p.photos && p.photos.length) ? `<span class="me-2"><i class="bi bi-images me-1"></i>${p.photos.length}</span>` : ''}${(p.files && p.files.length) ? `<span><i class="bi bi-paperclip me-1"></i>${p.files.length}</span>` : ''}</div>` : ''}
-        <div class="d-flex gap-2 mt-2 flex-wrap">
-          ${p.link ? `<a class="btn btn-soft btn-sm" href="${escapeHtml(p.link)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Open</a>` : ''}
-          <button class="btn btn-soft btn-sm owner-only" onclick="openContentStudio('projects','${p.id}', refreshCurrentPage)"><i class="bi bi-easel me-1"></i>Studio</button>
-          <button class="btn btn-ghost btn-sm owner-only" onclick="openEntityModal('projects','${p.id}')"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-ghost btn-sm text-danger owner-only" onclick="confirmDelete('projects','${p.id}')"><i class="bi bi-trash3"></i></button>
-        </div>
-      </div>`).join('')}</div>`;
+    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(p => projectCardHtml(p, galPhotoBadge, true)).join('')}</div>`;
+    host.onclick = portfolioDetailDelegate;
   };
   document.getElementById('projectAdd').onclick = () => openEntityModal('projects', null, draw);
+  draw();
+}
+
+/* Creative: a horizontal "admissions pipeline" — at a glance, how many
+   applications are out, how many offers landed, and where you enrolled.
+   Counts cascade (an Enrolled record also counts as an Offer), so it reads
+   like a funnel from "applied" down to "enrolled / graduated". */
+function admissionsPipeline(items) {
+  const has = (st, list) => items.filter(e => list.includes((e.status || '').toLowerCase())).length;
+  const offers = has('offer', ['offer received', 'admitted', 'enrolled', 'graduated']);
+  const stages = [
+    ['mortarboard-fill', 'Institutions', items.length, 'primary'],
+    ['send-fill', 'Applications', items.filter(e => e.appliedDate || ['applied', 'under review', 'interviewing', 'offer received', 'admitted', 'waitlisted', 'deferred', 'rejected', 'declined', 'enrolled', 'graduated'].includes((e.status || '').toLowerCase())).length, 'blue'],
+    ['envelope-paper-fill', 'Offers received', offers, 'amber'],
+    ['check-circle-fill', 'Admitted / Enrolled', has('', ['admitted', 'enrolled', 'graduated']), 'green'],
+    ['patch-check-fill', 'Graduated', has('grad', ['graduated']), 'green']
+  ];
+  return `<div class="edu-pipeline">${stages.map(([ico, label, n, tone]) => `
+    <div class="edu-pl-stage">
+      <span class="edu-pl-ico t-${tone}"><i class="bi bi-${ico}"></i></span>
+      <div><div class="edu-pl-n num">${n}</div><div class="edu-pl-l">${label}</div></div>
+    </div>`).join('<span class="edu-pl-sep"><i class="bi bi-chevron-right"></i></span>')}</div>`;
+}
+
+/* ---------- EDUCATION (academic journey + admissions tracker) ---------- */
+function initEducation() {
+  const host = document.getElementById('eduHost');
+  const draw = () => {
+    const items = DB.getAll('education');
+    if (!items.length) { host.innerHTML = emptyState('mortarboard', 'No education added yet', 'Add your schools, colleges and universities — applications, offers, results and offer-letter showcase, all in one timeline.', 'Add education', () => openEntityModal('education', null, draw), true); return; }
+    // order by start date (newest first), undated last
+    const ordered = [...items].sort((a, b) => (b.startDate || b.endDate || '').localeCompare(a.startDate || a.endDate || ''));
+    host.innerHTML = admissionsPipeline(items) + `<div class="gal-grid gal-grid--4">${ordered.map(e => educationCardHtml(e, galPhotoBadge, true)).join('')}</div>`;
+    host.onclick = portfolioDetailDelegate;
+  };
+  document.getElementById('eduAdd').onclick = () => openEntityModal('education', null, draw);
   draw();
 }
 
@@ -2418,7 +2576,8 @@ function initProfile() {
     wins: wins.length,
     projects: projects.length,
     research: research.length,
-    training: DB.getAll('training').length
+    training: DB.getAll('training').length,
+    education: DB.getAll('education').length
   };
 
   // hero + about
@@ -2445,6 +2604,7 @@ function initProfile() {
   addSkills(p.skills);
   DB.getAll('training').forEach(t => addSkills(t.skills));
   DB.getAll('volunteering').forEach(v => addSkills(v.skills));
+  DB.getAll('research').forEach(r => addSkills(r.skills));
   document.getElementById('pfSkills').innerHTML = [...skillSet.values()].map(s => `<span class="chip t-primary">${escapeHtml(s)}</span>`).join('');
   document.getElementById('pfInterests').innerHTML = (p.interests || []).map(s => `<span class="chip chip-outline">${escapeHtml(s)}</span>`).join('');
 
@@ -2475,7 +2635,7 @@ function initProfile() {
   const statEl = document.getElementById('pfStats');
   statEl.innerHTML = [
     ['Opportunities', stats.opportunities, 'opportunities'], ['Applied', stats.applied, 'applied'], ['Wins', stats.wins, 'wins'],
-    ['Projects', stats.projects, 'projects'], ['Research', stats.research, 'research'], ['Training', stats.training, 'training']
+    ['Education', stats.education, 'education'], ['Projects', stats.projects, 'projects'], ['Research', stats.research, 'research'], ['Training', stats.training, 'training']
   ].map(([l, v, k]) => `<button type="button" class="pf-stat" data-stat="${k}"><div class="v">${v}</div><div class="l">${l}</div><span class="pf-stat-cue"><i class="bi bi-arrow-right-short"></i></span></button>`).join('');
   statEl.querySelectorAll('[data-stat]').forEach(b => b.onclick = () => openStatList(b.dataset.stat));
 
@@ -2573,59 +2733,37 @@ function initProfile() {
       ${cardTools('opportunities', o.id)}
     </div>`).join('') : '<p class="text-soft">No wins recorded yet.</p>'; }
 
+  // Portfolio media badge = photo/file counts + owner edit/delete overlay,
+  // so the public showcase cards reuse the SAME compact builders as the
+  // management pages (identical width & height everywhere).
+  const pfBadge = (entity) => (item) => `${photoBadge(item)}${cardTools(entity, item.id)}`;
+
+  // showcase: education (academic journey) — newest first
+  const eduEl = document.getElementById('pfEducation');
+  if (eduEl) {
+    const eds = featured([...DB.getAll('education')].sort((a, b) => (b.startDate || b.endDate || '').localeCompare(a.startDate || a.endDate || '')));
+    eduEl.innerHTML = eds.length ? eds.map(e => educationCardHtml(e, pfBadge('education'), false)).join('') : '<p class="text-soft">No education added yet.</p>';
+  }
+
   // showcase: projects (ongoing first, then the rest)
   const ordered = featured([...projects].sort((a, b) =>
     (a.status === 'Completed' ? 1 : 0) - (b.status === 'Completed' ? 1 : 0)));
-  document.getElementById('pfProjects').innerHTML = ordered.map(pr => {
-    const hasImg = collectImages(pr).length;
-    return `<div class="card card-pad card-glow pf-editable pf-clickable" data-detail="projects:${pr.id}">
-      ${cardTools('projects', pr.id)}
-      ${hasImg ? `<div class="pf-card-media">${mediaCollage(pr, 'diagram-3-fill')}${photoBadge(pr)}</div>` : ''}
-      <span class="chip t-${statusTone(pr.status)} mb-2 d-inline-flex"><span class="dot"></span>${escapeHtml(pr.status || '')}</span>
-      <b style="display:block;font-size:15px">${escapeHtml(pr.name)}</b>
-      ${pr.subtitle ? `<small class="text-soft d-block mb-1" style="font-size:12.5px">${escapeHtml(pr.subtitle)}</small>` : ''}
-      <p class="text-soft mt-1 mb-2" style="font-size:13px">${escapeHtml(pr.abstract || pr.description || '')}</p>
-      ${pr.technologies ? `<div style="font-size:12px" class="text-soft"><i class="bi bi-cpu me-1"></i>${escapeHtml(pr.technologies)}</div>` : ''}
-      <div class="pf-card-cta"><span><i class="bi bi-eye me-1"></i>View details</span>${!hasImg ? photoBadge(pr) : ''}</div>
-    </div>`;
-  }).join('') || '<p class="text-soft">No projects to show yet.</p>';
+  document.getElementById('pfProjects').innerHTML =
+    ordered.map(pr => projectCardHtml(pr, pfBadge('projects'), false)).join('') || '<p class="text-soft">No projects to show yet.</p>';
 
   // research
   const resEl = document.getElementById('pfResearch');
-  if (resEl) { const rs = featured(research); resEl.innerHTML = rs.length ? rs.map(r => `
-    <div class="card card-pad card-glow pf-editable pf-clickable" data-detail="research:${r.id}">
-      ${cardTools('research', r.id)}
-      ${collectImages(r).length ? `<div class="pf-card-media">${mediaCollage(r, 'lightbulb-fill')}${photoBadge(r)}</div>` : ''}
-      <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
-        <span class="stat-ico t-blue"><i class="bi bi-lightbulb-fill"></i></span>
-        <b style="font-size:15px">${escapeHtml(r.title)}</b>
-        ${r.field ? `<span class="chip chip-outline">${escapeHtml(r.field)}</span>` : ''}
-        ${r.stage ? `<span class="chip t-${statusTone(r.stage)}">${escapeHtml(r.stage)}</span>` : ''}
-        ${photoBadge(r)}
-      </div>
-      ${r.subtitle ? `<small class="text-soft d-block mb-1" style="font-size:12.5px">${escapeHtml(r.subtitle)}</small>` : ''}
-      ${(r.abstract || r.problem) ? `<p class="text-soft mt-1 mb-0" style="font-size:13px;white-space:pre-wrap">${escapeHtml(r.abstract || r.problem)}</p>` : ''}
-      <div class="pf-card-cta"><span><i class="bi bi-eye me-1"></i>View details</span></div>
-    </div>`).join('') : '<p class="text-soft">No research to show yet.</p>'; }
+  if (resEl) { const rs = featured(research); resEl.innerHTML = rs.length
+    ? rs.map(r => researchCardHtml(r, pfBadge('research'), false)).join('')
+    : '<p class="text-soft">No research to show yet.</p>'; }
 
   // showcase: social activities / volunteering
   const volEl = document.getElementById('pfVolunteering');
-  if (volEl) volEl.innerHTML = featured(DB.getAll('volunteering'), 6).map(v => {
-    const skills = Array.isArray(v.skills) ? v.skills : [];
-    return `
-    <div class="gal-card ach-card pf-clickable" data-detail="volunteering:${v.id}">
-      <div class="gc-media">${mediaCollage(v, 'heart-fill')}${photoBadge(v)}${cardTools('volunteering', v.id)}</div>
-      <div class="gc-body">
-        <div class="d-flex align-items-center gap-2 mb-1">${v.cause ? `<span class="chip t-pink">${escapeHtml(v.cause)}</span>` : ''}${v.role ? `<span class="chip chip-outline ach-pos">${escapeHtml(v.role)}</span>` : ''}<small class="text-faint num ms-auto">${fmtDate(v.date)}</small></div>
-        <b class="ach-title">${escapeHtml(v.title)}</b>
-        ${v.organization ? `<div class="ach-meta">${escapeHtml(v.organization)}</div>` : ''}
-        ${skills.length ? `<div class="ach-tags">${skills.slice(0, 4).map(s => `<span class="chip chip-mini">${escapeHtml(s)}</span>`).join('')}${skills.length > 4 ? `<span class="chip chip-mini">+${skills.length - 4}</span>` : ''}</div>` : ''}
-        <div class="ach-foot"><span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span></div>
-      </div>
-    </div>`; }).join('') || '<p class="text-soft">No social activities to show yet.</p>';
+  if (volEl) volEl.innerHTML = featured(DB.getAll('volunteering'), 6)
+    .map(v => volCardHtml(v, pfBadge('volunteering'), false)).join('') || '<p class="text-soft">No social activities to show yet.</p>';
 
   // make portfolio cards open a detail view (ignoring clicks on owner tools / links)
-  ['pfAchievements', 'pfTraining', 'pfWins', 'pfProjects', 'pfResearch', 'pfVolunteering'].forEach(cid => {
+  ['pfAchievements', 'pfTraining', 'pfEducation', 'pfWins', 'pfProjects', 'pfResearch', 'pfVolunteering'].forEach(cid => {
     const c = document.getElementById(cid);
     if (c) c.onclick = portfolioDetailDelegate;
   });
@@ -2666,7 +2804,7 @@ function initProfile() {
   // then re-render the portfolio in place).
   const addHooks = {
     pfAddWin: 'opportunities', pfAddAch: 'achievements', pfAddTrain: 'training',
-    pfAddProj: 'projects', pfAddRes: 'research', pfAddVol: 'volunteering'
+    pfAddEdu: 'education', pfAddProj: 'projects', pfAddRes: 'research', pfAddVol: 'volunteering'
   };
   Object.entries(addHooks).forEach(([id, entity]) => {
     const b = document.getElementById(id);
@@ -2904,14 +3042,15 @@ function openStatList(kind) {
     projects: { title: 'Projects', entity: 'projects', icon: 'diagram-3-fill', items: DB.getAll('projects') },
     certs: { title: 'Certifications', entity: 'achievements', icon: 'patch-check-fill',
       items: DB.getAll('achievements').filter(a => a.category === 'Certification') },
-    training: { title: 'Training & certifications', entity: 'training', icon: 'mortarboard-fill', items: DB.getAll('training') },
+    training: { title: 'Training & certifications', entity: 'training', icon: 'patch-check-fill', items: DB.getAll('training') },
+    education: { title: 'Education', entity: 'education', icon: 'mortarboard-fill', items: DB.getAll('education') },
     research: { title: 'Research', entity: 'research', icon: 'lightbulb-fill', items: DB.getAll('research') }
   }[kind];
   if (!CFG) return;
 
   const rows = CFG.items.map(it => {
-    const name = it.name || it.title || 'Untitled';
-    const sub = it.organizer || it.category || it.field || it.technologies || '';
+    const name = it.name || it.title || it.institution || 'Untitled';
+    const sub = it.organizer || it.category || it.field || it.technologies || it.program || it.level || '';
     const meta = it.status || it.stage || (it.date ? fmtDate(it.date) : '');
     return `<button type="button" class="stat-row" data-open="${CFG.entity}:${it.id}">
       <span class="stat-row-ic"><i class="bi bi-${CFG.icon}"></i></span>
@@ -3000,8 +3139,8 @@ function mediaCollage(item, fallbackIcon) {
 function fileCardHtml(f) {
   const ext = (f.name || '').includes('.') ? (f.name.split('.').pop() || '').toUpperCase() : '';
   return `<a class="pf-file" href="${escapeHtml(f.data)}" download="${escapeHtml(f.name || 'file')}">
-    <span class="pf-file-ic"><i class="bi bi-file-earmark-arrow-down"></i></span>
-    <span class="pf-file-meta"><b>${escapeHtml(f.name || 'File')}</b><small>${ext ? ext + ' · ' : ''}${fmtBytes(f.size)}</small></span>
+    <span class="pf-file-ic"><i class="bi bi-${f._label ? 'envelope-paper' : 'file-earmark-arrow-down'}"></i></span>
+    <span class="pf-file-meta"><b>${escapeHtml(f._label || f.name || 'File')}</b><small>${f._label && f.name ? escapeHtml(f.name) + ' · ' : ''}${ext ? ext + ' · ' : ''}${fmtBytes(f.size)}</small></span>
   </a>`;
 }
 
@@ -3033,36 +3172,45 @@ function openPortfolioDetail(entity, id) {
   if (!item) return;
   const rich = entity === 'projects' || entity === 'research';
 
-  const titleOf = item.name || item.title || 'Details';
-  const skillsStr = Array.isArray(item.skills) ? item.skills.join(', ') : '';
+  const titleOf = item.name || item.title || item.institution || 'Details';
+  const join = (v) => Array.isArray(v) ? v.filter(Boolean).join(', ') : v;
+  const skillsStr = join(item.skills);
   const icon = entity === 'projects' ? 'diagram-3-fill'
     : entity === 'research' ? 'lightbulb-fill'
       : entity === 'achievements' ? 'trophy-fill'
-        : entity === 'training' ? 'mortarboard-fill'
-          : entity === 'volunteering' ? 'heart-fill' : typeIcon(item.type);
+        : entity === 'training' ? 'patch-check-fill'
+          : entity === 'education' ? 'mortarboard-fill'
+            : entity === 'volunteering' ? 'heart-fill' : typeIcon(item.type);
 
   const chipsArr = entity === 'projects' ? [item.status, item.category]
-    : entity === 'research' ? [item.field, item.stage]
+    : entity === 'research' ? [item.field, item.stage, item.researchType]
       : entity === 'achievements' ? [item.category, fmtDate(item.date)]
         : entity === 'training' ? [item.type, fmtDate(item.date)]
-          : entity === 'volunteering' ? [item.cause, item.role, fmtDate(item.date)]
-            : [item.status, item.type, item.subType];
+          : entity === 'education' ? [item.level, item.status]
+            : entity === 'volunteering' ? [item.cause, item.commitment, fmtDate(item.date)]
+              : [item.status, item.type, item.subType];
   const chips = chipsArr.filter(c => c && c !== '—').map(c => `<span class="chip chip-outline">${escapeHtml(c)}</span>`).join('');
 
   const rowsArr = entity === 'projects' ? [['Technologies', item.technologies], ['Team', item.team]]
-    : entity === 'research' ? [['Field', item.field], ['Stage', item.stage], ['References', item.references]]
+    : entity === 'research' ? [['Field', item.field], ['Topic', item.topic], ['Research type', item.researchType], ['Stage', item.stage], ['Aspects', join(item.aspects)], ['Tools & tech', join(item.technologies)], ['Methods', join(item.methods)], ['Skills', skillsStr], ['Keywords', join(item.keywords)], ['Collaborators', item.collaborators], ['Hypothesis', item.hypothesis], ['Expected outcome', item.outcome], ['References', item.references]]
       : entity === 'opportunities' ? [['Organizer', item.organizer], ['Country', item.country], ['Funding', item.fundingType], ['Deadline', fmtDate(item.deadline)], ['Event', fmtDate(item.eventDate)]]
         : entity === 'training' ? [['Issuer', item.issuer], ['Type', item.type], ['Length', item.length], ['Credential ID', item.credentialId], ['Skills', skillsStr], ['Date', fmtDate(item.date)]]
-          : entity === 'volunteering' ? [['Role', item.role], ['Organization', item.organization], ['Cause', item.cause], ['Location', item.location], ['Skills', skillsStr], ['Date', fmtDate(item.date)]]
-            : [['Position', item.position], ['Competition', item.competition], ['Issuer', item.issuer], ['Date', fmtDate(item.date)]];
+          : entity === 'education' ? [['Level', item.level], ['Program', item.program], ['Field of study', item.fieldOfStudy], ['Status', item.status], ['Location', item.location], ['Result / GPA', item.result], ['Scholarship', item.scholarship], ['Highlights', join(item.highlights)], ['Started', fmtDate(item.startDate)], ['Ended', fmtDate(item.endDate)], ['Applied', fmtDate(item.appliedDate)], ['Decision', fmtDate(item.decisionDate)]]
+            : entity === 'volunteering' ? [['Role', item.role], ['Organization', item.organization], ['Cause', item.cause], ['Commitment', item.commitment], ['Hours', item.hours], ['Impact', item.impact], ['Location', item.location], ['Skills', skillsStr], ['Started', fmtDate(item.startDate)], ['Ended', fmtDate(item.date)]]
+              : [['Position', item.position], ['Competition', item.competition], ['Issuer', item.issuer], ['Date', fmtDate(item.date)]];
   const rows = rowsArr.filter(([, v]) => v && v !== '—').map(([l, v]) => `<dt>${l}</dt><dd>${escapeHtml(v)}</dd>`).join('');
 
   const linksArr = (entity === 'achievements' || entity === 'training') ? [[item.certLink, 'Certificate', 'patch-check']]
-    : [[item.link, entity === 'opportunities' ? 'Official page' : 'Open link', 'box-arrow-up-right']];
+    : entity === 'volunteering' ? [[item.orgLink, 'Organization', 'box-arrow-up-right'], ...((item.links || []).map((u, i) => [u, 'Reference ' + (i + 1), 'link-45deg']))]
+      : entity === 'research' ? [[item.link, 'Publication', 'file-earmark-text']]
+        : entity === 'education' ? [[item.link, 'Program page', 'box-arrow-up-right']]
+          : [[item.link, entity === 'opportunities' ? 'Official page' : 'Open link', 'box-arrow-up-right']];
   const links = linksArr.filter(([href]) => href).map(([href, label, ico]) => `<a class="btn btn-soft btn-sm" href="${escapeHtml(href)}" target="_blank" rel="noopener"><i class="bi bi-${ico} me-1"></i>${label}</a>`).join('');
 
   const images = collectImages(item);
-  const files = collectFiles(item);
+  // education stores the offer/admission letter as a single uploaded file —
+  // surface it alongside any other attached documents in the Files section.
+  const files = collectFiles(item).concat(item.offerLetter && item.offerLetter.data ? [Object.assign({ _label: 'Offer / admission letter' }, item.offerLetter)] : []);
   const hero = images[0] || '';
   const rest = images.slice(1);
   const body = item.description || item.notes || item.problem || '';
@@ -3951,6 +4099,7 @@ const PAGE_INIT = {
   tasks: initTasks,
   documents: initDocuments,
   achievements: initAchievements,
+  education: initEducation,
   training: initTraining,
   volunteering: initVolunteering,
   contacts: initContacts,
@@ -4019,6 +4168,7 @@ function renderActivePage(page) {
       tasks: ['Task Board', 'Drag tasks across stages to update status'],
       documents: ['Documents', 'Passports, CVs, SOPs, transcripts and their status'],
       achievements: ['Achievements', 'Your awards, certifications and leadership roles'],
+      education: ['Education', 'Schools, colleges, universities, applications & offer letters'],
       contacts: ['Contacts & Network', 'Professors, mentors, alumni and industry contacts'],
       research: ['Research Hub', 'Ideas, problem statements and references'],
       projects: ['Projects', 'Project ideas and active builds'],
@@ -4124,7 +4274,12 @@ function SEED_DATA() {
     ],
 
     volunteering: [
-      { id: 'vl-1', title: 'STEM Workshop Facilitator', role: 'Lead Facilitator', organization: 'University Computer Club', cause: 'Education', date: plus(-90), location: 'Dhaka, Bangladesh', skills: ['Public Speaking', 'Mentoring', 'Teaching'], description: 'Ran coding and robotics workshops for 200+ school students across 6 sessions.', featured: true }
+      { id: 'vl-1', title: 'STEM Workshop Facilitator', role: 'Lead Facilitator', organization: 'University Computer Club', orgLink: '', cause: 'Education', commitment: 'Seasonal', startDate: plus(-120), date: plus(-90), location: 'Dhaka, Bangladesh', hours: '36 hours', impact: '200+ school students reached across 6 sessions', skills: ['Public Speaking', 'Mentoring', 'Teaching'], description: 'Ran coding and robotics workshops for 200+ school students across 6 sessions.', featured: true }
+    ],
+
+    education: [
+      { id: 'ed-1', institution: 'Daffodil International University', level: 'Undergraduate', program: 'B.Sc. in Computing & Information System', fieldOfStudy: 'Artificial Intelligence', status: 'Enrolled', location: 'Dhaka, Bangladesh', startDate: plus(-700), endDate: plus(760), appliedDate: plus(-760), decisionDate: plus(-730), result: 'CGPA 3.92 / 4.00', scholarship: 'Merit-based 25% tuition waiver', highlights: ["Dean's List", 'AI Major', 'Research Assistant'], description: 'Majoring in Artificial Intelligence with a focus on machine learning and applied research.', featured: true },
+      { id: 'ed-2', institution: 'Dhaka College', level: 'College', program: 'Higher Secondary Certificate (Science)', fieldOfStudy: 'Science', status: 'Graduated', location: 'Dhaka, Bangladesh', startDate: plus(-1800), endDate: plus(-740), result: 'GPA 5.00 / 5.00', highlights: ['Science Olympiad', 'Golden A+'], description: 'Higher secondary education in the science group.', featured: true }
     ],
 
     contacts: [
@@ -4135,14 +4290,14 @@ function SEED_DATA() {
     ],
 
     research: [
-      { id: 'rs-1', title: 'Low-resource Bangla speech recognition', field: 'AI', stage: 'Problem Defined', problem: 'Existing ASR models perform poorly on regional Bangla dialects due to limited labelled data. Can self-supervised pretraining close the gap with under 50 hours of labelled audio?', references: 'wav2vec 2.0 (Baevski et al., 2020); Common Voice Bangla dataset' },
-      { id: 'rs-2', title: 'AI crop disease detection for smallholder farmers', field: 'AI', stage: 'In Progress', problem: 'Build a lightweight CNN that runs offline on low-end Android phones to identify common crop diseases from leaf images.', references: 'PlantVillage dataset; MobileNetV3 paper' }
+      { id: 'rs-1', title: 'Low-resource Bangla speech recognition', subtitle: 'Closing the dialect gap with self-supervised pretraining', field: 'AI', topic: 'Self-supervised ASR for regional Bangla', researchType: 'Experimental', stage: 'Problem Defined', aspects: ['Dialect variation', 'Data efficiency', 'Transfer learning'], technologies: ['PyTorch', 'wav2vec 2.0', 'Kaldi'], methods: ['Self-supervised pretraining', 'Fine-tuning', 'WER evaluation'], skills: ['Speech Processing', 'Deep Learning'], keywords: ['ASR', 'Bangla', 'low-resource', 'wav2vec'], collaborators: 'Supervised by Prof. Dr. Aminul Rahman', problem: 'Existing ASR models perform poorly on regional Bangla dialects due to limited labelled data. Can self-supervised pretraining close the gap with under 50 hours of labelled audio?', hypothesis: 'Self-supervised pretraining on unlabelled Bangla audio will cut word-error-rate by 30%+ with under 50 hours of labelled data.', outcome: 'A reusable Bangla ASR baseline + a published benchmark for dialectal speech.', references: 'wav2vec 2.0 (Baevski et al., 2020); Common Voice Bangla dataset', featured: true },
+      { id: 'rs-2', title: 'AI crop disease detection for smallholder farmers', subtitle: 'Offline, on-device diagnosis from a single leaf photo', field: 'AI', topic: 'Edge ML for agriculture', researchType: 'Applied', stage: 'In Progress', aspects: ['On-device inference', 'Model compression', 'Accessibility'], technologies: ['TensorFlow Lite', 'MobileNetV3', 'Flutter'], methods: ['Transfer learning', 'Quantization', 'Field testing'], skills: ['Computer Vision', 'Mobile ML'], keywords: ['CNN', 'agriculture', 'edge AI'], problem: 'Build a lightweight CNN that runs offline on low-end Android phones to identify common crop diseases from leaf images.', outcome: 'An offline Android app deployed with two farming cooperatives.', references: 'PlantVillage dataset; MobileNetV3 paper', featured: true }
     ],
 
     projects: [
-      { id: 'pj-1', name: 'KrishiAI — Crop Disease Detector', category: 'AI', status: 'Development', technologies: 'Python, TensorFlow Lite, Flutter', team: 'Imran, Tanvir', link: '', description: 'Offline mobile app that detects crop diseases from a photo of a leaf and suggests treatment.' },
-      { id: 'pj-2', name: 'OppTrack — Opportunity Manager', category: 'Software', status: 'Completed', technologies: 'HTML, CSS, Bootstrap, Vanilla JS', team: 'Imran', link: '', description: 'This very dashboard — a personal system to manage opportunities, tasks and achievements.' },
-      { id: 'pj-3', name: 'FloodWatch BD', category: 'Data Science', status: 'Testing', technologies: 'Python, Pandas, Leaflet.js', team: 'Hackathon team', link: '', description: 'Real-time flood early-warning dashboard using public water-level data.' }
+      { id: 'pj-1', name: 'KrishiAI — Crop Disease Detector', subtitle: 'Offline crop diagnosis for smallholder farmers', category: 'AI', status: 'Development', technologies: 'Python, TensorFlow Lite, Flutter', team: 'Imran, Tanvir', link: '', description: 'Offline mobile app that detects crop diseases from a photo of a leaf and suggests treatment.', featured: true },
+      { id: 'pj-2', name: 'OppTrack — Opportunity Manager', subtitle: 'A personal life-OS for opportunities & growth', category: 'Software', status: 'Completed', technologies: 'HTML, CSS, Bootstrap, Vanilla JS', team: 'Imran', link: '', description: 'This very dashboard — a personal system to manage opportunities, tasks and achievements.', featured: true },
+      { id: 'pj-3', name: 'FloodWatch BD', subtitle: 'Real-time flood early-warning for Bangladesh', category: 'Data Science', status: 'Testing', technologies: 'Python, Pandas, Leaflet.js', team: 'Hackathon team', link: '', description: 'Real-time flood early-warning dashboard using public water-level data.' }
     ],
 
     reminders: [

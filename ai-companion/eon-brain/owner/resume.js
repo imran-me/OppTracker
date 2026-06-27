@@ -17,6 +17,7 @@ const PAGE_NAMES = {
   opportunities: 'Opportunities', 'opportunity-details': 'an opportunity',
   tasks: 'the Task Board', documents: 'Documents', contacts: 'Contacts',
   achievements: 'Achievements', projects: 'Projects', research: 'the Research Hub',
+  education: 'Education', training: 'Training & Certification', volunteering: 'Social Activities',
   dashboard: 'the Dashboard', categories: 'Category Manager', profile: 'your Profile',
 };
 

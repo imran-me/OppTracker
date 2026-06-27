@@ -138,7 +138,7 @@ export class CompanionBrain {
 
     // Showcase / archive entities are historical — never nag about them
     // (achievements, awards, training, volunteering, projects, research).
-    const NO_NAG = new Set(['achievements', 'training', 'volunteering', 'projects', 'research']);
+    const NO_NAG = new Set(['achievements', 'education', 'training', 'volunteering', 'projects', 'research']);
 
     // stale: a created/added/updated date long in the past, not finished
     for (const [entity, arr] of Object.entries(data)) {

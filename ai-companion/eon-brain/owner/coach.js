@@ -25,19 +25,19 @@ const PAGE_KEY = {
   dashboard: 'dashboard', index: 'dashboard',
   opportunities: 'opportunities', 'opportunity-details': 'opportunityDetails',
   tasks: 'tasks', documents: 'documents', achievements: 'achievements',
-  training: 'training', projects: 'projects', research: 'research',
+  education: 'education', training: 'training', projects: 'projects', research: 'research',
   volunteering: 'volunteering', contacts: 'contacts', profile: 'profile',
   categories: 'system', owner: 'system',
 };
 // content key → the data entity it counts / reads
 const KEY_ENTITY = {
   opportunities: 'opportunities', opportunityDetails: 'opportunities', tasks: 'tasks',
-  documents: 'documents', achievements: 'achievements', training: 'training',
+  documents: 'documents', achievements: 'achievements', education: 'education', training: 'training',
   projects: 'projects', research: 'research', volunteering: 'volunteering', contacts: 'contacts',
 };
 const LABEL = {
   opportunities: 'opportunities', tasks: 'tasks', documents: 'documents',
-  achievements: 'achievements', training: 'training', projects: 'projects',
+  achievements: 'achievements', education: 'schools & degrees', training: 'training', projects: 'projects',
   research: 'research ideas', volunteering: 'activities', contacts: 'contacts',
 };
 
@@ -78,6 +78,12 @@ const SECTIONS = {
     observe: ['The trophy room. 🏆 Every one of these is earned.', 'Look at this wall, {name}. Proud of you.', 'Wins on wins. Keep stacking. 🥇', "Hard to be humble in here, isn't it? 😏", 'Receipts of greatness, all in a row. 🧾', 'I never get tired of this view. 🏅'],
     prompt: ['Just won something? Add it — show it off.', 'New certificate to display? Let\'s add it.', 'Add a photo — these look great with one. 📸', 'Don\'t be shy — log that win.', 'Recent recognition? It belongs on this wall.'],
     tip: ['Tip: mark "Portfolio" to feature it publicly.', 'Tip: add the position and issuer — looks sharp.', 'Tip: a cover image makes the card pop.', 'Tip: no deadlines here — these are pure wins. 🎉', 'Tip: the "View details" opens the full story.'],
+  },
+  education: {
+    emotes: ['read', 'proud', 'salute', 'nod', 'idea'],
+    observe: ['Your academic journey, all mapped out. 🎓', 'From school to university — quite the climb, {name}.', 'Admissions, offers, results — the full story lives here.', 'Every degree is a chapter. Proud of this one.'],
+    prompt: ['Applied somewhere new? Log it and track the decision.', 'Got an offer letter? Upload it — show it off. 📜', 'Add your result or scholarship — it counts.', 'Enrolled or graduated? Update the status.'],
+    tip: ['Tip: the pipeline up top shows offers vs admissions at a glance.', 'Tip: upload your offer letter — it gets a special badge.', 'Tip: set status from Applied → Admitted → Enrolled to track admissions.', 'Tip: mark "Portfolio" to feature a degree publicly.'],
   },
   training: {
     emotes: ['read', 'idea', 'thumbsUp', 'nod', 'salute'],
