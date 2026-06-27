@@ -2238,8 +2238,8 @@ function volCardHtml(v, photoBadge, withTools) {
         ${when ? `<small class="text-faint num ms-auto">${escapeHtml(when)}</small>` : ''}
       </div>
       <b class="ach-title">${escapeHtml(v.title)}</b>
-      ${v.role ? `<div class="ach-role-badge"><i class="bi bi-person-badge-fill"></i>${escapeHtml(v.role)}</div>` : ''}
-      ${(v.organization || v.location) ? `<div class="ach-meta">${[v.organization, v.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+      ${v.role ? `<div class="ach-role">${escapeHtml(v.role)}</div>` : ''}
+      ${(v.organization || v.location) ? `<div class="ach-meta ach-sub">${[v.organization, v.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
       ${v.impact ? `<div class="ach-impact"><i class="bi bi-graph-up-arrow"></i><span>${escapeHtml(v.impact)}</span></div>` : ''}
       ${skills.length ? tagRow(skills) : (v.description ? `<p class="ach-desc">${escapeHtml(mdStrip(v.description))}</p>` : '')}
       <div class="ach-foot">
@@ -2264,7 +2264,7 @@ function researchCardHtml(r, photoBadge, withTools) {
         ${r.researchType ? `<small class="text-faint num ms-auto">${escapeHtml(r.researchType)}</small>` : ''}
       </div>
       <b class="ach-title">${escapeHtml(r.title)}</b>
-      ${(r.topic || r.subtitle) ? `<div class="ach-meta">${escapeHtml(r.topic || r.subtitle)}</div>` : ''}
+      ${(r.topic || r.subtitle) ? `<div class="ach-meta ach-sub">${escapeHtml(r.topic || r.subtitle)}</div>` : ''}
       ${(r.abstract || r.problem) ? `<p class="ach-desc">${escapeHtml(mdStrip(r.abstract || r.problem))}</p>` : ''}
       ${tagRow(tags)}
       <div class="ach-foot">
@@ -2287,7 +2287,7 @@ function projectCardHtml(p, photoBadge, withTools) {
         ${p.category ? `<span class="chip chip-outline ach-pos">${escapeHtml(p.category)}</span>` : ''}
       </div>
       <b class="ach-title">${escapeHtml(p.name)}</b>
-      ${p.subtitle ? `<div class="ach-meta">${escapeHtml(p.subtitle)}</div>` : ''}
+      ${p.subtitle ? `<div class="ach-meta ach-sub">${escapeHtml(p.subtitle)}</div>` : ''}
       ${p.technologies ? `<div class="ach-tech"><i class="bi bi-cpu"></i>${escapeHtml(p.technologies)}</div>` : ''}
       ${(p.abstract || p.description) ? `<p class="ach-desc">${escapeHtml(mdStrip(p.abstract || p.description))}</p>` : ''}
       <div class="ach-foot">
@@ -2324,6 +2324,63 @@ function educationCardHtml(ed, photoBadge, withTools) {
       </div>
     </div>
   </div>`;
+}
+
+/* EDUCATION timeline row — the CV-style "where I studied" layout (Part 1).
+   A connected node per institution, newest at the top. */
+function educationTimelineHtml(ed, withTools) {
+  const hasOffer = ed.offerLetter && ed.offerLetter.data;
+  const when = [fmtDate(ed.startDate), ed.status === 'Graduated' || ed.endDate ? fmtDate(ed.endDate) : (ed.status === 'Enrolled' ? 'Present' : '')].filter(d => d && d !== '—');
+  const period = when.length === 2 ? `${when[0]} – ${when[1]}` : (when[0] || '');
+  return `
+  <div class="edu-tl pf-clickable" data-detail="education:${ed.id}">
+    <span class="edu-tl-node"><i class="bi bi-mortarboard-fill"></i></span>
+    <div class="edu-tl-card">
+      <div class="edu-tl-head">
+        <b>${escapeHtml(ed.institution)}</b>
+        ${ed.status ? `<span class="chip t-${statusTone(ed.status)} ach-pos"><span class="dot"></span>${escapeHtml(ed.status)}</span>` : ''}
+        ${period ? `<small class="text-faint num ms-auto">${escapeHtml(period)}</small>` : ''}
+      </div>
+      ${(ed.program || ed.fieldOfStudy || ed.level) ? `<div class="edu-tl-prog">${[ed.program || ed.level, ed.fieldOfStudy].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+      ${ed.location ? `<div class="ach-meta">${escapeHtml(ed.location)}</div>` : ''}
+      ${(ed.result || ed.scholarship) ? `<div class="ach-impact"><i class="bi bi-patch-check-fill"></i><span>${[ed.result, ed.scholarship].filter(Boolean).map(escapeHtml).join(' · ')}</span></div>` : ''}
+      ${tagRow(ed.highlights, 6)}
+      <div class="ach-foot">
+        <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+        ${hasOffer ? '<span class="chip chip-mini" style="background:#0a7d4b;color:#fff"><i class="bi bi-envelope-paper-fill me-1"></i>Offer letter</span>' : ''}
+        ${ed.link ? `<a class="btn btn-ghost btn-sm" title="Program" href="${escapeHtml(ed.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="bi bi-box-arrow-up-right"></i></a>` : ''}
+        ${withTools ? cardFootTools('education', ed.id) : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* Split education into its two parts and render each with its own layout:
+   Part 1 "My Academic Journey" (studied / studying) → vertical timeline.
+   Part 2 "Admissions & Offers" (got in, may not have attended) → card grid.
+   Classification is by status, so it just works as the owner updates a record
+   from "Offer Received" → "Enrolled". */
+function educationGroups(items, badge, withTools, withPipeline) {
+  const STUDIED = ['enrolled', 'graduated'];
+  const isJourney = (e) => !e.status || STUDIED.includes((e.status || '').toLowerCase());
+  const dkey = (e) => e.startDate || e.endDate || e.decisionDate || e.appliedDate || '';
+  const journey = items.filter(isJourney).sort((a, b) => dkey(b).localeCompare(dkey(a)));
+  const admits = items.filter(e => !isJourney(e)).sort((a, b) => (b.decisionDate || b.appliedDate || '').localeCompare(a.decisionDate || a.appliedDate || ''));
+
+  const groupHead = (ico, tone, title, sub) => `<div class="edu-group-h">
+    <span class="edu-group-ic t-${tone}"><i class="bi bi-${ico}"></i></span>
+    <div><b>${title}</b><small>${sub}</small></div></div>`;
+
+  let html = withPipeline ? admissionsPipeline(items) : '';
+  if (journey.length) {
+    html += `<div class="edu-group">${groupHead('mortarboard-fill', 'primary', 'My Academic Journey', "Where I've studied &amp; study now")}
+      <div class="edu-timeline">${journey.map(e => educationTimelineHtml(e, withTools)).join('')}</div></div>`;
+  }
+  if (admits.length) {
+    html += `<div class="edu-group">${groupHead('envelope-paper-fill', 'green', 'Admissions &amp; Offers', 'Where I got in — offers, admissions &amp; applications')}
+      <div class="gal-grid gal-grid--4">${admits.map(e => educationCardHtml(e, badge, withTools)).join('')}</div></div>`;
+  }
+  return html;
 }
 
 /* ---------- ACHIEVEMENTS (gallery) ---------- */
@@ -2504,10 +2561,8 @@ function initEducation() {
   const host = document.getElementById('eduHost');
   const draw = () => {
     const items = DB.getAll('education');
-    if (!items.length) { host.innerHTML = emptyState('mortarboard', 'No education added yet', 'Add your schools, colleges and universities — applications, offers, results and offer-letter showcase, all in one timeline.', 'Add education', () => openEntityModal('education', null, draw), true); return; }
-    // order by start date (newest first), undated last
-    const ordered = [...items].sort((a, b) => (b.startDate || b.endDate || '').localeCompare(a.startDate || a.endDate || ''));
-    host.innerHTML = admissionsPipeline(items) + `<div class="gal-grid gal-grid--4">${ordered.map(e => educationCardHtml(e, galPhotoBadge, true)).join('')}</div>`;
+    if (!items.length) { host.innerHTML = emptyState('mortarboard', 'No education added yet', 'Add your schools, colleges and universities. Places you studied appear as a timeline; places you got into (offers & admissions) appear as a showcase grid.', 'Add education', () => openEntityModal('education', null, draw), true); return; }
+    host.innerHTML = educationGroups(items, galPhotoBadge, true, true);
     host.onclick = portfolioDetailDelegate;
   };
   document.getElementById('eduAdd').onclick = () => openEntityModal('education', null, draw);
@@ -2738,11 +2793,12 @@ function initProfile() {
   // management pages (identical width & height everywhere).
   const pfBadge = (entity) => (item) => `${photoBadge(item)}${cardTools(entity, item.id)}`;
 
-  // showcase: education (academic journey) — newest first
+  // showcase: education — split into "My Academic Journey" (timeline) and
+  // "Admissions & Offers" (grid), same two-part layout as the manage page.
   const eduEl = document.getElementById('pfEducation');
   if (eduEl) {
-    const eds = featured([...DB.getAll('education')].sort((a, b) => (b.startDate || b.endDate || '').localeCompare(a.startDate || a.endDate || '')));
-    eduEl.innerHTML = eds.length ? eds.map(e => educationCardHtml(e, pfBadge('education'), false)).join('') : '<p class="text-soft">No education added yet.</p>';
+    const eds = featured(DB.getAll('education'));
+    eduEl.innerHTML = eds.length ? educationGroups(eds, galPhotoBadge, true, false) : '<p class="text-soft">No education added yet.</p>';
   }
 
   // showcase: projects (ongoing first, then the rest)
@@ -3566,8 +3622,12 @@ function initOwner() {
   };
 
   renderDriveStatus();
-  // a silent reconnect may finish after first paint → refresh the badge
-  if (hasDrive) Drive.trySilentConnect().then(renderDriveStatus);
+  // a silent reconnect may finish after first paint → refresh the badge, then
+  // catch Drive up if it fell behind Firestore (edits made where Drive was off)
+  if (hasDrive) Drive.trySilentConnect().then((connected) => {
+    renderDriveStatus();
+    if (connected) Drive.catchUp(JSON.stringify(DB.data));
+  });
 }
 
 /* ---------- INDEX / LANDING ---------- */
@@ -4148,11 +4208,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Show owner tools / hide them from visitors (sets <body> class + auth control)
   Security.applyMode();
 
-  // Owner only: route Drive-backup status to the pill and try to
-  // reconnect Drive silently so backups keep flowing across pages.
+  // Owner only: route Drive-backup status to the pill, silently reconnect on
+  // a device that already connected Drive, then CATCH UP — push the latest
+  // Firestore data to Drive if it changed while Drive wasn't connected (e.g.
+  // edits made on another device). Uploads only when something differs; never
+  // pops up. No-op on devices where Drive was never connected.
   if (Security.isOwner() && typeof Drive !== 'undefined' && Drive) {
     Drive.onStatus = (st) => setSync(st === 'saving' ? 'drive-saving' : st === 'done' ? 'drive-done' : 'drive-error');
-    Drive.trySilentConnect();
+    Drive.trySilentConnect().then((connected) => {
+      if (connected) Drive.catchUp(JSON.stringify(DB.data));
+    });
   }
 });
 
@@ -4279,7 +4344,9 @@ function SEED_DATA() {
 
     education: [
       { id: 'ed-1', institution: 'Daffodil International University', level: 'Undergraduate', program: 'B.Sc. in Computing & Information System', fieldOfStudy: 'Artificial Intelligence', status: 'Enrolled', location: 'Dhaka, Bangladesh', startDate: plus(-700), endDate: plus(760), appliedDate: plus(-760), decisionDate: plus(-730), result: 'CGPA 3.92 / 4.00', scholarship: 'Merit-based 25% tuition waiver', highlights: ["Dean's List", 'AI Major', 'Research Assistant'], description: 'Majoring in Artificial Intelligence with a focus on machine learning and applied research.', featured: true },
-      { id: 'ed-2', institution: 'Dhaka College', level: 'College', program: 'Higher Secondary Certificate (Science)', fieldOfStudy: 'Science', status: 'Graduated', location: 'Dhaka, Bangladesh', startDate: plus(-1800), endDate: plus(-740), result: 'GPA 5.00 / 5.00', highlights: ['Science Olympiad', 'Golden A+'], description: 'Higher secondary education in the science group.', featured: true }
+      { id: 'ed-2', institution: 'Dhaka College', level: 'College', program: 'Higher Secondary Certificate (Science)', fieldOfStudy: 'Science', status: 'Graduated', location: 'Dhaka, Bangladesh', startDate: plus(-1800), endDate: plus(-740), result: 'GPA 5.00 / 5.00', highlights: ['Science Olympiad', 'Golden A+'], description: 'Higher secondary education in the science group.', featured: true },
+      { id: 'ed-3', institution: 'BRAC University', level: 'Undergraduate', program: 'B.Sc. in Computer Science', fieldOfStudy: 'Computer Science', status: 'Offer Received', location: 'Dhaka, Bangladesh', appliedDate: plus(-790), decisionDate: plus(-755), scholarship: '40% merit scholarship', highlights: ['Merit waiver'], description: 'Received an admission offer with a partial scholarship — chose Daffodil instead.', featured: true },
+      { id: 'ed-4', institution: 'TU Munich (DAAD)', level: 'Masters', program: 'M.Sc. in Informatics', fieldOfStudy: 'AI & Machine Learning', status: 'Applied', location: 'Munich, Germany', appliedDate: plus(-20), highlights: ['DAAD scholarship track'], description: 'Master’s application in progress for the upcoming intake.', featured: true }
     ],
 
     contacts: [

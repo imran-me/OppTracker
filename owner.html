@@ -76,11 +76,14 @@
 
       <!-- Google Drive auto-backup -->
       <div class="card card-pad mt-4" id="driveCard">
-        <div class="section-title">Google Drive backup</div>
+        <div class="section-title">Google Drive backup <span class="text-faint" style="font-weight:500;font-size:12px">— optional</span></div>
         <p class="text-soft" style="font-size:13px">
-          Every change is mirrored to a single <code>opptrack-backup.json</code> in your Google Drive,
-          alongside Firebase. A safety net: if Firebase ever fails, open that file from Drive and
-          restore it with <b>Import backup</b> above. Connect once — backups then run automatically.
+          Your data is always saved to <b>Firebase</b> automatically on every device — Drive is just an
+          <b>optional extra backup</b> mirrored to <code>opptrack-backup.json</code> in your Drive.
+          Because Google only lets a site write to your Drive after you sign in, this is a
+          <b>per-device, one-time connect</b>: click <b>Connect Drive</b> on a device and backups run
+          quietly from then on. On devices where you don't connect, nothing pops up and your edits
+          still save to Firebase as normal.
         </p>
         <div id="driveStatus" class="mb-3"></div>
         <div class="d-flex gap-2 flex-wrap">

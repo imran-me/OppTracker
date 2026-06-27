@@ -27,6 +27,15 @@ const Drive = {
   FILE_ID_KEY: 'pomls_drive_backup_id',
   FOLDER_NAME: 'OppTracker Backups',
   FOLDER_ID_KEY: 'pomls_drive_folder_id',
+  /* Per-device opt-in flag. Set only after the owner deliberately clicks
+     "Connect Drive" on THIS device. Until then, Drive is never touched and
+     NO Google sign-in popup can ever appear — Firestore is the always-on
+     cross-device store; Drive is just a local extra backup. */
+  DEVICE_FLAG: 'pomls_drive_enabled',
+  /* Fingerprint of the data last written to Drive (per device). Lets us
+     detect when Firestore has newer data than Drive — e.g. edits made on a
+     phone where Drive wasn't connected — and catch the Drive copy up. */
+  LAST_HASH_KEY: 'pomls_drive_last_hash',
 
   _token: null,
   _tokenExp: 0,
@@ -91,19 +100,53 @@ const Drive = {
 
   isConnected() { return this._tokenIsFresh(); },
 
-  /* Silent (re)connect — succeeds only if the owner consented
-     before and still has an active Google session. No popup. */
+  /* Has the owner connected Drive on THIS device before? */
+  deviceEnabled() { try { return localStorage.getItem(this.DEVICE_FLAG) === '1'; } catch (e) { return false; } },
+
+  /* Silent (re)connect — refreshes the short-lived token WITHOUT any popup.
+     Gated on the per-device flag: on a device that never connected Drive we
+     do NOT even ask Google, so no sign-in window can appear. On a connected
+     device with a live Google session it refreshes quietly. */
   async trySilentConnect() {
     if (this._tokenIsFresh()) return true;
+    if (!this.deviceEnabled()) return false;          // never auto-prompt on a fresh device
     try { await this._requestToken(false); return true; }
     catch (e) { return false; }
   },
 
-  /* Interactive connect — MUST be called from a user click. */
+  /* Interactive connect — MUST be called from a user click. This is the ONE
+     place a Google popup is allowed, because the owner asked for it. */
   async connect() {
-    if (this._tokenIsFresh()) return true;
+    if (this._tokenIsFresh()) { this._markEnabled(); return true; }
     await this._requestToken(true);
+    this._markEnabled();
     return true;
+  },
+
+  _markEnabled() { try { localStorage.setItem(this.DEVICE_FLAG, '1'); } catch (e) {} },
+
+  /* Quick content fingerprint (djb2) — cheap way to tell if the data has
+     changed since the last Drive write, without re-reading the file. */
+  _hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h >>> 0); },
+  _rememberHash(s) { try { localStorage.setItem(this.LAST_HASH_KEY, this._hash(s)); } catch (e) {} },
+  _hashMatches(s) { try { return localStorage.getItem(this.LAST_HASH_KEY) === this._hash(s); } catch (e) { return false; } },
+
+  /* Catch-up sync: push the current data to Drive IF this device is connected
+     and Drive is behind (data changed since the last Drive write — typically
+     because edits were made elsewhere while Drive wasn't connected). Safe to
+     call on every page load; it uploads only when something actually changed
+     and never shows a popup. */
+  catchUp(jsonString) {
+    if (!this._tokenIsFresh()) return false;     // not connected on this device → nothing to do
+    if (this._hashMatches(jsonString)) return false; // Drive already has this exact data
+    this.backup(jsonString);                     // debounced upload (remembers the new hash on success)
+    return true;
+  },
+
+  /* Turn off Drive backup on this device (clears token + opt-in flag). */
+  disconnect() {
+    this._token = null; this._tokenExp = 0;
+    try { localStorage.removeItem(this.DEVICE_FLAG); } catch (e) {}
   },
 
   async _validToken() {
@@ -179,9 +222,14 @@ const Drive = {
     });
   },
 
-  /* Create or overwrite the backup file with the given JSON. */
-  async backupNow(jsonString) {
-    const token = await this._validToken();
+  /* Create or overwrite the backup file with the given JSON.
+     silent=true (the auto path) NEVER requests a token: it uploads only if a
+     live token is already in memory, otherwise it quietly skips — so an edit
+     can never spawn a sign-in popup. silent=false (manual "Back up now") may
+     reconnect. */
+  async backupNow(jsonString, silent = false) {
+    const token = silent ? (this._tokenIsFresh() ? this._token : null) : await this._validToken();
+    if (!token) return false;
     const folderId = await this._findOrCreateFolder(token);
     const fileId = await this._findFileId(token);
     if (!fileId) {
@@ -216,10 +264,11 @@ const Drive = {
         // File was deleted in Drive — forget it and recreate.
         this._fileId = null;
         localStorage.removeItem(this.FILE_ID_KEY);
-        return this.backupNow(jsonString);
+        return this.backupNow(jsonString, silent);
       }
       if (!r.ok) throw new Error('Drive update failed: ' + r.status);
     }
+    this._rememberHash(jsonString);   // Drive now matches this data
     return true;
   },
 
@@ -230,13 +279,17 @@ const Drive = {
   },
 
   /* Debounced backup — called by DB.save() after each change.
-     Silently does nothing if Drive isn't connected yet. */
+     NEVER triggers a sign-in popup: if this device has no live Drive token it
+     simply does nothing (Firestore already saved the change). A token is only
+     obtained by an explicit "Connect Drive" click or the once-per-load silent
+     refresh on an already-connected device. */
   backup(jsonString) {
+    if (!this._tokenIsFresh()) return;        // not connected on this device → skip quietly, no popup
     clearTimeout(this._debounce);
     if (this.onStatus) this.onStatus('saving');
     this._debounce = setTimeout(() => {
-      this.backupNow(jsonString)
-        .then(() => { if (this.onStatus) this.onStatus('done'); })
+      this.backupNow(jsonString, true)
+        .then((ok) => { if (this.onStatus) this.onStatus(ok ? 'done' : 'error'); })
         .catch(e => { console.warn('Drive backup skipped/failed:', e.message); if (this.onStatus) this.onStatus('error'); });
     }, 1500);
   }
