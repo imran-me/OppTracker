@@ -2383,39 +2383,44 @@ function educationGroups(items, badge, withTools, withPipeline) {
   return html;
 }
 
+/* ACHIEVEMENT card — placement first (big & bold), then the title beneath it
+   (smaller), then "By: issuer", a divider, then the rest. The placement is
+   plain text (never a clipped chip) so it's always fully readable. When no
+   placement was entered (older records typed into the description), the title
+   is the headline instead. */
+function achievementCardHtml(a, photoBadge, withTools) {
+  const hasPlace = !!a.position;
+  return `
+  <div class="gal-card ach-card pf-clickable" data-detail="achievements:${a.id}">
+    <div class="gc-media">${mediaCollage(a, typeIcon(a.category) || 'trophy-fill')}${photoBadge ? photoBadge(a) : ''}${a.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+    <div class="gc-body">
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || 'Achievement')}</span>
+        <small class="text-faint num ms-auto">${fmtDate(a.date)}</small>
+      </div>
+      ${hasPlace
+        ? `<b class="ach-title">${escapeHtml(a.position)}</b><div class="ach-subtitle">${escapeHtml(a.title)}</div>`
+        : `<b class="ach-title">${escapeHtml(a.title)}</b>`}
+      ${a.issuer ? `<div class="ach-by"><span>By</span>${escapeHtml(a.issuer)}</div>` : ''}
+      ${(a.competition || a.description) ? `<hr class="ach-div">` : ''}
+      ${a.competition ? `<div class="ach-meta">${escapeHtml(a.competition)}</div>` : ''}
+      ${a.description ? `<p class="ach-desc">${escapeHtml(mdStrip(a.description))}</p>` : ''}
+      <div class="ach-foot">
+        <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
+        ${a.certLink ? `<a class="btn btn-ghost btn-sm" title="Certificate" href="${escapeHtml(a.certLink)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="bi bi-patch-check"></i></a>` : ''}
+        ${withTools ? cardFootTools('achievements', a.id) : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ---------- ACHIEVEMENTS (gallery) ---------- */
 function initAchievements() {
   const host = document.getElementById('achHost');
   const draw = () => {
     const items = DB.getAll('achievements');
     if (!items.length) { host.innerHTML = emptyState('trophy', 'No achievements yet', 'Showcase competitions, awards, certifications and leadership roles.', 'Add achievement', () => openEntityModal('achievements', null, draw), true); return; }
-    const photoBadge = (item) => {
-      const np = collectImages(item).length, nf = collectFiles(item).length;
-      return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
-    };
-    const metaLine = (a) => [a.competition, a.issuer].filter(Boolean).map(escapeHtml).join(' · ');
-    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(a => `
-      <div class="gal-card ach-card pf-clickable" data-detail="achievements:${a.id}">
-        <div class="gc-media">${mediaCollage(a, typeIcon(a.category) || 'trophy-fill')}${photoBadge(a)}${a.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
-        <div class="gc-body">
-          <div class="d-flex align-items-center gap-2 mb-1">
-            <span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || 'Achievement')}</span>
-            ${a.position ? `<span class="chip chip-outline ach-pos">${escapeHtml(a.position)}</span>` : ''}
-            <small class="text-faint num ms-auto">${fmtDate(a.date)}</small>
-          </div>
-          <b class="ach-title">${escapeHtml(a.title)}</b>
-          ${metaLine(a) ? `<div class="ach-meta">${metaLine(a)}</div>` : ''}
-          ${a.description ? `<p class="ach-desc">${escapeHtml(mdStrip(a.description))}</p>` : ''}
-          <div class="ach-foot">
-            <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
-            <span class="ach-tools">
-              ${a.certLink ? `<a class="btn btn-ghost btn-sm" title="Certificate" href="${escapeHtml(a.certLink)}" target="_blank" rel="noopener"><i class="bi bi-patch-check"></i></a>` : ''}
-              <button class="btn btn-ghost btn-sm owner-only" title="Edit" onclick="event.stopPropagation();openEntityModal('achievements','${a.id}')"><i class="bi bi-pencil"></i></button>
-              <button class="btn btn-ghost btn-sm text-danger owner-only" title="Delete" onclick="event.stopPropagation();confirmDelete('achievements','${a.id}')"><i class="bi bi-trash3"></i></button>
-            </span>
-          </div>
-        </div>
-      </div>`).join('')}</div>`;
+    host.innerHTML = `<div class="gal-grid gal-grid--4">${items.map(a => achievementCardHtml(a, galPhotoBadge, true)).join('')}</div>`;
     host.onclick = portfolioDetailDelegate;
   };
   document.getElementById('achAdd').onclick = () => openEntityModal('achievements', null, draw);
@@ -2727,6 +2732,9 @@ function initProfile() {
     return `${np ? `<span class="pf-photo-count"><i class="bi bi-images"></i>${np}</span>` : ''}${nf ? `<span class="pf-photo-count file"><i class="bi bi-paperclip"></i>${nf}</span>` : ''}`;
   };
   const coverOf = (item) => item.image || (Array.isArray(item.gallery) && item.gallery[0]) || (Array.isArray(item.photos) && item.photos[0] && item.photos[0].data) || '';
+  // Portfolio media badge = photo/file counts + owner edit/delete overlay,
+  // so public showcase cards reuse the SAME compact builders as the manage pages.
+  const pfBadge = (entity) => (item) => `${photoBadge(item)}${cardTools(entity, item.id)}`;
 
   // Featured selection: show only items the owner marked "Show on portfolio".
   // If NONE are marked in a collection, fall back to showing them all so the
@@ -2738,20 +2746,9 @@ function initProfile() {
   };
 
   // showcase: achievements
-  document.getElementById('pfAchievements').innerHTML = featured(DB.getAll('achievements'), 6).map(a => `
-    <div class="gal-card ach-card pf-clickable" data-detail="achievements:${a.id}">
-      <div class="gc-media">${mediaCollage(a, 'trophy-fill')}${photoBadge(a)}${cardTools('achievements', a.id)}</div>
-      <div class="gc-body">
-        <div class="d-flex align-items-center gap-2 mb-1">
-          <span class="chip t-${statusTone(a.category)}">${escapeHtml(a.category || '')}</span>
-          ${a.position ? `<span class="chip chip-outline ach-pos">${escapeHtml(a.position)}</span>` : ''}
-        </div>
-        <b class="ach-title">${escapeHtml(a.title)}</b>
-        ${[a.competition, a.issuer].filter(Boolean).length ? `<div class="ach-meta">${[a.competition, a.issuer].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
-        ${a.description ? `<p class="ach-desc">${escapeHtml(mdStrip(a.description))}</p>` : ''}
-        <div class="ach-foot"><span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span></div>
-      </div>
-    </div>`).join('') || '<p class="text-soft">No achievements to show yet.</p>';
+  document.getElementById('pfAchievements').innerHTML =
+    featured(DB.getAll('achievements'), 6).map(a => achievementCardHtml(a, pfBadge('achievements'), false)).join('')
+    || '<p class="text-soft">No achievements to show yet.</p>';
 
   // showcase: training & certifications
   const trainEl = document.getElementById('pfTraining');
@@ -2787,11 +2784,6 @@ function initProfile() {
       </div>
       ${cardTools('opportunities', o.id)}
     </div>`).join('') : '<p class="text-soft">No wins recorded yet.</p>'; }
-
-  // Portfolio media badge = photo/file counts + owner edit/delete overlay,
-  // so the public showcase cards reuse the SAME compact builders as the
-  // management pages (identical width & height everywhere).
-  const pfBadge = (entity) => (item) => `${photoBadge(item)}${cardTools(entity, item.id)}`;
 
   // showcase: education — split into "My Academic Journey" (timeline) and
   // "Admissions & Offers" (grid), same two-part layout as the manage page.
