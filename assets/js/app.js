@@ -2228,18 +2228,20 @@ function volCardHtml(v, photoBadge, withTools) {
   const skills = Array.isArray(v.skills) ? v.skills : [];
   const dates = [fmtDate(v.startDate), fmtDate(v.date)].filter(d => d && d !== '—');
   const when = dates.length === 2 && dates[0] !== dates[1] ? `${dates[0]} – ${dates[1]}` : (dates[0] || '');
+  const topBits = [
+    v.commitment ? `<span class="chip chip-outline ach-pos">${escapeHtml(v.commitment)}</span>` : '',
+    v.hours ? `<span class="chip chip-mini"><i class="bi bi-clock me-1"></i>${escapeHtml(v.hours)}</span>` : '',
+    when ? `<small class="text-faint num ms-auto">${escapeHtml(when)}</small>` : ''
+  ].filter(Boolean).join('');
   return `
-  <div class="gal-card ach-card pf-clickable" data-detail="volunteering:${v.id}">
-    <div class="gc-media">${mediaCollage(v, 'heart-fill')}${photoBadge ? photoBadge(v) : ''}${v.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
+  <div class="gal-card ach-card vol-card pf-clickable" data-detail="volunteering:${v.id}">
+    <div class="gc-media">${mediaCollage(v, 'heart-fill')}${photoBadge ? photoBadge(v) : ''}${v.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}<span class="vol-tag"><i class="bi bi-heart-fill"></i>Social impact</span></div>
     <div class="gc-body">
-      <div class="d-flex align-items-center gap-2 mb-1">
-        <span class="chip t-pink">${escapeHtml(v.cause || 'Community')}</span>
-        ${v.commitment ? `<span class="chip chip-outline ach-pos">${escapeHtml(v.commitment)}</span>` : ''}
-        ${when ? `<small class="text-faint num ms-auto">${escapeHtml(when)}</small>` : ''}
-      </div>
+      ${topBits ? `<div class="d-flex align-items-center gap-2 mb-1">${topBits}</div>` : ''}
       <b class="ach-title">${escapeHtml(v.title)}</b>
       ${v.role ? `<div class="ach-role">${escapeHtml(v.role)}</div>` : ''}
       ${(v.organization || v.location) ? `<div class="ach-meta ach-sub">${[v.organization, v.location].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+      ${v.cause ? `<div class="vol-cause"><i class="bi bi-tag-fill"></i><span>${escapeHtml(v.cause)}</span></div>` : ''}
       ${v.impact ? `<div class="ach-impact"><i class="bi bi-graph-up-arrow"></i><span>${escapeHtml(v.impact)}</span></div>` : ''}
       ${skills.length ? tagRow(skills) : (v.description ? `<p class="ach-desc">${escapeHtml(mdStrip(v.description))}</p>` : '')}
       <div class="ach-foot">
@@ -2252,10 +2254,10 @@ function volCardHtml(v, photoBadge, withTools) {
 }
 
 /* RESEARCH card — field + stage chips, topic line, aspects/tech tags. */
-function researchCardHtml(r, photoBadge, withTools) {
+function researchCardHtml(r, photoBadge, withTools, compact) {
   const tags = [...(Array.isArray(r.aspects) ? r.aspects : []), ...(Array.isArray(r.technologies) ? r.technologies : [])];
   return `
-  <div class="gal-card ach-card pf-clickable" data-detail="research:${r.id}">
+  <div class="gal-card ach-card pf-clickable${compact ? ' ach-cap' : ''}" data-detail="research:${r.id}">
     <div class="gc-media">${mediaCollage(r, 'lightbulb-fill')}${photoBadge ? photoBadge(r) : ''}${r.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
     <div class="gc-body">
       <div class="d-flex align-items-center gap-2 mb-1">
@@ -2277,9 +2279,9 @@ function researchCardHtml(r, photoBadge, withTools) {
 }
 
 /* PROJECT card — order: name → subtitle → technology → description. */
-function projectCardHtml(p, photoBadge, withTools) {
+function projectCardHtml(p, photoBadge, withTools, compact) {
   return `
-  <div class="gal-card ach-card pf-clickable" data-detail="projects:${p.id}">
+  <div class="gal-card ach-card pf-clickable${compact ? ' ach-cap' : ''}" data-detail="projects:${p.id}">
     <div class="gc-media">${mediaCollage(p, 'diagram-3-fill')}${photoBadge ? photoBadge(p) : ''}${p.featured ? '<span class="pf-feat-badge"><i class="bi bi-star-fill"></i>Portfolio</span>' : ''}</div>
     <div class="gc-body">
       <div class="d-flex align-items-center gap-2 mb-1">
@@ -2288,7 +2290,7 @@ function projectCardHtml(p, photoBadge, withTools) {
       </div>
       <b class="ach-title">${escapeHtml(p.name)}</b>
       ${p.subtitle ? `<div class="ach-meta ach-sub">${escapeHtml(p.subtitle)}</div>` : ''}
-      ${p.technologies ? `<div class="ach-tech"><i class="bi bi-cpu"></i>${escapeHtml(p.technologies)}</div>` : ''}
+      ${p.technologies ? `<div class="ach-tech"><i class="bi bi-cpu"></i><span>${escapeHtml(p.technologies)}</span></div>` : ''}
       ${(p.abstract || p.description) ? `<p class="ach-desc">${escapeHtml(mdStrip(p.abstract || p.description))}</p>` : ''}
       <div class="ach-foot">
         <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
@@ -2355,12 +2357,37 @@ function educationTimelineHtml(ed, withTools) {
   </div>`;
 }
 
+/* One compact "got-in" row — for the public portfolio, where many admissions
+   shouldn't each eat a full card. Single line: Got-in tag · institution ·
+   subject · status · year, click for full details. */
+function educationRowHtml(ed, withTools) {
+  const yr = (ed.startDate || ed.decisionDate || ed.appliedDate || '').slice(0, 4);
+  const subject = ed.fieldOfStudy || ed.program || ed.level || '';
+  const hasOffer = ed.offerLetter && ed.offerLetter.data;
+  return `
+  <div class="edu-row pf-clickable" data-detail="education:${ed.id}">
+    <span class="edu-row-tag"><i class="bi bi-check-circle-fill"></i>Got in</span>
+    <div class="edu-row-main">
+      <b>${escapeHtml(ed.institution)}</b>
+      ${subject ? `<span>${escapeHtml(subject)}</span>` : ''}
+    </div>
+    ${hasOffer ? '<span class="edu-row-offer" title="Offer letter on file"><i class="bi bi-envelope-paper-fill"></i></span>' : ''}
+    ${ed.status ? `<span class="chip t-${statusTone(ed.status)} edu-row-st">${escapeHtml(ed.status)}</span>` : ''}
+    ${yr ? `<small class="num edu-row-yr">${escapeHtml(yr)}</small>` : ''}
+    ${withTools ? `<span class="edu-row-tools owner-only">
+      <button class="btn btn-ghost btn-sm" title="Edit" onclick="event.stopPropagation();openEntityModal('education','${ed.id}', refreshCurrentPage)"><i class="bi bi-pencil"></i></button>
+      <button class="btn btn-ghost btn-sm text-danger" title="Delete" onclick="event.stopPropagation();confirmDelete('education','${ed.id}', refreshCurrentPage)"><i class="bi bi-trash3"></i></button></span>` : ''}
+    <i class="bi bi-chevron-right edu-row-cta"></i>
+  </div>`;
+}
+
 /* Split education into its two parts and render each with its own layout:
    Part 1 "My Academic Journey" (studied / studying) → vertical timeline.
-   Part 2 "Admissions & Offers" (got in, may not have attended) → card grid.
-   Classification is by status, so it just works as the owner updates a record
-   from "Offer Received" → "Enrolled". */
-function educationGroups(items, badge, withTools, withPipeline) {
+   Part 2 "Admissions & Offers" (got in, may not have attended) → cards, OR
+   compact rows when admitsAsRows is set (the public portfolio, to stay tidy
+   when there are many). Classification is by status, so it just works as the
+   owner updates a record from "Offer Received" → "Enrolled". */
+function educationGroups(items, badge, withTools, withPipeline, admitsAsRows) {
   const STUDIED = ['enrolled', 'graduated'];
   const isJourney = (e) => !e.status || STUDIED.includes((e.status || '').toLowerCase());
   const dkey = (e) => e.startDate || e.endDate || e.decisionDate || e.appliedDate || '';
@@ -2377,10 +2404,32 @@ function educationGroups(items, badge, withTools, withPipeline) {
       <div class="edu-timeline">${journey.map(e => educationTimelineHtml(e, withTools)).join('')}</div></div>`;
   }
   if (admits.length) {
-    html += `<div class="edu-group">${groupHead('envelope-paper-fill', 'green', 'Admissions &amp; Offers', 'Where I got in — offers, admissions &amp; applications')}
-      <div class="gal-grid gal-grid--4">${admits.map(e => educationCardHtml(e, badge, withTools)).join('')}</div></div>`;
+    const inner = admitsAsRows
+      ? `<div class="edu-rows">${admits.map(e => educationRowHtml(e, withTools)).join('')}</div>`
+      : `<div class="gal-grid gal-grid--4">${admits.map(e => educationCardHtml(e, badge, withTools)).join('')}</div>`;
+    html += `<div class="edu-group">${groupHead('envelope-paper-fill', 'green', 'Admissions &amp; Offers', 'Where I got in — click any for details')}${inner}</div>`;
   }
   return html;
+}
+
+/* Academic profile block — the owner's current university / department / major
+   / degree, shown at the top of the Education section on the portfolio (this is
+   the info-row design that used to live under "About"). */
+function academicProfileBlock(p) {
+  const rows = [
+    ['mortarboard-fill', 'University', p.university],
+    ['building', 'Department', p.department],
+    ['cpu-fill', 'Major', p.major],
+    ['award-fill', 'Degree', p.degree]
+  ].filter(([, , v]) => v);
+  if (!rows.length) return '';
+  return `<div class="edu-group">
+    <div class="edu-group-h"><span class="edu-group-ic t-primary"><i class="bi bi-person-vcard-fill"></i></span>
+      <div><b>Academic profile</b><small>My field, department &amp; degree right now</small></div></div>
+    <div class="pf-info-grid">${rows.map(([ico, label, v]) => `
+      <div class="pf-info-row"><span class="pf-info-ico"><i class="bi bi-${ico}"></i></span>
+        <div><small>${label}</small><b>${escapeHtml(v)}</b></div></div>`).join('')}</div>
+  </div>`;
 }
 
 /* ACHIEVEMENT card — placement first (big & bold), then the title beneath it
@@ -2673,22 +2722,26 @@ function initProfile() {
   if (heroSocial) heroSocial.innerHTML = socialLinks(p)
     .map(l => `<a class="pf-soc" href="${escapeHtml(l.href)}" target="_blank" rel="noopener"><i class="bi bi-${l.ico}"></i><span>${l.label}</span></a>`).join('');
 
-  // academic / personal info card
+  // "Beyond the work" — the person behind the portfolio + how to reach me.
+  // Academic info has moved to the Education section; this keeps the human
+  // facts (where I am, languages, what I'm into right now) and contact.
   const aboutEl = document.getElementById('pfAbout');
   if (aboutEl) {
+    const langs = Array.isArray(p.languages) ? p.languages.join(', ') : (p.languages || '');
     const rows = [
-      ['mortarboard-fill', 'University', p.university],
-      ['building', 'Department', p.department],
-      ['cpu-fill', 'Major', p.major],
-      ['award-fill', 'Degree', p.degree],
+      ['geo-alt-fill', 'Based in', p.location],
+      ['translate', 'Languages', langs],
+      ['lightning-charge-fill', 'Currently', p.currentFocus],
+      ['compass-fill', 'Open to', p.availability],
       ['whatsapp', 'WhatsApp', p.whatsapp],
-      ['envelope-fill', 'Email', p.email]
+      ['envelope-fill', 'Email', p.email],
+      ['telephone-fill', 'Phone', p.phone]
     ].filter(([, , v]) => v);
     aboutEl.innerHTML = rows.map(([ico, label, v]) => `
       <div class="pf-info-row">
         <span class="pf-info-ico"><i class="bi bi-${ico}"></i></span>
         <div><small>${label}</small><b>${escapeHtml(v)}</b></div>
-      </div>`).join('');
+      </div>`).join('') || '<p class="text-soft">Add a few personal details from Edit.</p>';
   }
 
   // stats row — each card is clickable and opens the list behind the number
@@ -2790,19 +2843,22 @@ function initProfile() {
   const eduEl = document.getElementById('pfEducation');
   if (eduEl) {
     const eds = featured(DB.getAll('education'));
-    eduEl.innerHTML = eds.length ? educationGroups(eds, galPhotoBadge, true, false) : '<p class="text-soft">No education added yet.</p>';
+    // academic profile (univ/dept/major/degree) sits up top, then my journey
+    // timeline, then "got in" admissions as compact rows.
+    eduEl.innerHTML = academicProfileBlock(p)
+      + (eds.length ? educationGroups(eds, galPhotoBadge, true, false, true) : '<p class="text-soft">No education entries yet.</p>');
   }
 
   // showcase: projects (ongoing first, then the rest)
   const ordered = featured([...projects].sort((a, b) =>
     (a.status === 'Completed' ? 1 : 0) - (b.status === 'Completed' ? 1 : 0)));
   document.getElementById('pfProjects').innerHTML =
-    ordered.map(pr => projectCardHtml(pr, pfBadge('projects'), false)).join('') || '<p class="text-soft">No projects to show yet.</p>';
+    ordered.map(pr => projectCardHtml(pr, pfBadge('projects'), false, true)).join('') || '<p class="text-soft">No projects to show yet.</p>';
 
   // research
   const resEl = document.getElementById('pfResearch');
   if (resEl) { const rs = featured(research); resEl.innerHTML = rs.length
-    ? rs.map(r => researchCardHtml(r, pfBadge('research'), false)).join('')
+    ? rs.map(r => researchCardHtml(r, pfBadge('research'), false, true)).join('')
     : '<p class="text-soft">No research to show yet.</p>'; }
 
   // showcase: social activities / volunteering
@@ -2843,6 +2899,8 @@ function initProfile() {
   // owner-only edit hooks
   const editBtn = document.getElementById('pfEdit');
   if (editBtn) editBtn.onclick = openProfileEditor;
+  const beyondBtn = document.getElementById('pfEditBeyond');
+  if (beyondBtn) beyondBtn.onclick = openProfileEditor;
   const refBtn = document.getElementById('pfManageRefs');
   if (refBtn) refBtn.onclick = openReferencesEditor;
   const expBtn = document.getElementById('pfManageExp');
@@ -2891,9 +2949,16 @@ function openProfileEditor() {
       <div class="field col-span"><label>Skills (comma separated)</label><input name="skills" value="${escapeHtml((p.skills || []).join(', '))}"></div>
       <div class="field col-span"><label>Interests (comma separated)</label><input name="interests" value="${escapeHtml((p.interests || []).join(', '))}"></div>
 
+      <div class="field col-span"><div class="section-title mb-0 mt-1">Beyond the work <small class="text-faint" style="font-weight:500">— the personal section at the end of your portfolio</small></div></div>
+      <div class="field"><label>Based in</label><input name="location" value="${escapeHtml(p.location || '')}" placeholder="City, Country"></div>
+      <div class="field"><label>Languages (comma separated)</label><input name="languages" value="${escapeHtml((Array.isArray(p.languages) ? p.languages : []).join(', '))}" placeholder="Bangla (Native), English (Fluent)"></div>
+      <div class="field col-span"><label>Currently</label><input name="currentFocus" value="${escapeHtml(p.currentFocus || '')}" placeholder="What you're building or learning right now"></div>
+      <div class="field col-span"><label>Open to</label><input name="availability" value="${escapeHtml(p.availability || '')}" placeholder="Research, internships, collaborations…"></div>
+
       <div class="field col-span"><div class="section-title mb-0 mt-1">Contact &amp; social</div></div>
       <div class="field"><label>Email</label><input name="email" type="email" value="${escapeHtml(p.email || '')}"></div>
-      <div class="field"><label>Phone / WhatsApp</label><input name="whatsapp" value="${escapeHtml(p.whatsapp || '')}"></div>
+      <div class="field"><label>WhatsApp</label><input name="whatsapp" value="${escapeHtml(p.whatsapp || '')}"></div>
+      <div class="field"><label>Phone</label><input name="phone" value="${escapeHtml(p.phone || '')}"></div>
       <div class="field"><label>LinkedIn URL</label><input name="linkedin" type="url" value="${escapeHtml(p.linkedin || '')}"></div>
       <div class="field"><label>Facebook URL</label><input name="facebook" type="url" value="${escapeHtml(p.facebook || '')}"></div>
       <div class="field"><label>GitHub URL</label><input name="github" type="url" value="${escapeHtml(p.github || '')}"></div>
@@ -2927,7 +2992,9 @@ function openProfileEditor() {
       name: f.name.value.trim(), eyebrow: f.eyebrow.value.trim(), headline: f.headline.value.trim(),
       degree: f.degree.value.trim(), university: f.university.value.trim(), department: f.department.value.trim(),
       major: f.major.value.trim(), photo, bio: f.bio.value.trim(),
-      email: f.email.value.trim(), whatsapp: f.whatsapp.value.trim(),
+      email: f.email.value.trim(), whatsapp: f.whatsapp.value.trim(), phone: f.phone.value.trim(),
+      location: f.location.value.trim(), currentFocus: f.currentFocus.value.trim(), availability: f.availability.value.trim(),
+      languages: f.languages.value.split(',').map(s => s.trim()).filter(Boolean),
       linkedin: f.linkedin.value.trim(), facebook: f.facebook.value.trim(),
       github: f.github.value.trim(), website: f.website.value.trim(),
       skills: f.skills.value.split(',').map(s => s.trim()).filter(Boolean),
@@ -4269,6 +4336,10 @@ function SEED_DATA() {
       email: 'me.imran.personal@gmail.com',
       phone: '+8801972037650',
       whatsapp: '+8801641606561',
+      location: 'Dhaka, Bangladesh',
+      languages: ['Bangla (Native)', 'English (Fluent)', 'Hindi (Conversational)'],
+      currentFocus: 'Building EON — a behavioral AI portfolio companion',
+      availability: 'Open to research, internships & AI collaborations',
       facebook: 'https://fb.com/msg.imran',
       linkedin: 'https://linkedin.com/in/msgimran',
       github: '',
