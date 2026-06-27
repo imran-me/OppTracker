@@ -589,14 +589,21 @@ a:hover { color: var(--primary-700); }
 .ach-card .ach-meta { font-size: 11.5px; color: var(--text-soft); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Subtitle / tagline variant — wraps fully (used on project & research cards). */
 .ach-card .ach-sub { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.45; overflow-wrap: anywhere; }
-/* Achievement: the secondary title under a big placement (a step smaller). */
-.ach-card .ach-subtitle { font-size: 12.5px; font-weight: 600; color: var(--text-soft); line-height: 1.35; margin-top: 3px;
+/* Achievement: the secondary title under a big placement (a step smaller).
+   Spacing is kept tight so the extra lines don't grow the card. */
+.ach-card .ach-subtitle { font-size: 12.5px; font-weight: 600; color: var(--text-soft); line-height: 1.3; margin-top: 1px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-/* "By {issuer}" credit line. */
-.ach-card .ach-by { font-size: 11.5px; color: var(--text-soft); margin-top: 6px; overflow-wrap: anywhere; }
+/* "By {issuer}" credit line — issuer in VIOLET BOLD, the "BY" tag muted. */
+.ach-card .ach-by { font-size: 11.5px; font-weight: 700; color: #7b3fe0; margin-top: 4px; line-height: 1.3; overflow-wrap: anywhere; }
 .ach-card .ach-by span { color: var(--text-faint); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; font-size: 9.5px; margin-right: 5px; }
 /* The visible divider separating headline/credit from the rest. */
-.ach-card .ach-div { border: 0; border-top: 1px solid var(--line); margin: 10px 0 0; opacity: 1; }
+.ach-card .ach-div { border: 0; border-top: 1px solid var(--line); margin: 7px 0 0; opacity: 1; }
+/* Competition / programme — BLACK BOLD with a small trophy accent. */
+.ach-card .ach-comp { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: #16203a; margin-top: 7px; }
+.ach-card .ach-comp i { color: #e0a800; font-size: 11px; flex: 0 0 auto; }
+.ach-card .ach-comp span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Tighter description on achievement cards so the card keeps its compact height. */
+.ach-card .ach-comp + .ach-desc { margin-top: 4px; }
 .ach-card .ach-desc { font-size: 12.5px; color: var(--text-soft); margin: 6px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ach-card .ach-foot { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 10px; }
 .ach-card .ach-more { font-size: 12px; font-weight: 600; color: var(--primary); display: inline-flex; align-items: center; }
