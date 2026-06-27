@@ -616,6 +616,19 @@ a:hover { color: var(--primary-700); }
    title and a touch smaller, with the organization line beneath it. */
 .ach-card .ach-role { margin-top: 5px; font-size: 12.5px; font-weight: 700; font-style: italic;
   text-decoration: underline; text-underline-offset: 2px; color: var(--primary-700); line-height: 1.35; }
+
+/* Social-activity card flourishes. */
+.ach-card .vol-tag { position: absolute; left: 8px; bottom: 8px; z-index: 2; display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: 999px; background: rgba(192, 22, 107, .92); color: #fff; font-size: 10px; font-weight: 700;
+  letter-spacing: .02em; box-shadow: 0 4px 12px rgba(192, 22, 107, .3); }
+.ach-card .vol-tag i { font-size: 10px; }
+.vol-card .gc-media { background: linear-gradient(135deg, #fde7f1, #ffe9d6); color: #c0166b; }
+/* Cause / focus area — a soft pink pill that WRAPS so long causes show in full. */
+.ach-card .vol-cause { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; padding: 5px 10px; border-radius: 9px;
+  background: #fdeaf2; color: #c0166b; font-size: 11.5px; font-weight: 600; line-height: 1.35; }
+.ach-card .vol-cause i { font-size: 10.5px; margin-top: 2px; flex: 0 0 auto; opacity: .8; }
+.ach-card .vol-cause span { min-width: 0; }
+.ach-card.ach-cap .vol-cause span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* Impact / highlight callout (social impact, education result/scholarship). */
 .ach-card .ach-impact { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; padding: 7px 10px;
   border-radius: 10px; font-size: 12px; font-weight: 600; color: #0a7d4b;
@@ -626,9 +639,18 @@ a:hover { color: var(--primary-700); }
    every technology stays readable. Long lists grow the card; "View details"
    is always there for the full record. */
 .ach-card .ach-tech { display: flex; align-items: flex-start; gap: 6px; margin-top: 7px; font-size: 11.5px;
-  font-family: var(--font-mono, monospace); color: var(--text-soft); line-height: 1.55;
-  white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+  font-family: var(--font-mono, monospace); color: var(--text-soft); line-height: 1.55; }
 .ach-card .ach-tech i { color: var(--primary); flex: 0 0 auto; margin-top: 2px; }
+.ach-card .ach-tech span { min-width: 0; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+
+/* Compact (public-portfolio) cards — cap the variable-height bits to keep every
+   card the same compact height; full content opens via "View details". */
+.ach-card.ach-cap .ach-tech span,
+.ach-card.ach-cap .ach-sub,
+.ach-card.ach-cap .ach-desc { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.ach-card.ach-cap .ach-tech span { -webkit-line-clamp: 2; }
+.ach-card.ach-cap .ach-sub { -webkit-line-clamp: 2; }
+.ach-card.ach-cap .ach-desc { -webkit-line-clamp: 2; }
 /* Offer-letter ribbon (education) — sits opposite the Portfolio star. */
 .pf-feat-badge.offer { left: auto; right: 8px; background: #0a7d4b; }
 
@@ -667,6 +689,25 @@ a:hover { color: var(--primary-700); }
 .edu-tl .ach-foot { padding-top: 9px; }
 @media (max-width: 520px) { .edu-tl-node { width: 34px; height: 34px; font-size: 15px; } .edu-tl::before { left: 16px; } }
 
+/* Part 2 — "got in" admissions as compact single-line rows (public portfolio). */
+.edu-rows { display: flex; flex-direction: column; gap: 8px; }
+.edu-row { display: flex; align-items: center; gap: 10px; padding: 9px 13px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 12px; cursor: pointer; transition: transform .14s, box-shadow .14s, border-color .14s; }
+.edu-row:hover { border-color: var(--primary); transform: translateX(3px); box-shadow: 0 8px 20px rgba(16, 24, 40, .08); }
+.edu-row-tag { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 800;
+  letter-spacing: .04em; text-transform: uppercase; color: #0a7d4b; background: rgba(126, 217, 87, .16); padding: 4px 9px; border-radius: 999px; }
+.edu-row-tag i { font-size: 10px; }
+.edu-row-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 9px; }
+.edu-row-main b { font-size: 13.5px; color: #16203a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edu-row-main span { flex: 1 1 auto; font-size: 11.5px; color: var(--text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.edu-row-offer { flex: 0 0 auto; color: #0a7d4b; font-size: 13px; }
+.edu-row-st { flex: 0 0 auto; }
+.edu-row-yr { flex: 0 0 auto; color: var(--text-faint); }
+.edu-row-tools { flex: 0 0 auto; display: inline-flex; }
+.edu-row-cta { flex: 0 0 auto; color: var(--text-faint); transition: transform .14s; }
+.edu-row:hover .edu-row-cta { transform: translateX(3px); color: var(--primary); }
+@media (max-width: 560px) { .edu-row-main { flex-direction: column; align-items: flex-start; gap: 1px; } .edu-row-main span { white-space: normal; } .edu-row-st { display: none; } }
+
 /* -----------------------------------------------------------
    15. Empty states
    ----------------------------------------------------------- */
@@ -698,11 +739,22 @@ a:hover { color: var(--primary-700); }
   radial-gradient(1100px 480px at 88% -8%, #eef0ff 0%, transparent 60%),
   radial-gradient(900px 420px at -6% 4%, #e6f6ff 0%, transparent 55%),
   var(--canvas); }
-.pf-nav { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 14px; padding: 16px 6%; background: rgba(255,255,255,.7); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
-.pf-nav .brand { display: flex; align-items: center; gap: 11px; margin-right: auto; }
-.pf-nav .logo { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--primary), var(--accent)); display: grid; place-items: center; color: #fff; font-weight: 800; font-family: var(--font-display); }
-.pf-nav a { color: var(--text-soft); font-weight: 600; font-size: 13.5px; }
-.pf-nav a:hover { color: var(--text); }
+.pf-nav { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 16px; padding: 11px max(18px, 4%);
+  background: rgba(255, 255, 255, .82); backdrop-filter: saturate(140%) blur(14px); border-bottom: 1px solid var(--line);
+  box-shadow: 0 1px 0 rgba(16, 24, 40, .02), 0 8px 24px -18px rgba(16, 24, 40, .35); }
+.pf-nav .brand { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.pf-nav .brand b { font-size: 16px; }
+.pf-nav .logo { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--primary), var(--accent)); display: grid; place-items: center; color: #fff; font-weight: 800; font-family: var(--font-display); box-shadow: 0 4px 12px rgba(31, 109, 255, .28); }
+/* The link group — a pill-rail that scrolls horizontally if it ever overflows
+   (so the bar never wraps into an ugly second line). */
+.pf-nav-links { display: flex; align-items: center; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto;
+  scrollbar-width: none; -ms-overflow-style: none; padding: 2px; }
+.pf-nav-links::-webkit-scrollbar { display: none; }
+.pf-nav-links a { position: relative; padding: 7px 12px; border-radius: 9px; white-space: nowrap;
+  color: var(--text-soft); font-weight: 600; font-size: 13px; transition: background .15s, color .15s; }
+.pf-nav-links a:hover { background: var(--primary-soft); color: var(--primary-700); }
+.pf-nav-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; padding-left: 6px; border-left: 1px solid var(--line); }
+@media (max-width: 760px) { .pf-nav-actions { border-left: 0; padding-left: 0; } }
 
 .pf-hero { max-width: 1080px; margin: 0 auto; padding: 64px 24px 36px; display: grid; grid-template-columns: 1.4fr 1fr; gap: 40px; align-items: center; }
 .pf-hero .eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--primary-600); margin-bottom: 14px; }

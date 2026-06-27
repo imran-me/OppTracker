@@ -23,21 +23,25 @@
   <!-- Portfolio top nav -->
   <nav class="pf-nav">
     <a class="brand" href="profile.html"><span class="logo">O</span><b style="font-family:var(--font-display)">Portfolio</b></a>
-    <a href="#about">About</a>
-    <a href="#experience">Experience</a>
-    <a href="#wins">Wins</a>
-    <a href="#education">Education</a>
-    <a href="#training">Training</a>
-    <a href="#projects">Projects</a>
-    <a href="#research">Research</a>
-    <a href="#volunteering">Social</a>
-    <a href="#references">References</a>
-    <a href="#contact">Contact</a>
-    <a href="dashboard.html" class="btn btn-soft btn-sm"><i class="bi bi-speedometer2 me-1"></i>Open dashboard</a>
-    <!-- Owner-only edit; hidden from public visitors -->
-    <button class="btn btn-ghost btn-sm owner-only" id="pfEdit"><i class="bi bi-pencil me-1"></i>Edit</button>
-    <!-- Auth control (login / owner badge + logout) rendered by Security -->
-    <div id="authSlot" class="auth-slot d-flex align-items-center gap-2"></div>
+    <div class="pf-nav-links">
+      <a href="#experience">Experience</a>
+      <a href="#wins">Wins</a>
+      <a href="#education">Education</a>
+      <a href="#training">Training</a>
+      <a href="#projects">Projects</a>
+      <a href="#research">Research</a>
+      <a href="#volunteering">Social</a>
+      <a href="#references">References</a>
+      <a href="#contact">Contact</a>
+      <a href="#beyond">Beyond</a>
+    </div>
+    <div class="pf-nav-actions">
+      <a href="dashboard.html" class="btn btn-soft btn-sm"><i class="bi bi-speedometer2 me-1"></i><span class="d-none d-lg-inline">Open dashboard</span></a>
+      <!-- Owner-only edit; hidden from public visitors -->
+      <button class="btn btn-ghost btn-sm owner-only" id="pfEdit"><i class="bi bi-pencil me-1"></i>Edit</button>
+      <!-- Auth control (login / owner badge + logout) rendered by Security -->
+      <div id="authSlot" class="auth-slot d-flex align-items-center gap-2"></div>
+    </div>
   </nav>
 
   <!-- Hero / About me -->
@@ -59,13 +63,6 @@
 
   <!-- Statistics -->
   <section class="pf-stats" id="pfStats"></section>
-
-  <!-- About / Academic + personal info -->
-  <section class="pf-section" id="about">
-    <h2>About</h2>
-    <p class="lead-sub">University, department, major and how to reach me.</p>
-    <div class="pf-info-grid" id="pfAbout"></div>
-  </section>
 
   <!-- Experience -->
   <section class="pf-section" id="experience">
@@ -163,6 +160,16 @@
     <h2>Get in touch</h2>
     <p class="lead-sub">Reach me on any of these channels.</p>
     <div class="d-flex flex-wrap gap-2" id="pfContact"></div>
+  </section>
+
+  <!-- Beyond the work — the person behind the portfolio (last section) -->
+  <section class="pf-section" id="beyond">
+    <div class="pf-sec-head">
+      <h2 class="mb-0">Beyond the Work</h2>
+      <button class="btn btn-soft btn-sm owner-only ms-auto" id="pfEditBeyond"><i class="bi bi-pencil me-1"></i>Edit</button>
+    </div>
+    <p class="lead-sub">A little about the person behind the portfolio — where I am, what I speak, what I'm into right now, and how to reach me.</p>
+    <div class="pf-info-grid" id="pfAbout"></div>
   </section>
   <!-- Bootstrap bundle (modals, dropdowns) + centralized app engine -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
