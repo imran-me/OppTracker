@@ -2403,7 +2403,7 @@ function achievementCardHtml(a, photoBadge, withTools) {
         : `<b class="ach-title">${escapeHtml(a.title)}</b>`}
       ${a.issuer ? `<div class="ach-by"><span>By</span>${escapeHtml(a.issuer)}</div>` : ''}
       ${(a.competition || a.description) ? `<hr class="ach-div">` : ''}
-      ${a.competition ? `<div class="ach-meta">${escapeHtml(a.competition)}</div>` : ''}
+      ${a.competition ? `<div class="ach-comp"><i class="bi bi-trophy-fill"></i><span>${escapeHtml(a.competition)}</span></div>` : ''}
       ${a.description ? `<p class="ach-desc">${escapeHtml(mdStrip(a.description))}</p>` : ''}
       <div class="ach-foot">
         <span class="ach-more"><i class="bi bi-eye me-1"></i>View details</span>
