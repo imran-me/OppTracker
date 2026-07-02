@@ -1254,3 +1254,207 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 .gal-card:hover .cc-collage .cc-tile,
 .pf-card-media:hover .cc-collage .cc-tile { box-shadow: 0 6px 16px rgba(16, 24, 40, .16); }
 @media (prefers-reduced-motion: reduce) { .sync-status.is-saving i { animation: none; } }
+
+/* -----------------------------------------------------------
+   24. Accounts — private income / expense intelligence
+   A distinct, premium surface. Owner-only; never public.
+   ----------------------------------------------------------- */
+/* Top bar: privacy badge + month navigator + actions */
+.fin-topbar { display: flex; align-items: center; gap: 14px 18px; flex-wrap: wrap; margin-bottom: 20px; }
+.fin-priv-wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fin-priv { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
+  padding: 6px 12px; border-radius: 999px; color: var(--amber); background: var(--amber-soft); border: 1px solid #f3ddb8; }
+.fin-priv.is-sync { color: var(--green); background: var(--green-soft); border-color: #bfe6cf; }
+.fin-monthnav { display: flex; align-items: center; gap: 6px; margin: 0 auto; }
+.fin-month { text-align: center; min-width: 150px; }
+.fin-month b { display: block; font-family: var(--font-display); font-size: 16px; color: #16203a; line-height: 1.1; }
+.fin-month small { color: var(--text-faint); font-size: 11.5px; }
+.fin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* KPI cards — white surface, tone-driven accent (never fully tinted) */
+.fin-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 22px; }
+.fin-kpi { position: relative; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 16px 16px 15px; box-shadow: var(--shadow-sm); overflow: hidden;
+  --k: var(--primary); --ks: var(--primary-soft);
+  transition: transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s ease, border-color .22s ease; }
+.fin-kpi.t-green   { --k: var(--green);   --ks: var(--green-soft); }
+.fin-kpi.t-red     { --k: var(--red);     --ks: var(--red-soft); }
+.fin-kpi.t-primary { --k: var(--primary); --ks: var(--primary-soft); }
+.fin-kpi.t-violet  { --k: var(--violet);  --ks: var(--violet-soft); }
+.fin-kpi.t-amber   { --k: var(--amber);   --ks: var(--amber-soft); }
+.fin-kpi::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, var(--k), transparent 85%); }
+.fin-kpi:hover { transform: translateY(-4px); box-shadow: 0 16px 36px rgba(16,24,40,.12); border-color: var(--k); }
+.fin-kpi .fk-ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+  font-size: 16px; background: var(--ks); color: var(--k); margin-bottom: 10px; }
+.fin-kpi .fk-v { font-family: var(--font-mono); font-weight: 700; font-size: 23px; line-height: 1; color: #16203a; }
+.fin-kpi .fk-l { color: var(--text-soft); font-size: 12px; margin-top: 5px; font-weight: 600; }
+.fin-kpi .fk-ring { height: 5px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 9px; }
+.fin-kpi .fk-ring > span { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--k), var(--accent)); }
+
+/* Shared premium card feel for the finance panels */
+.fin-card { border-radius: var(--r-lg); }
+
+/* Insight rows */
+.fin-insights { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fin-insight { display: flex; align-items: flex-start; gap: 11px; padding: 13px 15px; border-radius: 13px;
+  background: var(--surface-2); border: 1px solid var(--line-2); font-size: 13px; line-height: 1.5; color: var(--text); }
+.fin-insight i { font-size: 17px; margin-top: 1px; flex: 0 0 auto; }
+.fin-insight b { color: #16203a; }
+.fin-insight.t-green  { background: var(--green-soft);  border-color: #cdeadb; } .fin-insight.t-green i  { color: var(--green); }
+.fin-insight.t-amber  { background: var(--amber-soft);  border-color: #f3ddb8; } .fin-insight.t-amber i  { color: var(--amber); }
+.fin-insight.t-red    { background: var(--red-soft);    border-color: #f6cfcc; } .fin-insight.t-red i    { color: var(--red); }
+.fin-insight.t-blue   { background: var(--blue-soft);   border-color: #cdddfb; } .fin-insight.t-blue i   { color: var(--blue); }
+.fin-insight.t-slate  { background: var(--slate-soft);  border-color: #dde2ec; } .fin-insight.t-slate i  { color: var(--slate); }
+
+/* Horizontal bar rows (sector / method breakdowns) */
+.fin-bar { margin-bottom: 12px; } .fin-bar:last-child { margin-bottom: 0; }
+.fin-bar-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+.fin-bar-lbl { font-size: 13px; font-weight: 600; color: #16203a; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-bar-amt { margin-left: auto; font-size: 12.5px; color: var(--text-soft); flex: 0 0 auto; }
+.fin-bar-track { height: 8px; border-radius: 6px; background: var(--line-2); overflow: hidden; }
+.fin-bar-track > span { display: block; height: 100%; border-radius: 6px; background: var(--primary);
+  transition: width .6s cubic-bezier(.2,.7,.3,1); }
+.fin-bar-track > span.t-green   { background: linear-gradient(90deg, #0f9d58, #34c77b); }
+.fin-bar-track > span.t-red     { background: linear-gradient(90deg, #d6453d, #f0776f); }
+.fin-bar-track > span.t-amber   { background: linear-gradient(90deg, #c77d0a, #eaa53d); }
+.fin-bar-track > span.t-blue    { background: linear-gradient(90deg, #2563eb, #5b8bf7); }
+.fin-bar-track > span.t-violet  { background: linear-gradient(90deg, #7c3aed, #a06bf5); }
+.fin-bar-track > span.t-primary { background: linear-gradient(90deg, var(--primary), var(--accent)); }
+
+/* Necessity / spending-quality grid */
+.fin-need { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin-top: 14px; }
+.fin-need-cell { min-width: 0; }
+.fin-need-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.fin-need-top > div { min-width: 0; } .fin-need-top b { font-size: 13.5px; color: #16203a; display: block; }
+.fin-need-top small { font-size: 11px; color: var(--text-faint); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-need-amt { margin-left: auto; font-size: 14px; font-weight: 700; background: transparent !important; padding: 0 !important; flex: 0 0 auto; }
+.fin-need-amt.t-green { color: var(--green); } .fin-need-amt.t-amber { color: var(--amber); }
+.fin-need-amt.t-red { color: var(--red); } .fin-need-amt.t-blue { color: var(--blue); }
+.fin-need-pct { font-size: 11px; color: var(--text-faint); margin-top: 5px; font-family: var(--font-mono); }
+
+/* 6-month trend — twin bars per month */
+.fin-trend { display: flex; align-items: flex-end; gap: 10px; height: 150px; padding: 4px 2px 0; }
+.fin-tcol { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
+.fin-tbars { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 4px; width: 100%; min-height: 0; }
+.fin-tbar { width: 34%; max-width: 20px; min-height: 3px; border-radius: 5px 5px 0 0; background: var(--primary); transition: height .6s cubic-bezier(.2,.7,.3,1); }
+.fin-tbar.t-green { background: linear-gradient(180deg, #34c77b, #0f9d58); }
+.fin-tbar.t-red { background: linear-gradient(180deg, #f0776f, #d6453d); }
+.fin-tcol.is-cur .fin-tlabel { color: var(--primary-700); font-weight: 800; }
+.fin-tlabel { font-size: 11px; color: var(--text-faint); margin-top: 8px; font-weight: 600; }
+.fin-legend { display: flex; gap: 16px; justify-content: center; margin-top: 12px; font-size: 12px; color: var(--text-soft); }
+.fin-legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+.fin-legend .dot.t-green { background: var(--green); } .fin-legend .dot.t-red { background: var(--red); }
+
+/* transaction amount colours */
+.fin-pos { color: var(--green); font-weight: 700; }
+.fin-neg { color: #16203a; font-weight: 700; }
+
+/* month quick-chips */
+.fin-months { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
+.fin-mchip { border: 1px solid var(--line); background: var(--surface); color: var(--text-soft);
+  font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer; transition: all .15s; }
+.fin-mchip:hover { border-color: var(--primary); color: var(--primary-700); }
+.fin-mchip.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* income / expense segmented toggle (modal) */
+.fin-typetoggle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 12px; padding: 5px; }
+.fin-typetoggle button { border: 0; background: transparent; border-radius: 9px; padding: 10px; font-weight: 700;
+  font-size: 13.5px; color: var(--text-soft); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: all .15s; }
+.fin-typetoggle button:hover { color: var(--text); }
+.fin-typetoggle button[data-t="expense"].on { background: #fff; color: var(--red); box-shadow: var(--shadow-sm); }
+.fin-typetoggle button[data-t="income"].on { background: #fff; color: var(--green); box-shadow: var(--shadow-sm); }
+
+/* Accounts responsive: 2 KPIs per row on phones, single-column panels */
+@media (max-width: 640px) {
+  .fin-kpis { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .fin-insights, .fin-need { grid-template-columns: 1fr; }
+  .fin-monthnav { order: 3; width: 100%; justify-content: center; }
+  .fin-topbar { gap: 12px; }
+  .fin-kpi .fk-v { font-size: 20px; }
+}
+
+/* ===========================================================
+   25. LUXURY POLISH — additive refinements (public views)
+   Purely cosmetic layers on top of the existing system: richer
+   depth, gradient accents, smoother motion and a denser, more
+   premium mobile layout. Nothing here changes structure, copy
+   or behaviour — safe to remove without breaking anything.
+   =========================================================== */
+
+/* -- Primary buttons: a subtle gradient + a more confident lift -- */
+.btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-600)); border-color: var(--primary-600); }
+.btn-primary:hover { background: linear-gradient(135deg, var(--primary-600), var(--primary-700)); box-shadow: 0 8px 22px rgba(79,70,229,.32); transform: translateY(-1px); }
+
+/* -- Section headers get a slim gradient tick to feel intentional -- */
+.pf-section > .pf-sec-head > h2::before,
+.pf-section > h2::before {
+  content: ""; display: block; width: 46px; height: 4px; border-radius: 3px; margin-bottom: 12px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+}
+
+/* -- Portfolio hero: gradient name + a soft aurora behind the photo -- */
+.pf-hero h1 {
+  background: linear-gradient(120deg, #16203a 0%, var(--primary-700) 55%, var(--primary) 100%);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.pf-hero .pf-photo { position: relative; box-shadow: 0 24px 60px -18px rgba(79,70,229,.55), var(--shadow-md); }
+.pf-hero .pf-photo::after {
+  content: ""; position: absolute; inset: -14px; border-radius: 34px; z-index: -1;
+  background: radial-gradient(60% 60% at 30% 20%, rgba(79,70,229,.35), transparent 70%),
+              radial-gradient(60% 60% at 80% 90%, rgba(14,165,233,.30), transparent 70%);
+  filter: blur(8px);
+}
+
+/* -- Portfolio stat numbers: gradient tabular figures -- */
+.pf-stat .v {
+  background: linear-gradient(120deg, var(--primary-700), var(--accent));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.pf-stat { border-radius: var(--r-lg); }
+
+/* -- Cards: a hair more depth at rest, richer ring on hover -- */
+.card { box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 6px 18px -12px rgba(16,24,40,.18); }
+.gal-card, .pf-ref, .pf-win, .edu-tl-card, .pf-file, .pf-info-row {
+  transition: transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s ease, border-color .22s ease;
+}
+
+/* -- Frosted, quieter portfolio nav on scroll -- */
+.pf-nav { box-shadow: 0 1px 0 rgba(16,24,40,.03), 0 10px 30px -24px rgba(16,24,40,.4); }
+
+/* -- Refined focus + selection already themed; add smooth anchor scroll -- */
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* -----------------------------------------------------------
+   25b. MOBILE DENSITY — think like a phone user.
+   Cards sit 2-per-row (never one giant card filling the screen),
+   spacing tightens, type scales down a touch — premium, not cramped.
+   ----------------------------------------------------------- */
+@media (max-width: 720px) {
+  /* Every showcase gallery → two tidy columns instead of one full-width card */
+  .gal-grid, .gal-grid--4 { grid-template-columns: repeat(2, 1fr) !important; gap: 12px; }
+  .pf-detail-gallery { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+  /* Compact card internals so two fit gracefully on a narrow screen */
+  .ach-card .gc-media, .gal-card .gc-media { height: 104px; }
+  .gal-card .gc-body { padding: 11px 12px; }
+  .ach-card .ach-title { font-size: 12.5px; }
+  .ach-card .ach-meta, .ach-card .ach-desc, .ach-card .ach-sub { font-size: 11px; }
+  .ach-card .ach-by, .ach-card .ach-tech, .ach-card .vol-cause, .ach-card .ach-impact { font-size: 10.5px; }
+  .chip-mini { font-size: 9.5px; padding: 2px 6px; }
+
+  /* Portfolio rhythm: tighter sections, punchier hero */
+  .pf-section { padding: 26px 18px; }
+  .pf-hero { padding: 40px 18px 26px; gap: 26px; }
+  .pf-stats { padding: 6px 18px 24px; gap: 10px; }
+  .pf-stat { padding: 14px 10px; } .pf-stat .v { font-size: 24px; }
+}
+
+/* Very small phones: keep two columns but ease the gutters/media */
+@media (max-width: 400px) {
+  .gal-grid, .gal-grid--4 { gap: 9px; }
+  .ach-card .gc-media, .gal-card .gc-media { height: 92px; }
+  .pf-stats { grid-template-columns: repeat(2, 1fr); }
+}

@@ -39,7 +39,7 @@ const Security = {
   /* Pages a visitor must NOT open directly. Opening one without a
      valid owner session bounces the user to LOGIN_PAGE. Keys match
      <body data-page="…">. */
-  PROTECTED_PAGES: ['categories', 'owner'],
+  PROTECTED_PAGES: ['categories', 'owner', 'accounts'],
 
   /* ==========================================================
      2. INTERNAL STATE
