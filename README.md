@@ -44,6 +44,7 @@ npx serve .
 /
 ├── index.html              # Landing / entry page + live snapshot
 ├── dashboard.html          # Module 1 — summary cards, alerts, calendar, quick actions
+├── accounts.html           # Accounts — PRIVATE income/expense intelligence (owner-only, never public)
 ├── opportunities.html      # Module 2 — opportunity list with search/filter/sort
 ├── opportunity-details.html# Single opportunity: full record + timeline + linked tasks
 ├── tasks.html              # Module 3 — Kanban task board (drag & drop)
@@ -361,6 +362,77 @@ In **console.cloud.google.com** (reuse the same project):
 
 Latest Chrome, Edge, Firefox and Safari. Fully responsive for mobile, tablet and desktop.
 Respects reduced-motion preferences and keyboard focus.
+
+---
+
+## Accounts — Private Finance Intelligence (owner-only)
+
+A private personal-finance command centre at **`accounts.html`**. It is **owner-only** and
+**never visible to the public** — hidden from the nav for visitors, redirect-protected via
+`Security.PROTECTED_PAGES`, and (critically) stored **outside** the public portfolio document.
+
+### Why a separate store
+Every visitor reads the single public Firestore doc `opptrack/data` to render the portfolio.
+So finance data must **never** live there or it would ship in every visitor's payload — even if
+hidden on screen. Instead the Accounts module uses its own store:
+
+- **localStorage** key `pomls_finance_v1` — instant, offline, on this device.
+- **Firestore doc `opptrack_private/finance`** — same Firebase project, but a **separate,
+  dedicated collection** (deliberately *not* under `opptrack`, so no public rule on the
+  portfolio collection can ever match it; Firestore denies it by default).
+
+It works on this device immediately. To sync it privately across your devices, add this
+**owner-only read+write** rule in **Firebase Console → Firestore → Rules** (then Publish),
+inside `match /databases/{database}/documents { … }`:
+
+```
+match /opptrack_private/{doc} {
+  allow read, write: if request.auth != null
+    && request.auth.token.email == 'me.imran.personal@gmail.com';
+}
+```
+
+Keep your existing public-portfolio rule scoped to `/opptrack/data` (not a `/opptrack/{document=**}`
+wildcard) so nothing else is ever public.
+
+Until that rule exists the page shows a subtle **"Private · this device"** pill and stays local
+(never leaking, never breaking). With the rule it flips to **"Private · synced."**
+
+### What it tracks (BDT ৳)
+- **Transactions** — income & expense, amount, date, category/sector, payment method
+  (Cash, bKash, Nagad, Rocket, Card, Bank), repeat cadence, and a free-text note.
+- **Necessity band per expense** — *Essential · Important · Discretionary · Avoidable* — the
+  heart of the "was it worth it?" spending-quality analysis.
+- **Editable categories, monthly budget and savings goal** (⚙ Categories & budget).
+
+### What it shows
+- **KPI cards** — income, expense, net saved, savings-rate %, and "could save" (the reclaimable leak).
+- **Insights** — plain-language, month-specific findings (savings verdict, biggest sector,
+  avoidable-spend leak, month-over-month movement, budget status).
+- **Spending-quality meter** — how much went to each necessity band.
+- **Sector breakdowns** — where money came from / where it went.
+- **6-month trend** — income vs expense twin bars, plus a by-payment-method view.
+- **Transactions table** — full add / edit / delete, filter by type, quick month chips.
+
+---
+
+## Design directives & change log
+
+Living record of the owner's intent (per request, kept in the repo):
+
+- **UI must feel *luxurious yet modern, digital & minimalistic*** — refined cards, borders,
+  text colours, animations and effects, using the **existing indigo/sky theme** (no over-design,
+  no over-colour; everything balanced).
+- **Mobile ≠ desktop.** On phones, showcase cards sit **2 per row** (never one giant full-width
+  card), with tightened spacing and scaled type — super-responsive and premium.
+- **Never break existing systems, functionality, text, information or features** — UI upgrades
+  are additive (see `style.css` §25 "Luxury polish" and §24 "Accounts").
+- **Do not touch EON** (`ai-companion/`) or any existing functionality/options.
+- **Accounts feature** (above) — a private income/expense "game changer," owner-only, invisible
+  to the public, that turns raw entries into savings insight.
+
+_2026-07-02 — Added the private Accounts module; luxury UI polish + mobile density pass across
+the public portfolio and dashboard._
 
 ---
 

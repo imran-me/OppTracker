@@ -830,7 +830,8 @@ function renderFooter() {
    ========================================================== */
 const NAV = [
   { group: 'Overview', items: [
-    { page: 'dashboard', href: 'dashboard.html', icon: 'grid-1x2-fill', label: 'Dashboard' }
+    { page: 'dashboard', href: 'dashboard.html', icon: 'grid-1x2-fill', label: 'Dashboard' },
+    { page: 'accounts',  href: 'accounts.html',  icon: 'wallet-fill', label: 'Accounts', ownerOnly: true }
   ]},
   { group: 'Manage', items: [
     { page: 'opportunities', href: 'opportunities.html', icon: 'compass-fill', label: 'Opportunities', countOf: 'opportunities' },
@@ -3621,7 +3622,9 @@ function initOwner() {
     </div>`).join('');
 
   // Manage each module (jump to its list page)
-  document.getElementById('ownerManage').innerHTML = entities.map(e => `
+  document.getElementById('ownerManage').innerHTML =
+    `<a class="qa" href="accounts.html"><i class="t-green bi bi-wallet-fill"></i><b>Accounts <span class="text-faint" style="font-weight:500;font-size:11px">· private</span></b></a>`
+    + entities.map(e => `
     <a class="qa" href="${e.href}"><i class="t-${e.t} bi bi-${e.ico}"></i><b>${e.label}</b></a>`).join('')
     + `<a class="qa" href="categories.html"><i class="t-primary bi bi-sliders"></i><b>Categories</b></a>
        <a class="qa" href="profile.html"><i class="t-violet bi bi-person-badge-fill"></i><b>Profile</b></a>`;
@@ -4209,10 +4212,615 @@ function maybeWeeklyRetro() {
 }
 
 /* ==========================================================
+   6.7  ACCOUNTS — private income / expense intelligence
+   ----------------------------------------------------------
+   OWNER-ONLY & PRIVATE. Unlike every other module, this data
+   NEVER touches the public portfolio document (opptrack/data),
+   which any visitor can read. It lives in its own store:
+     • localStorage key  `pomls_finance_v1`  (instant, offline)
+     • Firestore doc      opptrack/finance    (same project, but a
+       SEPARATE document — add the owner-only read+write rule and
+       it syncs across devices; without the rule it silently stays
+       on this device so nothing ever breaks or leaks).
+   The page itself is redirect-protected (Security.PROTECTED_PAGES)
+   and hidden from the public nav, so visitors never see it.
+   ========================================================== */
+const FIN_STORE_KEY = 'pomls_finance_v1';
+
+/* Sensible starting categories — tuned for a Bangladeshi student /
+   professional (bKash / Nagad, Zakat, stipend, etc.). Editable. */
+const FIN_DEFAULTS = {
+  incomeCategories: ['Salary', 'Freelance / Contract', 'Business', 'Scholarship / Stipend',
+    'Investment Return', 'Gift / Family', 'Refund / Cashback', 'Other Income'],
+  expenseCategories: ['Food & Groceries', 'Dining Out', 'Transport', 'Rent / Housing',
+    'Utilities (Gas/Water/Electric)', 'Internet & Mobile', 'Education / Tuition', 'Books & Courses',
+    'Health & Medicine', 'Clothing', 'Entertainment', 'Subscriptions', 'Gadgets / Tech',
+    'Family Support', 'Charity / Zakat', 'Savings / Investment', 'Travel', 'Personal Care',
+    'Bank Fees & Charges', 'Other Expense'],
+  methods: ['Cash', 'bKash', 'Nagad', 'Rocket', 'Debit / Credit Card', 'Bank Transfer', 'Other']
+};
+
+/* The four "was it worth it?" necessity bands — the heart of the
+   spending-quality analysis. Order matters (best → worst). */
+const FIN_NEED = [
+  { key: 'Essential',     tone: 'green',  ico: 'shield-check',  desc: 'Non-negotiable — rent, food, bills, health' },
+  { key: 'Important',     tone: 'blue',   ico: 'star',          desc: 'Real value — education, growth, family' },
+  { key: 'Discretionary', tone: 'amber',  ico: 'cup-hot',       desc: 'Nice to have — comfort, leisure, wants' },
+  { key: 'Avoidable',     tone: 'red',    ico: 'exclamation-triangle', desc: 'Regret / impulse — could have skipped' }
+];
+const FIN_NEED_TONE = FIN_NEED.reduce((m, n) => (m[n.key] = n.tone, m), {});
+
+/* ---- FinanceDB : the private storage layer (mirrors DB, isolated) ---- */
+const FinanceDB = {
+  data: null,
+  _clientId: 'f-' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36),
+  _unsub: null,
+  _doc() {
+    if (typeof fbDB === 'undefined' || !fbDB) return null;
+    // A SEPARATE top-level collection (not under `opptrack`), so even a
+    // wildcard public-read rule on the portfolio collection can never match
+    // it. Firestore default-denies this path until the owner adds the rule.
+    try { return fbDB.collection('opptrack_private').doc('finance'); } catch { return null; }
+  },
+  _hydrate(raw) {
+    const d = (raw && typeof raw === 'object') ? raw : {};
+    if (!Array.isArray(d.tx)) d.tx = [];
+    d.categories = Object.assign({}, FIN_DEFAULTS, d.categories || {});
+    if (typeof d.monthlyBudget !== 'number') d.monthlyBudget = 0;
+    if (typeof d.savingsGoal !== 'number') d.savingsGoal = 0;
+    return d;
+  },
+  loadLocal() {
+    try {
+      const raw = localStorage.getItem(FIN_STORE_KEY);
+      this.data = this._hydrate(raw ? JSON.parse(raw) : null);
+    } catch { this.data = this._hydrate(null); }
+    return this.data;
+  },
+  async loadCloud() {
+    const doc = this._doc();
+    if (!doc || !Security.isOwner()) { this._cloudBlocked = true; return this.loadLocal(); }
+    try {
+      const snap = await doc.get();
+      if (snap.exists) {
+        const d = snap.data() || {};
+        this.data = this._hydrate(d.store || d);
+        this._persistLocal();
+      } else {
+        if (!this.data) this.loadLocal();
+        await this._persistCloud();     // seed the private doc from local
+      }
+    } catch (e) {
+      // No rule yet / offline — run privately from this device. Never leaks.
+      if (!this.data) this.loadLocal();
+      this._cloudBlocked = true;
+    }
+    return this.data;
+  },
+  subscribe(onRemote) {
+    const doc = this._doc();
+    if (!doc || !Security.isOwner()) return;
+    if (this._unsub) { this._unsub(); this._unsub = null; }
+    try {
+      this._unsub = doc.onSnapshot(snap => {
+        if (!snap.exists) return;
+        const d = snap.data() || {};
+        if (d.writer === this._clientId) return;
+        this.data = this._hydrate(d.store || d);
+        this._persistLocal();
+        if (typeof onRemote === 'function') onRemote();
+      }, () => {});
+    } catch {}
+  },
+  _persistLocal() { try { localStorage.setItem(FIN_STORE_KEY, JSON.stringify(this.data)); } catch {} },
+  async _persistCloud() {
+    const doc = this._doc();
+    if (!doc || !Security.isOwner()) return;
+    try {
+      await doc.set({ store: this.data, writer: this._clientId, updatedAt: Date.now() });
+      this._cloudBlocked = false;
+    } catch (e) { this._cloudBlocked = true; }
+  },
+  save() {
+    if (!Security.guard('save finance data')) return;
+    this._persistLocal();
+    this._persistCloud();
+  },
+  all() { return (this.data && this.data.tx) || []; },
+  get(id) { return this.all().find(t => t.id === id); },
+  upsert(rec) {
+    if (!Security.guard('save finance data')) return null;
+    const list = this.data.tx;
+    if (!rec.id) { rec.id = uid(); rec.createdAt = new Date().toISOString(); list.push(rec); }
+    else { const i = list.findIndex(t => t.id === rec.id); if (i > -1) list[i] = Object.assign(list[i], rec); else list.push(rec); }
+    this.save();
+    return rec;
+  },
+  remove(id) {
+    if (!Security.guard('delete finance data')) return;
+    this.data.tx = this.all().filter(t => t.id !== id);
+    this.save();
+  }
+};
+
+/* ---- Money helpers (Bangladeshi ৳ with lakh/crore grouping) ---- */
+function fmtBDT(n, withSign) {
+  const neg = n < 0;
+  n = Math.round(Math.abs(Number(n) || 0));
+  let s = String(n), last3 = s.slice(-3), rest = s.slice(0, -3);
+  if (rest) rest = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',';
+  const body = '৳' + rest + last3;
+  return (neg ? '−' : (withSign ? '+' : '')) + body;
+}
+function fmtBDTk(n) {              // compact form for tiny chart labels
+  n = Number(n) || 0;
+  if (Math.abs(n) >= 10000000) return '৳' + (n / 10000000).toFixed(2).replace(/\.?0+$/, '') + 'Cr';
+  if (Math.abs(n) >= 100000)   return '৳' + (n / 100000).toFixed(2).replace(/\.?0+$/, '') + 'L';
+  if (Math.abs(n) >= 1000)     return '৳' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return fmtBDT(n);
+}
+const FIN_CATS = (k) => (FinanceDB.data.categories[k] || []);
+const finMonthKey = (iso) => String(iso || '').slice(0, 7);         // 'YYYY-MM'
+function finMonthLabel(key) {
+  if (!key) return '';
+  const [y, m] = key.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+function finShiftMonth(key, delta) {
+  const [y, m] = key.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
+/* Aggregate one month's transactions into everything the page needs. */
+function finSummary(monthKey) {
+  const tx = FinanceDB.all().filter(t => finMonthKey(t.date) === monthKey);
+  const income = tx.filter(t => t.type === 'income');
+  const expense = tx.filter(t => t.type === 'expense');
+  const sum = (a) => a.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const bySector = (arr) => {
+    const m = {};
+    arr.forEach(t => { const k = t.category || 'Uncategorised'; m[k] = (m[k] || 0) + (Number(t.amount) || 0); });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  };
+  const byNeed = {};
+  FIN_NEED.forEach(n => byNeed[n.key] = 0);
+  expense.forEach(t => { const k = FIN_NEED_TONE[t.necessity] ? t.necessity : 'Discretionary'; byNeed[k] += (Number(t.amount) || 0); });
+  const byMethod = {};
+  tx.forEach(t => { const k = t.method || 'Other'; byMethod[k] = (byMethod[k] || 0) + (Number(t.amount) || 0); });
+  const totalIn = sum(income), totalOut = sum(expense);
+  return {
+    tx, income, expense, totalIn, totalOut,
+    net: totalIn - totalOut,
+    savingsRate: totalIn > 0 ? (totalIn - totalOut) / totalIn * 100 : 0,
+    incomeSectors: bySector(income),
+    expenseSectors: bySector(expense),
+    byNeed,
+    leak: byNeed.Avoidable + byNeed.Discretionary * 0.5,   // realistic "could save"
+    byMethod: Object.entries(byMethod).sort((a, b) => b[1] - a[1]),
+    count: tx.length
+  };
+}
+
+/* Human, specific insights — the part that makes people go "whoa". */
+function finInsights(monthKey, s) {
+  const out = [];
+  const prev = finSummary(finShiftMonth(monthKey, -1));
+  if (s.totalIn === 0 && s.totalOut === 0)
+    return [{ tone: 'slate', ico: 'info-circle', text: 'No records for this month yet. Add your first income or expense to unlock insights.' }];
+
+  // Savings verdict
+  if (s.totalIn > 0) {
+    if (s.savingsRate >= 20) out.push({ tone: 'green', ico: 'piggy-bank', text: `Strong month — you kept <b>${s.savingsRate.toFixed(0)}%</b> of your income (${fmtBDT(s.net)}). Above the 20% healthy mark.` });
+    else if (s.net >= 0) out.push({ tone: 'amber', ico: 'piggy-bank', text: `You saved <b>${s.savingsRate.toFixed(0)}%</b> (${fmtBDT(s.net)}) this month. Nudging this past 20% builds real cushion.` });
+    else out.push({ tone: 'red', ico: 'graph-down-arrow', text: `You spent <b>${fmtBDT(-s.net)} more than you earned</b> this month. Worth trimming the avoidable spend below.` });
+  }
+  // Leak / quality of spend
+  if (s.leak > 0 && s.totalOut > 0) {
+    const pct = (s.leak / s.totalOut * 100).toFixed(0);
+    out.push({ tone: 'red', ico: 'scissors', text: `About <b>${fmtBDT(s.leak)}</b> (${pct}% of spending) sat in <b>Avoidable / Discretionary</b>. Reclaiming half would add <b>${fmtBDT(s.leak / 2)}</b> to savings.` });
+  }
+  // Biggest sector
+  if (s.expenseSectors.length) {
+    const [cat, amt] = s.expenseSectors[0];
+    out.push({ tone: 'blue', ico: 'pie-chart', text: `Your biggest expense was <b>${escapeHtml(cat)}</b> at <b>${fmtBDT(amt)}</b> — ${(amt / s.totalOut * 100).toFixed(0)}% of everything you spent.` });
+  }
+  // Month-over-month movement
+  if (prev.totalOut > 0) {
+    const diff = s.totalOut - prev.totalOut;
+    const p = Math.abs(diff / prev.totalOut * 100).toFixed(0);
+    if (Math.abs(diff) > prev.totalOut * 0.08)
+      out.push({ tone: diff > 0 ? 'amber' : 'green', ico: diff > 0 ? 'arrow-up-right' : 'arrow-down-right', text: `Spending is <b>${p}% ${diff > 0 ? 'higher' : 'lower'}</b> than last month (${finMonthLabel(finShiftMonth(monthKey, -1))}).` });
+  }
+  // Budget check
+  if (FinanceDB.data.monthlyBudget > 0) {
+    const b = FinanceDB.data.monthlyBudget;
+    if (s.totalOut > b) out.push({ tone: 'red', ico: 'flag', text: `You're <b>${fmtBDT(s.totalOut - b)} over</b> your ${fmtBDT(b)} monthly budget.` });
+    else out.push({ tone: 'green', ico: 'flag', text: `Within budget — <b>${fmtBDT(b - s.totalOut)}</b> of your ${fmtBDT(b)} budget still unspent.` });
+  }
+  return out;
+}
+
+/* horizontal bar-row helper (sector breakdowns) */
+function finBarRow(label, amt, max, tone) {
+  const pct = max > 0 ? Math.max(2, amt / max * 100) : 0;
+  return `<div class="fin-bar">
+    <div class="fin-bar-head"><span class="fin-bar-lbl">${escapeHtml(label)}</span><span class="fin-bar-amt num">${fmtBDT(amt)}</span></div>
+    <div class="fin-bar-track"><span class="t-${tone || 'primary'}" style="width:${pct}%"></span></div>
+  </div>`;
+}
+
+let _finMonth = null;   // currently viewed month (YYYY-MM)
+
+function initAccounts() {
+  // Hard gate — this page never renders for a visitor.
+  if (!Security.isOwner()) { location.replace(Security.LOGIN_PAGE); return; }
+  const host = document.getElementById('acctHost');
+  if (!host) return;
+
+  host.innerHTML = `<div class="empty"><div class="e-ico"><i class="bi bi-hourglass-split"></i></div><b>Loading your private ledger…</b></div>`;
+
+  const boot = () => {
+    if (!_finMonth) _finMonth = finMonthKey(new Date().toISOString());
+    drawAccounts();
+    FinanceDB.subscribe(() => { if (!document.querySelector('.modal.show')) drawAccounts(); });
+  };
+
+  // load private store (local instant, then cloud if the rule allows)
+  FinanceDB.loadLocal();
+  FinanceDB.loadCloud().then(boot);
+}
+
+function drawAccounts() {
+  const host = document.getElementById('acctHost');
+  if (!host) return;
+  const mk = _finMonth;
+  const s = finSummary(mk);
+  const allMonths = [...new Set(FinanceDB.all().map(t => finMonthKey(t.date)).filter(Boolean))].sort();
+  const insights = finInsights(mk, s);
+  const maxIn = Math.max(1, ...s.incomeSectors.map(x => x[1]));
+  const maxOut = Math.max(1, ...s.expenseSectors.map(x => x[1]));
+  const needMax = Math.max(1, ...Object.values(s.byNeed));
+  const cloudNote = FinanceDB._cloudBlocked
+    ? `<span class="fin-priv" title="Private to this device — add the finance security rule to sync across devices"><i class="bi bi-hdd"></i> Private · this device</span>`
+    : `<span class="fin-priv is-sync" title="Private &amp; synced to your account only"><i class="bi bi-shield-lock-fill"></i> Private · synced</span>`;
+
+  // ---- last-6-months trend ----
+  const trend = [];
+  for (let i = 5; i >= 0; i--) { const k = finShiftMonth(mk, -i); const t = finSummary(k); trend.push({ k, in: t.totalIn, out: t.totalOut }); }
+  const trendMax = Math.max(1, ...trend.flatMap(t => [t.in, t.out]));
+
+  host.innerHTML = `
+  <!-- Private banner + month navigator -->
+  <div class="fin-topbar">
+    <div class="fin-priv-wrap">${cloudNote}
+      <span class="text-faint" style="font-size:12px"><i class="bi bi-eye-slash me-1"></i>Never shown on your public portfolio</span>
+    </div>
+    <div class="fin-monthnav">
+      <button class="btn btn-ghost btn-icon" id="finPrev" title="Previous month"><i class="bi bi-chevron-left"></i></button>
+      <div class="fin-month"><b>${finMonthLabel(mk)}</b><small>${s.count} record${s.count === 1 ? '' : 's'}</small></div>
+      <button class="btn btn-ghost btn-icon" id="finNext" title="Next month"><i class="bi bi-chevron-right"></i></button>
+      <button class="btn btn-ghost btn-icon" id="finToday" title="Jump to this month"><i class="bi bi-calendar-event"></i></button>
+    </div>
+    <div class="fin-actions">
+      <button class="btn btn-ghost btn-sm" id="finSettings"><i class="bi bi-sliders me-1"></i>Categories &amp; budget</button>
+      <button class="btn btn-primary btn-sm" id="finAdd"><i class="bi bi-plus-lg me-1"></i>Add record</button>
+    </div>
+  </div>
+
+  <!-- KPI cards -->
+  <div class="fin-kpis">
+    <div class="fin-kpi t-green"><div class="fk-ico"><i class="bi bi-arrow-down-left"></i></div>
+      <div class="fk-v num">${fmtBDT(s.totalIn)}</div><div class="fk-l">Income</div></div>
+    <div class="fin-kpi t-red"><div class="fk-ico"><i class="bi bi-arrow-up-right"></i></div>
+      <div class="fk-v num">${fmtBDT(s.totalOut)}</div><div class="fk-l">Expense</div></div>
+    <div class="fin-kpi ${s.net >= 0 ? 't-primary' : 't-red'}"><div class="fk-ico"><i class="bi bi-piggy-bank"></i></div>
+      <div class="fk-v num">${fmtBDT(s.net)}</div><div class="fk-l">${s.net >= 0 ? 'Net saved' : 'Overspent'}</div></div>
+    <div class="fin-kpi t-violet"><div class="fk-ico"><i class="bi bi-graph-up-arrow"></i></div>
+      <div class="fk-v num">${s.savingsRate.toFixed(0)}<span style="font-size:16px">%</span></div><div class="fk-l">Savings rate</div>
+      <div class="fk-ring"><span style="width:${Math.max(0, Math.min(100, s.savingsRate))}%"></span></div></div>
+    <div class="fin-kpi t-amber"><div class="fk-ico"><i class="bi bi-scissors"></i></div>
+      <div class="fk-v num">${fmtBDT(s.leak)}</div><div class="fk-l">Could save</div></div>
+  </div>
+
+  <!-- Insights -->
+  <div class="card card-pad fin-card mb-4">
+    <div class="section-title mb-3"><i class="bi bi-stars me-1"></i>What your money is telling you</div>
+    <div class="fin-insights">
+      ${insights.map(i => `<div class="fin-insight t-${i.tone}"><i class="bi bi-${i.ico}"></i><div>${i.text}</div></div>`).join('')}
+    </div>
+  </div>
+
+  <!-- Necessity / spending quality -->
+  <div class="card card-pad fin-card mb-4">
+    <div class="d-flex align-items-center mb-1 flex-wrap gap-2">
+      <div class="section-title mb-0"><i class="bi bi-clipboard-heart me-1"></i>Was it worth it? · Spending quality</div>
+      <span class="ms-auto text-faint" style="font-size:11.5px">Every expense you tag builds this picture</span>
+    </div>
+    <div class="fin-need">
+      ${FIN_NEED.map(n => {
+        const amt = s.byNeed[n.key] || 0;
+        const pct = s.totalOut > 0 ? (amt / s.totalOut * 100) : 0;
+        return `<div class="fin-need-cell">
+          <div class="fin-need-top"><span class="stat-ico-sm t-${n.tone}"><i class="bi bi-${n.ico}"></i></span>
+            <div><b>${n.key}</b><small>${n.desc}</small></div>
+            <span class="fin-need-amt num t-${n.tone}">${fmtBDT(amt)}</span></div>
+          <div class="fin-bar-track"><span class="t-${n.tone}" style="width:${Math.max(pct > 0 ? 3 : 0, pct)}%"></span></div>
+          <div class="fin-need-pct">${pct.toFixed(0)}% of spend</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+
+  <!-- Sector breakdowns -->
+  <div class="grid-2 mb-4 fin-grid-2">
+    <div class="card card-pad fin-card">
+      <div class="section-title mb-3"><i class="bi bi-arrow-down-left-circle me-1"></i>Where money came from</div>
+      ${s.incomeSectors.length ? s.incomeSectors.map(([c, a]) => finBarRow(c, a, maxIn, 'green')).join('')
+        : '<p class="text-faint" style="font-size:13px">No income logged this month.</p>'}
+    </div>
+    <div class="card card-pad fin-card">
+      <div class="section-title mb-3"><i class="bi bi-arrow-up-right-circle me-1"></i>Where money went</div>
+      ${s.expenseSectors.length ? s.expenseSectors.map(([c, a]) => finBarRow(c, a, maxOut, 'red')).join('')
+        : '<p class="text-faint" style="font-size:13px">No expenses logged this month.</p>'}
+    </div>
+  </div>
+
+  <!-- 6-month trend + payment methods -->
+  <div class="grid-2 mb-4 fin-grid-2" style="grid-template-columns:1.5fr 1fr">
+    <div class="card card-pad fin-card">
+      <div class="section-title mb-3"><i class="bi bi-bar-chart-line me-1"></i>Last 6 months · income vs expense</div>
+      <div class="fin-trend">
+        ${trend.map(t => `<div class="fin-tcol ${t.k === mk ? 'is-cur' : ''}">
+          <div class="fin-tbars">
+            <span class="fin-tbar t-green" style="height:${t.in / trendMax * 100}%" title="Income ${fmtBDT(t.in)}"></span>
+            <span class="fin-tbar t-red" style="height:${t.out / trendMax * 100}%" title="Expense ${fmtBDT(t.out)}"></span>
+          </div>
+          <div class="fin-tlabel">${finMonthLabel(t.k).slice(0, 3)}</div>
+        </div>`).join('')}
+      </div>
+      <div class="fin-legend"><span><i class="dot t-green"></i>Income</span><span><i class="dot t-red"></i>Expense</span></div>
+    </div>
+    <div class="card card-pad fin-card">
+      <div class="section-title mb-3"><i class="bi bi-wallet2 me-1"></i>By payment method</div>
+      ${s.byMethod.length ? s.byMethod.map(([m, a]) => finBarRow(m, a, Math.max(1, ...s.byMethod.map(x => x[1])), 'violet')).join('')
+        : '<p class="text-faint" style="font-size:13px">Nothing logged this month.</p>'}
+    </div>
+  </div>
+
+  <!-- Transactions -->
+  <div class="card table-card fin-card">
+    <div class="card-head"><h3>Transactions · ${finMonthLabel(mk)}</h3>
+      <div class="ms-auto d-flex gap-2 align-items-center">
+        <select class="filter-select btn-sm" id="finFilterType" style="height:34px">
+          <option value="">All types</option><option value="income">Income</option><option value="expense">Expense</option>
+        </select>
+        <button class="btn btn-soft btn-sm" id="finAdd2"><i class="bi bi-plus-lg me-1"></i>Add</button>
+      </div>
+    </div>
+    <div id="finTxWrap"></div>
+  </div>
+
+  <!-- quick month chips -->
+  ${allMonths.length > 1 ? `<div class="fin-months">${allMonths.slice().reverse().map(k => `<button class="fin-mchip ${k === mk ? 'on' : ''}" data-m="${k}">${finMonthLabel(k)}</button>`).join('')}</div>` : ''}
+  `;
+
+  // ---- transactions table ----
+  const drawTx = () => {
+    const ft = document.getElementById('finFilterType')?.value || '';
+    let rows = s.tx.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    if (ft) rows = rows.filter(t => t.type === ft);
+    const wrap = document.getElementById('finTxWrap');
+    if (!rows.length) { wrap.innerHTML = `<div class="empty" style="padding:36px"><div class="e-ico"><i class="bi bi-receipt"></i></div><b>No transactions</b><p>Add your income and expenses to see the full picture.</p></div>`; return; }
+    wrap.innerHTML = `<table class="dt"><thead><tr>
+      <th>Date</th><th>Detail</th><th>Category</th><th>Necessity</th><th>Method</th><th style="text-align:right">Amount</th><th></th>
+    </tr></thead><tbody>${rows.map(t => {
+      const inc = t.type === 'income';
+      return `<tr>
+        <td class="date-cell">${fmtDate(t.date)}</td>
+        <td class="name-cell"><b>${escapeHtml(t.note || (inc ? 'Income' : 'Expense'))}</b>
+          ${t.recurring && t.recurring !== 'One-time' ? `<small><i class="bi bi-arrow-repeat"></i> ${escapeHtml(t.recurring)}</small>` : ''}</td>
+        <td>${escapeHtml(t.category || '—')}</td>
+        <td>${inc ? '<span class="text-faint">—</span>' : `<span class="chip t-${FIN_NEED_TONE[t.necessity] || 'slate'}"><span class="dot"></span>${escapeHtml(t.necessity || '—')}</span>`}</td>
+        <td class="text-soft">${escapeHtml(t.method || '—')}</td>
+        <td style="text-align:right" class="num ${inc ? 'fin-pos' : 'fin-neg'}">${inc ? fmtBDT(t.amount, true) : '−' + fmtBDT(t.amount)}</td>
+        <td><div class="row-actions"><button title="Edit" data-fe="${t.id}"><i class="bi bi-pencil"></i></button>
+          <button class="del" title="Delete" data-fd="${t.id}"><i class="bi bi-trash"></i></button></div></td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+    wrap.querySelectorAll('[data-fe]').forEach(b => b.onclick = () => openFinanceModal(b.dataset.fe));
+    wrap.querySelectorAll('[data-fd]').forEach(b => b.onclick = () => {
+      if (!Security.guard('delete finance data')) return;
+      if (confirm('Delete this transaction?')) { FinanceDB.remove(b.dataset.fd); toast('Deleted.', 'ok'); drawAccounts(); }
+    });
+  };
+  drawTx();
+
+  // ---- wiring ----
+  const go = (mkey) => { _finMonth = mkey; drawAccounts(); };
+  document.getElementById('finPrev').onclick = () => go(finShiftMonth(mk, -1));
+  document.getElementById('finNext').onclick = () => go(finShiftMonth(mk, 1));
+  document.getElementById('finToday').onclick = () => go(finMonthKey(new Date().toISOString()));
+  document.getElementById('finFilterType').onchange = drawTx;
+  document.getElementById('finAdd').onclick = () => openFinanceModal(null);
+  document.getElementById('finAdd2').onclick = () => openFinanceModal(null);
+  document.getElementById('finSettings').onclick = openFinanceSettings;
+  host.querySelectorAll('.fin-mchip').forEach(b => b.onclick = () => go(b.dataset.m));
+}
+
+/* ---- Add / edit a transaction (dedicated private modal) ---- */
+function openFinanceModal(id) {
+  if (!Security.guard(id ? 'edit this record' : 'add a record')) return;
+  const rec = id ? Object.assign({}, FinanceDB.get(id)) : { type: 'expense', date: new Date().toISOString().slice(0, 10), recurring: 'One-time', necessity: 'Essential', method: 'Cash' };
+  const isEdit = !!id;
+  document.getElementById('finModal')?.remove();
+
+  const catOpts = (type) => (type === 'income' ? FIN_CATS('incomeCategories') : FIN_CATS('expenseCategories'));
+  const optionList = (arr, sel) => arr.map(o => `<option ${o === sel ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="finModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="d-flex align-items-center gap-2">
+            <span class="stat-ico"><i class="bi bi-cash-coin"></i></span>
+            <h5 class="modal-title">${isEdit ? 'Edit' : 'Add'} transaction</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="fin-typetoggle" id="finType">
+            <button type="button" data-t="expense" class="${rec.type !== 'income' ? 'on' : ''}"><i class="bi bi-arrow-up-right"></i> Expense</button>
+            <button type="button" data-t="income" class="${rec.type === 'income' ? 'on' : ''}"><i class="bi bi-arrow-down-left"></i> Income</button>
+          </div>
+          <form id="finForm" class="form-grid" style="margin-top:16px">
+            <div class="field col-span"><label>Amount (৳) <span class="req">*</span></label>
+              <input type="number" name="amount" min="0" step="0.01" inputmode="decimal" value="${rec.amount != null ? rec.amount : ''}" placeholder="0"></div>
+            <div class="field"><label>Date <span class="req">*</span></label><input type="date" name="date" value="${escapeHtml(rec.date || '')}"></div>
+            <div class="field"><label>Category</label><select name="category" id="finCat">
+              <option value="">— Select —</option>${optionList(catOpts(rec.type), rec.category)}</select></div>
+            <div class="field" id="finNeedField"><label>Necessity — was it worth it?</label><select name="necessity">
+              ${FIN_NEED.map(n => `<option ${n.key === rec.necessity ? 'selected' : ''}>${n.key}</option>`).join('')}</select></div>
+            <div class="field"><label>Payment method</label><select name="method">${optionList(FIN_CATS('methods'), rec.method)}</select></div>
+            <div class="field"><label>Repeats</label><select name="recurring">
+              ${['One-time', 'Daily', 'Weekly', 'Monthly', 'Yearly'].map(o => `<option ${o === rec.recurring ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+            <div class="field col-span"><label>Note / detail</label>
+              <input type="text" name="note" value="${escapeHtml(rec.note || '')}" placeholder="e.g. Groceries at Shwapno, freelance milestone…"></div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          ${isEdit ? '<button type="button" class="btn btn-danger-soft me-auto" id="finDel"><i class="bi bi-trash me-1"></i>Delete</button>' : ''}
+          <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="finSave"><i class="bi bi-check-lg me-1"></i>${isEdit ? 'Save changes' : 'Add transaction'}</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('finModal');
+  const modal = new bootstrap.Modal(modalEl);
+  modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+
+  let curType = rec.type || 'expense';
+  const syncType = () => {
+    modalEl.querySelectorAll('#finType button').forEach(b => b.classList.toggle('on', b.dataset.t === curType));
+    // refresh category options + show/hide necessity (income has none)
+    const catSel = document.getElementById('finCat');
+    const cur = catSel.value;
+    catSel.innerHTML = `<option value="">— Select —</option>` + optionList(catOpts(curType), cur);
+    document.getElementById('finNeedField').style.display = curType === 'income' ? 'none' : '';
+  };
+  syncType();
+  modalEl.querySelectorAll('#finType button').forEach(b => b.onclick = () => { curType = b.dataset.t; syncType(); });
+
+  if (isEdit) document.getElementById('finDel').onclick = () => {
+    if (confirm('Delete this transaction?')) { FinanceDB.remove(id); toast('Deleted.', 'ok'); modal.hide(); drawAccounts(); }
+  };
+
+  document.getElementById('finSave').onclick = () => {
+    const f = document.getElementById('finForm');
+    const amount = parseFloat(f.elements.namedItem('amount').value);
+    if (!(amount > 0)) { toast('Enter an amount greater than zero.', 'err'); f.elements.namedItem('amount').focus(); return; }
+    const date = f.elements.namedItem('date').value;
+    if (!date) { toast('Pick a date.', 'err'); return; }
+    const out = {
+      id: id || undefined,
+      type: curType,
+      amount,
+      date,
+      category: f.elements.namedItem('category').value,
+      necessity: curType === 'income' ? '' : f.elements.namedItem('necessity').value,
+      method: f.elements.namedItem('method').value,
+      recurring: f.elements.namedItem('recurring').value,
+      note: f.elements.namedItem('note').value.trim()
+    };
+    const saved = FinanceDB.upsert(out);
+    if (!saved) return;
+    toast(`Transaction ${isEdit ? 'updated' : 'added'}.`, 'ok');
+    modal.hide();
+    drawAccounts();
+  };
+}
+
+/* ---- Finance settings: edit categories + budget + savings goal ---- */
+function openFinanceSettings() {
+  if (!Security.guard('manage finance settings')) return;
+  document.getElementById('finSetModal')?.remove();
+  const d = FinanceDB.data;
+  const groups = [
+    { key: 'incomeCategories', label: 'Income categories', ico: 'arrow-down-left' },
+    { key: 'expenseCategories', label: 'Expense categories', ico: 'arrow-up-right' },
+    { key: 'methods', label: 'Payment methods', ico: 'wallet2' }
+  ];
+  const chips = (key) => FIN_CATS(key).map((v, i) => `<span class="chip chip-outline" style="padding-right:4px">${escapeHtml(v)}
+    <button class="btn p-0 ms-1" style="line-height:0;color:var(--text-faint)" data-rmc="${key}" data-i="${i}"><i class="bi bi-x"></i></button></span>`).join('') || '<span class="text-faint" style="font-size:12px">None.</span>';
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="finSetModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="d-flex align-items-center gap-2"><span class="stat-ico"><i class="bi bi-sliders"></i></span>
+            <h5 class="modal-title">Finance settings</h5></div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid mb-3">
+            <div class="field"><label>Monthly budget (৳)</label><input type="number" id="finBudget" min="0" step="100" value="${d.monthlyBudget || ''}" placeholder="e.g. 30000"></div>
+            <div class="field"><label>Monthly savings goal (৳)</label><input type="number" id="finGoal" min="0" step="100" value="${d.savingsGoal || ''}" placeholder="e.g. 8000"></div>
+          </div>
+          ${groups.map(g => `<div class="card card-pad mb-3" data-grp="${g.key}">
+            <div class="d-flex align-items-center gap-2 mb-3"><span class="stat-ico-sm t-primary"><i class="bi bi-${g.ico}"></i></span><b>${g.label}</b></div>
+            <div class="d-flex flex-wrap gap-2 mb-3" data-chips="${g.key}">${chips(g.key)}</div>
+            <div class="input-group">
+              <input type="text" class="form-control" placeholder="Add new…" data-addc="${g.key}" style="border-radius:10px 0 0 10px;border:1px solid var(--line)">
+              <button class="btn btn-soft" data-addbtn="${g.key}" style="border-radius:0 10px 10px 0"><i class="bi bi-plus-lg"></i></button>
+            </div>
+          </div>`).join('')}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" id="finSetSave"><i class="bi bi-check-lg me-1"></i>Save settings</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('finSetModal');
+  const modal = new bootstrap.Modal(modalEl);
+  modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => { wrap.remove(); drawAccounts(); });
+
+  const redrawChips = (key) => { modalEl.querySelector(`[data-chips="${key}"]`).innerHTML = chips(key); bindChipRemovers(); };
+  const addC = (key) => {
+    const inp = modalEl.querySelector(`[data-addc="${key}"]`);
+    const v = (inp.value || '').trim(); if (!v) return;
+    if (FIN_CATS(key).includes(v)) { toast('Already there.', 'err'); return; }
+    d.categories[key].push(v); FinanceDB.save(); inp.value = ''; redrawChips(key);
+  };
+  const bindChipRemovers = () => modalEl.querySelectorAll('[data-rmc]').forEach(b => b.onclick = () => {
+    d.categories[b.dataset.rmc].splice(Number(b.dataset.i), 1); FinanceDB.save(); redrawChips(b.dataset.rmc);
+  });
+  bindChipRemovers();
+  modalEl.querySelectorAll('[data-addbtn]').forEach(b => b.onclick = () => addC(b.dataset.addbtn));
+  modalEl.querySelectorAll('[data-addc]').forEach(inp => inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addC(inp.dataset.addc); } }));
+  document.getElementById('finSetSave').onclick = () => {
+    d.monthlyBudget = parseFloat(document.getElementById('finBudget').value) || 0;
+    d.savingsGoal = parseFloat(document.getElementById('finGoal').value) || 0;
+    FinanceDB.save(); toast('Settings saved.', 'ok'); modal.hide();
+  };
+}
+
+/* ==========================================================
    7. ROUTER — map page name → initializer, run on load
    ========================================================== */
 const PAGE_INIT = {
   dashboard: initDashboard,
+  accounts: initAccounts,
   opportunities: initOpportunities,
   'opportunity-details': initOpportunityDetails,
   tasks: initTasks,
@@ -4287,6 +4895,7 @@ function renderActivePage(page) {
   if (page !== 'profile' && page !== 'index') {
     const titles = {
       dashboard: ['Dashboard', 'Your opportunities, deadlines and tasks at a glance'],
+      accounts: ['Accounts', 'Private income, expense & savings intelligence — owner only'],
       opportunities: ['Opportunities', 'Track every scholarship, fellowship and competition'],
       'opportunity-details': ['Opportunity', 'Full record and application timeline'],
       tasks: ['Task Board', 'Drag tasks across stages to update status'],
