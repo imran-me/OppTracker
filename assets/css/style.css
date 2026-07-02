@@ -1376,56 +1376,157 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 }
 
 /* ===========================================================
-   25. LUXURY POLISH — additive refinements (public views)
-   Purely cosmetic layers on top of the existing system: richer
-   depth, gradient accents, smoother motion and a denser, more
-   premium mobile layout. Nothing here changes structure, copy
-   or behaviour — safe to remove without breaking anything.
+   25. LUXURY LAYER — premium desktop finish (public views)
+   A cohesive, visible "expensive" pass over the existing system:
+   layered light & depth, refined glass, elevated cards, a bolder
+   portfolio hero and calm generous spacing. Additive only — no
+   structure, copy or behaviour changes; safe to remove.
    =========================================================== */
+:root {
+  /* Multi-layer "soft light" shadows — the core of the premium feel */
+  --lux-1: 0 1px 2px rgba(16,24,40,.04), 0 4px 10px -4px rgba(16,24,40,.06), 0 14px 34px -18px rgba(16,24,40,.16);
+  --lux-2: 0 2px 4px rgba(16,24,40,.05), 0 10px 24px -8px rgba(16,24,40,.12), 0 30px 60px -26px rgba(79,70,229,.24);
+  --hair:  inset 0 1px 0 rgba(255,255,255,.75);   /* top edge catches light */
+}
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 
-/* -- Primary buttons: a subtle gradient + a more confident lift -- */
+/* -- App canvas gets quiet depth (dashboard no longer flat white) -- */
+body.app-shell {
+  background:
+    radial-gradient(1000px 560px at 100% -6%, rgba(79,70,229,.07), transparent 60%),
+    radial-gradient(880px 500px at -6% 6%, rgba(14,165,233,.07), transparent 56%),
+    var(--canvas);
+  background-attachment: fixed;
+}
+
+/* -- Sidebar: deeper ink, a top sheen, glowing brand + gradient active -- */
+.sidebar {
+  background: linear-gradient(185deg, #0c1526 0%, #0a1120 55%, #0b1322 100%);
+  box-shadow: 1px 0 0 rgba(255,255,255,.03), 26px 0 70px -46px rgba(11,18,32,.7);
+}
+.sidebar .brand .logo { box-shadow: 0 10px 24px rgba(79,70,229,.5), inset 0 1px 0 rgba(255,255,255,.4); }
+.side-nav a.active {
+  background: linear-gradient(90deg, rgba(79,70,229,.24), rgba(79,70,229,.04));
+  box-shadow: inset 3px 0 0 var(--primary), inset 0 1px 0 rgba(255,255,255,.05);
+}
+
+/* -- Topbar: stronger frosted glass with a lit hairline -- */
+.topbar {
+  background: rgba(255,255,255,.68);
+  backdrop-filter: saturate(1.8) blur(18px); -webkit-backdrop-filter: saturate(1.8) blur(18px);
+  box-shadow: 0 1px 0 rgba(255,255,255,.6), 0 8px 30px -22px rgba(16,24,40,.5);
+}
+
+/* -- Primary buttons: gradient + confident lift -- */
 .btn-primary { background: linear-gradient(135deg, var(--primary), var(--primary-600)); border-color: var(--primary-600); }
-.btn-primary:hover { background: linear-gradient(135deg, var(--primary-600), var(--primary-700)); box-shadow: 0 8px 22px rgba(79,70,229,.32); transform: translateY(-1px); }
+.btn-primary:hover { background: linear-gradient(135deg, var(--primary-600), var(--primary-700)); box-shadow: 0 10px 26px rgba(79,70,229,.34); transform: translateY(-1px); }
 
-/* -- Section headers get a slim gradient tick to feel intentional -- */
-.pf-section > .pf-sec-head > h2::before,
-.pf-section > h2::before {
-  content: ""; display: block; width: 46px; height: 4px; border-radius: 3px; margin-bottom: 12px;
+/* -- Cards: larger radius, layered shadow, top highlight, richer hover -- */
+.card { border-radius: 18px; box-shadow: var(--hair), var(--lux-1); }
+.card-glow, .stat, .kcard, .pf-win, .pf-ref { box-shadow: var(--hair), var(--lux-1); }
+.card-glow:hover, .stat:hover, .pf-win:hover, .pf-ref:hover {
+  transform: translateY(-6px); box-shadow: var(--hair), var(--lux-2); border-color: var(--primary);
+}
+
+/* -- Section titles: a gradient lead bar so they feel intentional -- */
+.section-title { display: flex; align-items: center; gap: 9px; }
+.section-title::before {
+  content: ""; width: 16px; height: 3px; border-radius: 3px; flex: 0 0 auto;
   background: linear-gradient(90deg, var(--primary), var(--accent));
 }
 
-/* -- Portfolio hero: gradient name + a soft aurora behind the photo -- */
+/* -- Dashboard stat cards: elevated, bigger figures, hover accent line -- */
+.stat { border-radius: 16px; padding: 15px 16px; }
+.stat::after {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; opacity: 0; transition: opacity .2s;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+}
+.stat:hover::after { opacity: 1; }
+.stat .ico { width: 34px; height: 34px; font-size: 16px; }
+.stat .val { font-size: 23px; }
+
+/* ---------- PORTFOLIO — the public face, made striking ---------- */
+
+/* Richer aurora canvas */
+.pf-body { background:
+  radial-gradient(1200px 560px at 88% -10%, #e9ebff 0%, transparent 58%),
+  radial-gradient(1000px 520px at -8% 2%, #e3f6ff 0%, transparent 54%),
+  radial-gradient(760px 620px at 60% 120%, #eef0ff 0%, transparent 60%),
+  var(--canvas); }
+
+/* Nav: taller, refined glass, pill hover/active */
+.pf-nav { padding: 13px max(20px, 4%); box-shadow: 0 1px 0 rgba(255,255,255,.6), 0 12px 34px -26px rgba(16,24,40,.5);
+  background: rgba(255,255,255,.72); backdrop-filter: saturate(1.6) blur(16px); -webkit-backdrop-filter: saturate(1.6) blur(16px); }
+.pf-nav .logo { box-shadow: 0 8px 20px rgba(79,70,229,.4), inset 0 1px 0 rgba(255,255,255,.4); }
+
+/* Hero: more air, a bolder gradient headline, a floating framed photo */
+.pf-hero { padding: 88px 24px 52px; gap: 56px; }
+.pf-hero .eyebrow { display: inline-flex; align-items: center; gap: 10px; }
+.pf-hero .eyebrow::before { content: ""; width: 30px; height: 2px; background: linear-gradient(90deg, var(--primary), var(--accent)); }
 .pf-hero h1 {
-  background: linear-gradient(120deg, #16203a 0%, var(--primary-700) 55%, var(--primary) 100%);
+  font-size: clamp(38px, 5.6vw, 62px); letter-spacing: -.03em;
+  background: linear-gradient(118deg, #101a33 0%, #2a2a8f 46%, var(--primary) 78%, var(--accent) 100%);
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
-.pf-hero .pf-photo { position: relative; box-shadow: 0 24px 60px -18px rgba(79,70,229,.55), var(--shadow-md); }
-.pf-hero .pf-photo::after {
-  content: ""; position: absolute; inset: -14px; border-radius: 34px; z-index: -1;
-  background: radial-gradient(60% 60% at 30% 20%, rgba(79,70,229,.35), transparent 70%),
-              radial-gradient(60% 60% at 80% 90%, rgba(14,165,233,.30), transparent 70%);
-  filter: blur(8px);
+.pf-hero p { font-size: 16.5px; line-height: 1.7; }
+.pf-hero .pf-photo { position: relative; border-radius: 30px; box-shadow: 0 30px 70px -22px rgba(79,70,229,.55), var(--lux-2);
+  animation: pfFloat 7s ease-in-out infinite; }
+.pf-hero .pf-photo img { border-radius: 30px; }
+.pf-hero .pf-photo::before {   /* conic gradient frame ring */
+  content: ""; position: absolute; inset: -5px; border-radius: 34px; z-index: -1;
+  background: conic-gradient(from 210deg, var(--primary), var(--accent), #a06bf5, var(--primary));
+  filter: blur(3px); opacity: .85;
 }
+.pf-hero .pf-photo::after {    /* soft aura */
+  content: ""; position: absolute; inset: -26px; border-radius: 44px; z-index: -2;
+  background: radial-gradient(60% 60% at 30% 20%, rgba(79,70,229,.38), transparent 70%),
+              radial-gradient(60% 60% at 82% 92%, rgba(14,165,233,.34), transparent 70%);
+  filter: blur(14px);
+}
+@keyframes pfFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+@media (prefers-reduced-motion: reduce) { .pf-hero .pf-photo { animation: none; } }
 
-/* -- Portfolio stat numbers: gradient tabular figures -- */
-.pf-stat .v {
+/* Stats: premium cards + big gradient figures */
+.pf-stats { padding: 10px 24px 34px; gap: 16px; }
+.pf-stat { border-radius: 18px; padding: 22px 16px; box-shadow: var(--hair), var(--lux-1); }
+.pf-stat .v { font-size: 34px; letter-spacing: -.02em;
   background: linear-gradient(120deg, var(--primary-700), var(--accent));
-  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-}
-.pf-stat { border-radius: var(--r-lg); }
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.pf-stat:hover { transform: translateY(-5px); box-shadow: var(--hair), var(--lux-2); }
 
-/* -- Cards: a hair more depth at rest, richer ring on hover -- */
-.card { box-shadow: 0 1px 2px rgba(16,24,40,.04), 0 6px 18px -12px rgba(16,24,40,.18); }
+/* Sections: generous rhythm + a gradient tick above each heading */
+.pf-section { padding: 52px 24px; }
+.pf-section h2 { font-size: 28px; letter-spacing: -.02em; }
+.pf-section > .pf-sec-head > h2::before, .pf-section > h2::before {
+  content: ""; display: block; width: 48px; height: 4px; border-radius: 3px; margin-bottom: 14px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+}
+.pf-section .lead-sub { font-size: 15px; }
+
+/* Showcase & recognition cards: lifted, refined hover */
 .gal-card, .pf-ref, .pf-win, .edu-tl-card, .pf-file, .pf-info-row {
-  transition: transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s ease, border-color .22s ease;
+  transition: transform .24s cubic-bezier(.2,.7,.3,1), box-shadow .24s ease, border-color .24s ease;
 }
+.gal-card { border-radius: 18px; box-shadow: var(--hair), var(--lux-1); }
+.pf-win, .pf-ref, .pf-info-row { box-shadow: var(--hair), var(--lux-1); }
+.pf-info-row:hover, .pf-file:hover { transform: translateY(-3px); box-shadow: var(--hair), var(--lux-2); border-color: var(--primary); }
+.pf-ref { border-radius: 20px; }
+.pf-ref-quote i { opacity: .7; }
 
-/* -- Frosted, quieter portfolio nav on scroll -- */
-.pf-nav { box-shadow: 0 1px 0 rgba(16,24,40,.03), 0 10px 30px -24px rgba(16,24,40,.4); }
+/* Social / contact pills feel tactile */
+.pf-soc { box-shadow: var(--hair), var(--shadow-sm); }
+.pf-soc:hover { box-shadow: 0 8px 20px -8px rgba(79,70,229,.35); }
 
-/* -- Refined focus + selection already themed; add smooth anchor scroll -- */
-html { scroll-behavior: smooth; }
-@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+/* Footer: a top gradient hairline */
+.site-footer { box-shadow: inset 0 2px 0 -1px rgba(79,70,229,.5); }
+
+/* -- Scroll reveal (portfolio). Enabled only when JS adds `reveal-on`,
+      so sections are always visible if the script never runs. -- */
+body.reveal-on .pf-section { opacity: 0; transform: translateY(30px);
+  transition: opacity .8s ease, transform .8s cubic-bezier(.2,.7,.3,1); will-change: opacity, transform; }
+body.reveal-on .pf-section.in-view { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { body.reveal-on .pf-section { opacity: 1; transform: none; } }
 
 /* -----------------------------------------------------------
    25b. MOBILE DENSITY — think like a phone user.

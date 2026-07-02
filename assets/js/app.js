@@ -4815,6 +4815,21 @@ function openFinanceSettings() {
   };
 }
 
+/* Portfolio scroll-reveal — a gentle, premium fade-up as each section
+   enters view. Purely cosmetic: it only adds classes, sections stay
+   fully visible if this never runs, and it honours reduced-motion. */
+function setupPortfolioReveal() {
+  try {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!('IntersectionObserver' in window)) return;
+    document.body.classList.add('reveal-on');
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in-view'); io.unobserve(e.target); } });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('.pf-section').forEach(s => io.observe(s));
+  } catch {}
+}
+
 /* ==========================================================
    7. ROUTER — map page name → initializer, run on load
    ========================================================== */
@@ -4871,6 +4886,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Ownership / copyright footer on every page.
   renderFooter();
+
+  // Portfolio: gentle scroll-reveal for a premium feel.
+  if (page === 'profile') setupPortfolioReveal();
 
   // Show owner tools / hide them from visitors (sets <body> class + auth control)
   Security.applyMode();
