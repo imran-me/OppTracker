@@ -14,7 +14,8 @@ const nowIso = () => new Date().toISOString();
 
 // Bump when the deadline/scan logic changes so a stale persisted brain
 // (saved by an older version) is force-recomputed instead of trusted.
-const BRAIN_VERSION = 2;
+// v3: treat "Missed Deadline" as a resolved status — never nag about it.
+const BRAIN_VERSION = 3;
 
 export class Brain {
   constructor(cfg) {
@@ -106,7 +107,9 @@ export class Brain {
     const out = [];
     // Anything already resolved is not a live deadline — never nag about a
     // won/lost/closed/completed item even if its date is in the past.
-    const DONE = /done|complete|closed|won|lost|accept|reject|success|approved|paid|submitted|finished|archiv|cancel|irrelevant|withdraw/i;
+    // "Missed Deadline" is a deliberate owner choice (couldn't participate) —
+    // it is resolved, so EON must stay silent on it too.
+    const DONE = /done|complete|closed|won|lost|accept|reject|success|approved|paid|submitted|finished|archiv|cancel|irrelevant|withdraw|missed/i;
     for (const r of records) {
       if (!r.deadlineAt) continue;
       const st = String(r.payload?.status || r.payload?.stage || '');

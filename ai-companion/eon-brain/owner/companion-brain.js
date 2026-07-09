@@ -77,8 +77,10 @@ export class CompanionBrain {
   plan({ horizon = 7, max = 8 } = {}) {
     const recs = (() => { try { return this.brain()?.getRecords?.() || []; } catch { return []; } })();
     const now = Date.now();
+    const DONE = /done|complete|closed|won|lost|accept|reject|success|approved|paid|submitted|finished|archiv|cancel|withdraw|missed/i;
     const items = recs
       .filter((r) => r.deadlineAt && !Number.isNaN(Date.parse(r.deadlineAt)))
+      .filter((r) => !DONE.test(String(r.payload?.status || r.payload?.stage || r.payload?.state || '')))
       .map((r) => { const days = Math.floor((Date.parse(r.deadlineAt) - now) / 86400000); return { ...r, dueAt: r.deadlineAt, days, urgency: this._urg(days) }; })
       .filter((r) => r.days <= horizon)
       .map((r) => this._score(r))
@@ -122,7 +124,9 @@ export class CompanionBrain {
     const ents = (() => { try { return b?.getEntities?.() || {}; } catch { return {}; } })();
     const recs = (() => { try { return b?.getRecords?.() || []; } catch { return []; } })();
     const now = Date.now();
-    const DONE = /done|complete|closed|won|accept|success|approved|paid|submitted|finished|archiv|reject/i;
+    // "missed" → the owner marked "Missed Deadline" on purpose; it's resolved,
+    // so it must never surface as a loose end / nudge.
+    const DONE = /done|complete|closed|won|accept|success|approved|paid|submitted|finished|archiv|reject|missed/i;
     const out = [];
 
     // deadline-based: overdue-and-still-open, due today / tomorrow

@@ -1882,12 +1882,22 @@ function initOpportunities() {
       (!q || (o.name + ' ' + (o.organizer || '')).toLowerCase().includes(q)) &&
       (!ft || o.type === ft) && (!fs || o.status === fs) && (!fp || o.priority === fp));
 
+    // "Missed Deadline" is a closed chapter — always sink those to the
+    // bottom regardless of the chosen sort, so the live opportunities stay
+    // at the top of the list.
+    const isMissed = (o) => /missed/i.test(o.status || '');
     rows.sort((a, b) => {
+      const ma = isMissed(a), mb = isMissed(b);
+      if (ma !== mb) return ma ? 1 : -1;                 // missed always last
       if (sort === 'name') return (a.name || '').localeCompare(b.name || '');
       if (sort === 'added') return (b.createdAt || '').localeCompare(a.createdAt || '');
       if (sort === 'priority') return (prioRank[a.priority] ?? 9) - (prioRank[b.priority] ?? 9);
+      // default: nearest deadline first, then newly added first as a tiebreaker
+      // (and for opportunities that have no deadline set at all).
       const da = daysUntil(a.deadline), db = daysUntil(b.deadline);
-      return (da == null ? 99999 : da) - (db == null ? 99999 : db);
+      const byDeadline = (da == null ? 99999 : da) - (db == null ? 99999 : db);
+      if (byDeadline !== 0) return byDeadline;
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
     });
 
     document.getElementById('oppCount').textContent = `${rows.length} shown`;
@@ -1971,13 +1981,103 @@ function setNextAction(oppId) {
   initOpportunityDetails();
 }
 
+/* ---- opportunity PHASES (milestones on the application timeline) ----
+   Owner adds named phases with a target date between "Added" and the
+   deadline; each can be ticked done. Phases live on the opportunity record
+   (o.phases) so they sync to the cloud like everything else. */
+function addPhase(oppId) {
+  if (!Security.guard('add a phase')) return;
+  const o = DB.get('opportunities', oppId); if (!o) return;
+  const tEl = document.getElementById('phaseTitle');
+  const dEl = document.getElementById('phaseDate');
+  const title = String(tEl ? tEl.value : '').trim();
+  if (!title) { toast('Name the phase first.', 'err'); tEl?.focus(); return; }
+  const at = (dEl && dEl.value) ? dEl.value : new Date().toISOString().slice(0, 10);
+  o.phases = Array.isArray(o.phases) ? o.phases : [];
+  o.phases.push({ id: uid(), title, at, done: false, doneAt: null });
+  DB.save(); try { computeSignals(); } catch {}
+  toast('Phase added. 🧭', 'ok');
+  initOpportunityDetails();
+}
+function togglePhase(oppId, phaseId) {
+  if (!Security.guard('update a phase')) return;
+  const o = DB.get('opportunities', oppId); if (!o || !Array.isArray(o.phases)) return;
+  const p = o.phases.find(x => x.id === phaseId); if (!p) return;
+  p.done = !p.done; p.doneAt = p.done ? new Date().toISOString() : null;
+  DB.save(); try { computeSignals(); } catch {}
+  initOpportunityDetails();
+}
+function removePhase(oppId, phaseId) {
+  if (!Security.guard('remove a phase')) return;
+  const o = DB.get('opportunities', oppId); if (!o || !Array.isArray(o.phases)) return;
+  o.phases = o.phases.filter(x => x.id !== phaseId);
+  DB.save(); try { computeSignals(); } catch {}
+  initOpportunityDetails();
+}
+
+/* Build the animated timeline: fixed milestones (Added / Opens / Deadline /
+   Event) interleaved with the owner's custom phases, ordered by date. The
+   connecting line "fills" up to the last completed node. */
+function oppTimelineHtml(o) {
+  const today = new Date().toISOString().slice(0, 10);
+  const day = (s) => (s ? String(s).slice(0, 10) : '');
+  const phases = (Array.isArray(o.phases) ? [...o.phases] : [])
+    .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+
+  const nodes = [];
+  nodes.push({ label: 'Added to tracker', at: day(o.createdAt || o.openDate), fixed: true, done: true });
+  if (o.openDate) nodes.push({ label: 'Opens', at: day(o.openDate), fixed: true, done: day(o.openDate) <= today });
+  phases.forEach(p => nodes.push({ id: p.id, label: p.title, at: day(p.at), done: !!p.done, phase: true }));
+  if (o.deadline) nodes.push({ label: 'Application deadline', at: day(o.deadline), fixed: true, deadline: true, done: false });
+  if (o.eventDate) nodes.push({ label: 'Event date', at: day(o.eventDate), fixed: true, done: day(o.eventDate) <= today });
+
+  // the "next" node is the first not-done milestone still ahead of today
+  const nextIdx = nodes.findIndex(n => !n.done && (!n.at || n.at >= today));
+  const total = phases.length;
+  const donePhases = phases.filter(p => p.done).length;
+  const pct = total ? Math.round((donePhases / total) * 100) : 0;
+
+  const rows = nodes.map((n, i) => {
+    const missed = !n.done && n.at && n.at < today;      // date passed, not ticked
+    const cls = [n.done ? 'is-done' : '', i === nextIdx ? 'is-next' : '', missed ? 'is-missed' : '', n.deadline ? 'is-deadline' : ''].filter(Boolean).join(' ');
+    const ico = n.done ? 'check-lg' : (n.deadline ? 'flag-fill' : (missed ? 'exclamation' : ''));
+    const controls = n.phase ? `
+      <span class="etl-actions owner-only">
+        <button title="${n.done ? 'Mark not done' : 'Mark done'}" onclick="togglePhase('${o.id}','${n.id}')"><i class="bi bi-${n.done ? 'arrow-counterclockwise' : 'check2'}"></i></button>
+        <button title="Remove phase" class="etl-del" onclick="removePhase('${o.id}','${n.id}')"><i class="bi bi-x-lg"></i></button>
+      </span>` : '';
+    return `<div class="etl-node ${cls}">
+      <span class="etl-dot">${ico ? `<i class="bi bi-${ico}"></i>` : ''}</span>
+      <div class="etl-body">
+        <b>${escapeHtml(n.label)}</b>
+        <small>${n.at ? fmtDate(n.at) : 'no date'}${missed ? ' · missed' : (i === nextIdx ? ' · up next' : '')}</small>
+        ${controls}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="section-title d-flex align-items-center">
+      <span>Application timeline</span>
+      ${total ? `<span class="etl-progress ms-auto" title="${donePhases}/${total} phases done">${pct}%</span>` : ''}
+    </div>
+    <div class="etl" style="--etl-fill:${pct}%">
+      <div class="etl-track"></div>
+      ${rows}
+    </div>
+    <div class="etl-add owner-only">
+      <input id="phaseTitle" placeholder="Add a phase (e.g. Draft essay)" onkeydown="if(event.key==='Enter')addPhase('${o.id}')">
+      <input id="phaseDate" type="date">
+      <button class="btn btn-primary btn-sm" onclick="addPhase('${o.id}')"><i class="bi bi-plus-lg"></i></button>
+    </div>`;
+}
+
 function initOpportunityDetails() {
   const id = new URLSearchParams(location.search).get('id');
   const o = id && DB.get('opportunities', id);
   const host = document.getElementById('detailHost');
   if (!o) { host.innerHTML = emptyState('compass', 'Opportunity not found', 'It may have been deleted.', 'Back to list', () => location.href = 'opportunities.html'); return; }
 
-  const linkedTasks = DB.getAll('tasks').filter(t => t.linkedOpportunity === o.name);
   const d = daysUntil(o.deadline);
 
   // EON's read on THIS deal (Signal Layer), owner-only
@@ -2014,7 +2114,7 @@ function initOpportunityDetails() {
       <div class="mt-3 d-flex gap-2">
         ${o.link ? `<a class="btn btn-soft btn-sm" href="${escapeHtml(o.link)}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Official page</a>` : ''}
         <button class="btn btn-ghost btn-sm owner-only" onclick="openEntityModal('opportunities','${o.id}', () => location.reload())"><i class="bi bi-pencil me-1"></i>Edit</button>
-        <button class="btn btn-ghost btn-sm owner-only" onclick="openEntityModal('tasks', null, ()=>location.reload())"><i class="bi bi-plus-lg me-1"></i>Add linked task</button>
+        <button class="btn btn-ghost btn-sm owner-only" id="oppAddLinkedTask"><i class="bi bi-plus-lg me-1"></i>Add linked task</button>
       </div>
       <div class="next-step mt-3">
         <i class="bi bi-flag-fill"></i>
@@ -2041,22 +2141,7 @@ function initOpportunityDetails() {
 
       <div class="stack-16">
         <div class="card card-pad">
-          <div class="section-title">Application timeline</div>
-          <div class="timeline">
-            <div class="tl-item"><b>Added to tracker</b><small>${fmtDate(o.createdAt || o.openDate)}</small></div>
-            ${o.openDate ? `<div class="tl-item"><b>Opens</b><small>${fmtDate(o.openDate)}</small></div>` : ''}
-            ${o.deadline ? `<div class="tl-item"><b>Application deadline</b><small>${fmtDate(o.deadline)}</small></div>` : ''}
-            ${o.eventDate ? `<div class="tl-item"><b>Event date</b><small>${fmtDate(o.eventDate)}</small></div>` : ''}
-          </div>
-        </div>
-        <div class="card card-pad">
-          <div class="section-title">Linked tasks (${linkedTasks.length})</div>
-          ${linkedTasks.length ? linkedTasks.map(t => `
-            <div class="d-flex align-items-center gap-2 py-2" style="border-bottom:1px solid var(--line-2)">
-              <i class="bi bi-${t.status === 'Completed' ? 'check-circle-fill text-success' : 'circle text-soft'}"></i>
-              <span style="font-size:13.5px;${t.status === 'Completed' ? 'text-decoration:line-through;color:var(--text-faint)' : ''}">${escapeHtml(t.title)}</span>
-              <span class="ms-auto">${statusChip(t.status)}</span>
-            </div>`).join('') : `<p class="text-soft mb-0" style="font-size:13px">No linked tasks yet. Use “Add linked task” above.</p>`}
+          ${oppTimelineHtml(o)}
         </div>
 
         <div class="card card-pad">
@@ -2075,69 +2160,113 @@ function initOpportunityDetails() {
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="card card-pad mt-3" id="oppTaskBoard">
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <div class="section-title mb-0">Task board</div>
+        <span class="text-soft" style="font-size:12.5px">Tasks here are linked to this opportunity and mirror to the main board.</span>
+        <button class="btn btn-primary btn-sm ms-auto owner-only" id="oppTaskAdd"><i class="bi bi-plus-lg me-1"></i>Add task</button>
+      </div>
+      <div id="oppKanban" class="kanban"></div>
     </div>`;
+
+  // Opportunity's own kanban: the SAME task board, filtered to this
+  // opportunity's linked tasks. Adds prefill the link so a new task lands
+  // here AND on the main board; drag/edit/delete stay in sync via the store.
+  const oppBoard = document.getElementById('oppKanban');
+  const drawBoard = () => renderKanbanBoard(
+    oppBoard,
+    DB.getAll('tasks').filter(t => t.linkedOpportunity === o.name),
+    drawBoard,
+    { showLink: false }
+  );
+  drawBoard();
+  // Both "Add task" (board) and "Add linked task" (header) prefill the link,
+  // wired in JS so the opportunity name is never inlined into HTML (names can
+  // contain quotes/apostrophes that would break an inline onclick attribute).
+  const addLinked = () => openEntityModal('tasks', null, initOpportunityDetails, { linkedOpportunity: o.name });
+  const addBtn = document.getElementById('oppTaskAdd');
+  if (addBtn) addBtn.onclick = addLinked;
+  const addBtn2 = document.getElementById('oppAddLinkedTask');
+  if (addBtn2) addBtn2.onclick = addLinked;
+
+  // freshly injected owner-only controls need the current mode applied
+  try { Security.applyMode(); } catch {}
 }
 
-/* ---------- TASK BOARD (Kanban + drag & drop) ---------- */
-function initTasks() {
+/* ---------- TASK BOARD (Kanban + drag & drop) ----------
+   The board renderer is shared: the main Task Board page draws EVERY task,
+   while an opportunity's detail page draws the SAME board filtered to just
+   that opportunity's linked tasks. Both go through one set of helpers so a
+   status change (drag), edit or delete stays consistent and synced. */
+const TASK_COL_DOT = { 'To Do': 'var(--slate)', 'In Progress': 'var(--blue)', 'Waiting': 'var(--amber)', 'Review': 'var(--violet)', 'Completed': 'var(--green)', 'Cancelled': 'var(--red)' };
+
+/* One task card. showLink=false hides the "linked opportunity" chip (redundant
+   on an opportunity's own board where every card belongs to it). */
+function taskCardHtml(t, showLink = true) {
+  const d = daysUntil(t.dueDate);
+  // Cards are only draggable for the owner; visitors get a read-only board.
+  return `<div class="kcard" draggable="${Security.isOwner()}" data-id="${t.id}">
+    <div class="kc-top">
+      <div class="kc-title">${escapeHtml(t.title)}</div>
+      <button class="btn-sm btn btn-ghost ms-auto p-1 owner-only" style="line-height:1" onclick="openEntityModal('tasks','${t.id}')" title="Edit"><i class="bi bi-pencil"></i></button>
+      <button class="btn-sm btn btn-ghost p-1 owner-only text-danger" style="line-height:1" onclick="confirmDelete('tasks','${t.id}')" title="Delete"><i class="bi bi-trash3"></i></button>
+    </div>
+    <div class="kc-meta">
+      ${prioChip(t.priority)}
+      ${t.category ? `<span class="chip chip-outline">${escapeHtml(t.category)}</span>` : ''}
+      ${t.dueDate ? `<span class="kc-due ${d != null && d < 0 ? 'overdue' : ''}"><i class="bi bi-calendar3"></i>${fmtDate(t.dueDate)}</span>` : ''}
+    </div>
+    ${showLink && t.linkedOpportunity ? `<div class="mt-2"><span class="kc-link"><i class="bi bi-link-45deg"></i> ${escapeHtml(t.linkedOpportunity)}</span></div>` : ''}
+  </div>`;
+}
+
+/* Render a kanban into boardEl from a task list, then wire drag & drop.
+   redraw() is called after a status change so the board (and any mirror,
+   e.g. the main board when editing from an opportunity) stays current. */
+function renderKanbanBoard(boardEl, tasks, redraw, { showLink = true } = {}) {
+  if (!boardEl) return;
   const cols = CATS('taskStatuses');
-  const colDot = { 'To Do': 'var(--slate)', 'In Progress': 'var(--blue)', 'Waiting': 'var(--amber)', 'Review': 'var(--violet)', 'Completed': 'var(--green)', 'Cancelled': 'var(--red)' };
-  const board = document.getElementById('kanban');
-
-  const draw = () => {
-    const tasks = DB.getAll('tasks');
-    board.innerHTML = cols.map(col => {
-      const items = tasks.filter(t => (t.status || 'To Do') === col);
-      return `<div class="kcol" data-col="${escapeHtml(col)}">
-        <div class="kcol-head"><span class="k-dot" style="background:${colDot[col] || 'var(--slate)'}"></span><b>${escapeHtml(col)}</b><span class="k-count">${items.length}</span></div>
-        <div class="kcol-body" data-col="${escapeHtml(col)}">
-          ${items.map(t => taskCard(t)).join('')}
-        </div>
-      </div>`;
-    }).join('');
-    wireKanban();
-  };
-
-  const taskCard = (t) => {
-    const d = daysUntil(t.dueDate);
-    // Cards are only draggable for the owner; visitors get a read-only board.
-    return `<div class="kcard" draggable="${Security.isOwner()}" data-id="${t.id}">
-      <div class="kc-top">
-        <div class="kc-title">${escapeHtml(t.title)}</div>
-        <button class="btn-sm btn btn-ghost ms-auto p-1 owner-only" style="line-height:1" onclick="openEntityModal('tasks','${t.id}')" title="Edit"><i class="bi bi-pencil"></i></button>
-        <button class="btn-sm btn btn-ghost p-1 owner-only text-danger" style="line-height:1" onclick="confirmDelete('tasks','${t.id}')" title="Delete"><i class="bi bi-trash3"></i></button>
+  boardEl.innerHTML = cols.map(col => {
+    const items = tasks.filter(t => (t.status || 'To Do') === col);
+    return `<div class="kcol" data-col="${escapeHtml(col)}">
+      <div class="kcol-head"><span class="k-dot" style="background:${TASK_COL_DOT[col] || 'var(--slate)'}"></span><b>${escapeHtml(col)}</b><span class="k-count">${items.length}</span></div>
+      <div class="kcol-body" data-col="${escapeHtml(col)}">
+        ${items.map(t => taskCardHtml(t, showLink)).join('')}
       </div>
-      <div class="kc-meta">
-        ${prioChip(t.priority)}
-        ${t.category ? `<span class="chip chip-outline">${escapeHtml(t.category)}</span>` : ''}
-        ${t.dueDate ? `<span class="kc-due ${d != null && d < 0 ? 'overdue' : ''}"><i class="bi bi-calendar3"></i>${fmtDate(t.dueDate)}</span>` : ''}
-      </div>
-      ${t.linkedOpportunity ? `<div class="mt-2"><span class="kc-link"><i class="bi bi-link-45deg"></i> ${escapeHtml(t.linkedOpportunity)}</span></div>` : ''}
     </div>`;
-  };
+  }).join('');
+  wireKanbanBoard(boardEl, redraw);
+}
 
-  function wireKanban() {
-    let dragId = null;
-    board.querySelectorAll('.kcard').forEach(card => {
-      card.addEventListener('dragstart', () => { dragId = card.dataset.id; card.classList.add('dragging'); });
-      card.addEventListener('dragend', () => card.classList.remove('dragging'));
+function wireKanbanBoard(boardEl, redraw) {
+  let dragId = null;
+  boardEl.querySelectorAll('.kcard').forEach(card => {
+    card.addEventListener('dragstart', () => { dragId = card.dataset.id; card.classList.add('dragging'); });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  });
+  boardEl.querySelectorAll('.kcol-body').forEach(zone => {
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault(); zone.classList.remove('drag-over');
+      if (!dragId) return;
+      if (!Security.guard('move tasks')) return; // owner-only status change
+      const task = DB.get('tasks', dragId);
+      if (task && task.status !== zone.dataset.col) {
+        // route through upsert so cloud sync + productivity signals fire
+        DB.upsert('tasks', { id: task.id, status: zone.dataset.col });
+        toast(`Moved to “${zone.dataset.col}”.`, 'ok');
+      }
+      if (typeof redraw === 'function') redraw();
     });
-    board.querySelectorAll('.kcol-body').forEach(zone => {
-      zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
-      zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-      zone.addEventListener('drop', (e) => {
-        e.preventDefault(); zone.classList.remove('drag-over');
-        if (!dragId) return;
-        if (!Security.guard('move tasks')) return; // owner-only status change
-        const task = DB.get('tasks', dragId);
-        if (task && task.status !== zone.dataset.col) {
-          task.status = zone.dataset.col; DB.save(); toast(`Moved to “${zone.dataset.col}”.`, 'ok');
-        }
-        draw();
-      });
-    });
-  }
+  });
+}
 
+function initTasks() {
+  const board = document.getElementById('kanban');
+  const draw = () => renderKanbanBoard(board, DB.getAll('tasks'), draw);
   document.getElementById('taskAdd').onclick = () => openEntityModal('tasks', null, draw);
   draw();
 }
@@ -3733,13 +3862,16 @@ function signalsEnabled() { try { return localStorage.getItem('eon-signals') !==
 const OPP_LADDER = ['New', 'Researching', 'Preparing', 'Documents Ready', 'Shortlisted', 'Applied', 'Interview', 'Won'];
 const OPP_WIN = ['Won', 'Accepted', 'Completed'];
 const OPP_LOSS = ['Lost', 'Rejected', 'Irrelevant', 'Missed', 'Withdrawn'];
+// Any status containing "missed" (e.g. "Missed Deadline") is a deliberate,
+// resolved outcome — treat it as terminal-loss so EON never coaches/revives it.
+const isMissedStatus = (s) => /missed/i.test(s || '');
 function stageIndex(status) {
   if (OPP_WIN.includes(status)) return OPP_LADDER.length - 1;     // 7 = closed-won
-  if (OPP_LOSS.includes(status)) return -1;                       // terminal-loss
+  if (OPP_LOSS.includes(status) || isMissedStatus(status)) return -1;   // terminal-loss
   const i = OPP_LADDER.indexOf(status);
   return i >= 0 ? i : 0;
 }
-const isClosed = (s) => OPP_WIN.includes(s) || OPP_LOSS.includes(s);
+const isClosed = (s) => OPP_WIN.includes(s) || OPP_LOSS.includes(s) || isMissedStatus(s);
 const daysBetween = (a, b) => (Date.parse(b) - Date.parse(a)) / 86400000;
 
 /* ---- event sourcing: append state-changes to the stream ---- */
