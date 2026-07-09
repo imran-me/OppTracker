@@ -751,6 +751,33 @@ function priorityTone(p) {
   return ({ Critical: 'red', High: 'amber', Medium: 'blue', Low: 'slate' })[p] || 'slate';
 }
 
+/* Where a status sits in the "how much action is left" order, used to rank
+   the opportunities list (lower = higher up):
+     1 in-progress / pre-submission (New, Researching, Preparing, Documents Ready…)
+     2 submitted / awaiting a result (Applied, Waitlisted, Shortlisted, Interview)
+     3 closed-positive (Won, Accepted, Completed)
+     4 closed-negative (Rejected, Lost, Irrelevant, Withdrawn)
+     5 missed deadline (always the very bottom)
+   Known statuses map explicitly (so "Writing Completed" stays tier 1, not
+   mistaken for "Completed"); custom statuses fall back to keyword matching. */
+const OPP_STATUS_TIER = {
+  'new': 1, 'researching': 1, 'requirements collected': 1, 'preparing': 1,
+  'documents ready': 1, 'writing completed': 1, 'planning to apply': 1,
+  'considering': 1, 'need preparation': 1,
+  'applied': 2, 'submitted': 2, 'waitlisted': 2, 'shortlisted': 2, 'interview': 2,
+  'accepted': 3, 'won': 3, 'completed': 3, 'offer received': 3,
+  'rejected': 4, 'lost': 4, 'irrelevant': 4, 'withdrawn': 4, 'declined': 4,
+};
+function oppStatusRank(status) {
+  const s = (status || '').toLowerCase().trim();
+  if (/missed/.test(s)) return 5;
+  if (s in OPP_STATUS_TIER) return OPP_STATUS_TIER[s];
+  if (/reject|lost|irrelevant|withdraw|declin|abandon/.test(s)) return 4;
+  if (/won|accept|complete|offer|admitted|enrol/.test(s)) return 3;
+  if (/appl|submit|waitlist|shortlist|interview|review|defer/.test(s)) return 2;
+  return 1;
+}
+
 /* badge + priority pill builders */
 function statusChip(status) {
   const tone = statusTone(status);
@@ -1892,8 +1919,12 @@ function initOpportunities() {
       if (sort === 'name') return (a.name || '').localeCompare(b.name || '');
       if (sort === 'added') return (b.createdAt || '').localeCompare(a.createdAt || '');
       if (sort === 'priority') return (prioRank[a.priority] ?? 9) - (prioRank[b.priority] ?? 9);
-      // default: nearest deadline first, then newly added first as a tiebreaker
-      // (and for opportunities that have no deadline set at all).
+      // default: group by status tier so the ones still needing work
+      // (Researching, Preparing…) sit above already-submitted ones (Applied,
+      // Shortlisted…), then closed; within a tier, nearest deadline first,
+      // then newly added (and for opportunities with no deadline set).
+      const ra = oppStatusRank(a.status), rb = oppStatusRank(b.status);
+      if (ra !== rb) return ra - rb;
       const da = daysUntil(a.deadline), db = daysUntil(b.deadline);
       const byDeadline = (da == null ? 99999 : da) - (db == null ? 99999 : db);
       if (byDeadline !== 0) return byDeadline;

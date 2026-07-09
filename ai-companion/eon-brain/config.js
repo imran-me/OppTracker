@@ -24,7 +24,12 @@ export const BRAIN_CONFIG = {
   // ── Which entities actually have an actionable deadline. Everything else
   //    (achievements, projects, research, training, volunteering, contacts…)
   //    carries historical/award dates that must NEVER be nagged as deadlines. ──
-  deadlineEntities: ['opportunities', 'tasks', 'reminders'],
+  //    NOTE: `reminders` is intentionally NOT here. The app already has a
+  //    dedicated reminder system (dashboard calendar + list + the browser
+  //    notification watcher), so letting EON re-scan reminders as "deadlines"
+  //    only produced duplicate/stale nags (e.g. an old "…final submission
+  //    (overdue)" reminder). EON's own manual reminders still work separately.
+  deadlineEntities: ['opportunities', 'tasks'],
 
   // ── Deadline warning windows, in days (descending). ──
   windows: [7, 3, 1, 0],

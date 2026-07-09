@@ -15,7 +15,9 @@ const nowIso = () => new Date().toISOString();
 // Bump when the deadline/scan logic changes so a stale persisted brain
 // (saved by an older version) is force-recomputed instead of trusted.
 // v3: treat "Missed Deadline" as a resolved status — never nag about it.
-const BRAIN_VERSION = 3;
+// v4: reminders are no longer scanned as deadlines (see config.deadlineEntities)
+//     — bump to drop any stale reminder alerts a prior brain persisted.
+const BRAIN_VERSION = 4;
 
 export class Brain {
   constructor(cfg) {
