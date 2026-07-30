@@ -520,10 +520,10 @@ stay on file. There is a print view that drops the app chrome and prints the she
 ### Three levels
 
 ```
-Department            Software & Development
-└─ Main task          WS-01 · Master Payroll        ← priority, timeline, roles, delivery
-   └─ Phase           Days 1–5 · the spine          ← a heading that groups sub-tasks
-      └─ Sub-task     D1 · 9 payroll tables …       ← dates, people, assignee, report point
+Department            e.g. Software & Development
+└─ Main task          WS-01 · <a workstream>     ← priority, timeline, roles, delivery
+   └─ Phase           Week 1 · groundwork        ← a heading that groups sub-tasks
+      └─ Sub-task     D1 · <a single line>       ← dates, people, assignee, report point
 ```
 
 A **phase** is just a label on a sub-task, so there is one editable list per main task rather
@@ -560,6 +560,36 @@ Ticks are keyed by each sub-task's own id, so they survive editing, re-phrasing,
 phases and reordering. Deleting a main task or a sub-task clears its ticks from **every** month —
 including all boxes of a repeat-count row — so nothing lingers in the counts. Shrinking a repeat
 count drops the ticks of the removed boxes.
+
+### Operating rhythm — the recurring gates
+
+The rhythm is a list of gates you run every week, ticked once per week. **+** on the heading adds
+one; ✏️/🗑 on each row edits or deletes it. A gate carries **when** (a weekday, or *Daily*), a
+**time**, a **kind**, **who runs it**, and what actually happens.
+
+- **Kinds** are colour-tagged — Plan, Stand-up, Audit, Delivery, Review, Sync — so the week's shape
+  reads at a glance.
+- **Rows due today are flagged.** A gate whose day matches today's weekday (or is *Daily*) gets a
+  gold `today` marker and a tinted row.
+- **Week columns follow the month on screen.** A month spanning five or six calendar weeks gets
+  five or six boxes instead of a fixed four, so a week's tick can't fall off the end.
+- Each row shows its own **completion bar** for the month, and the section header totals it.
+
+### Month-end close — what must be true
+
+**+** adds an item; ✏️/🗑 edit or delete. Each item carries an **area**, an **owner**, **when**,
+a note, and a **critical** flag.
+
+- Items are **grouped by area** (Finance, People, Operations, Marketing, Digital, Other) with a
+  per-area tally.
+- **Criticals gate the month.** While any critical item is open the panel says the month cannot be
+  called closed and marks those rows with a red edge; once they are all signed off it flips to a
+  green confirmation.
+
+> Both sections used to be plain data — cadence as `[day, gate, what]` tuples, close as bare
+> strings — with tick keys built from the **gate text** and the **array position**. So renaming a
+> gate or reordering the close list silently orphaned its ticks. Both are now records with stable
+> ids, and existing ticks were carried across on upgrade.
 
 ### ⚠️ Why the sheet's content is NOT in this repository
 
@@ -641,6 +671,17 @@ month. Sub-tasks also gained a day marker, a repeat count (for "10 videos" style
 tally) and a buffer flag. `data/work-seed.json` was reshaped to the same layout, with priorities
 set so the colour rules show on import._
 
+_2026-07-30 — **Operating rhythm and Month-end close are now editable and carry real information.**
+Both were static data with no add/edit/delete, and their tick keys came from the gate text and the
+array index — so renaming a gate or reordering the close list silently orphaned its ticks. Both are
+now id-based records. Gates gained a kind (colour-tagged), a time, an owner, a due-today flag and a
+per-gate completion bar, and the week columns now follow the month on screen (4, 5 or 6 weeks
+instead of a fixed 4). Close items gained an area to group under, an owner, a when, a note and a
+**critical** flag that gates the month — the panel refuses to call the month closed while any
+critical item is open. `data/work-seed.json` regenerated in the current schema: 3 departments,
+6 main tasks, 94 sub-tasks across 15 phases (186 tickable with repeat counts), 6 rhythm gates and
+9 close items._
+
 ---
 
 ## Credits
@@ -648,3 +689,4 @@ set so the colour rules show on import._
 Fonts: Plus Jakarta Sans, Inter, JetBrains Mono (Google Fonts).
 UI: Bootstrap 5 + Bootstrap Icons.
 Everything else: handwritten, commented Vanilla JS.
+

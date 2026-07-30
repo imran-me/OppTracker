@@ -6005,7 +6005,45 @@ const WorkDB = {
       this._didWkFold = n > 0;
       if (n) console.info(`[Work Sheet] folded ${n} checklist item(s) into sub-tasks.`);
     }
-    d._wkV = 3;
+    /* ---- Rhythm + close rows become records with stable ids ----
+       Both were plain data — cadence as [day, gate, what] tuples, close as bare
+       strings — so neither could be edited or deleted, and their tick keys were
+       built from the gate TEXT and the array POSITION. That meant renaming a
+       gate or reordering the close list silently orphaned its ticks. Ids fix
+       both, and the extra fields make each row carry real information. */
+    const oldCadence = d.cadence.some(r => Array.isArray(r));
+    const oldClose = d.close.some(r => typeof r === 'string');
+    if (oldCadence || oldClose) {
+      const remap = {};
+      if (oldCadence) {
+        d.cadence = d.cadence.map(r => {
+          if (!Array.isArray(r)) return r;
+          const [day, gate, what] = r;
+          const row = { id: uid(), day: day || '', gate: gate || '', what: what || '' };
+          for (let n = 1; n <= 6; n++) remap[`cad.${gate}.${n}`] = `cad.${row.id}.${n}`;
+          return row;
+        });
+      }
+      if (oldClose) {
+        d.close = d.close.map((c, i) => {
+          if (typeof c !== 'string') return c;
+          const row = { id: uid(), title: c };
+          remap[`close.${i}`] = `close.${row.id}`;
+          return row;
+        });
+      }
+      Object.values(d.checks).forEach(month => {
+        Object.keys(month).forEach(k => {
+          if (remap[k]) { month[remap[k]] = month[k]; delete month[k]; }
+        });
+      });
+      this._didWkFold = true;
+    }
+    // belt-and-braces: never render a row without an id
+    d.cadence.forEach(r => { if (r && !r.id) r.id = uid(); });
+    d.close.forEach(r => { if (r && !r.id) r.id = uid(); });
+
+    d._wkV = 4;
     return d;
   },
   loadLocal() {
@@ -6168,6 +6206,41 @@ function wkNextId() {
   return 'WS-' + String(next).padStart(2, '0');
 }
 
+/* ---- Operating-rhythm helpers ----
+   How many week columns the month on screen actually has: a month can span 4, 5
+   or 6 calendar weeks, and a 4-box row would quietly lose a week's tick. */
+function wkWeeksInMonth() {
+  const t = Date.parse('1 ' + String(_wkMonth || ''));
+  if (isNaN(t)) return 4;
+  const d = new Date(t);
+  const days = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const lead = new Date(d.getFullYear(), d.getMonth(), 1).getDay();
+  return Math.min(6, Math.max(4, Math.ceil((days + lead) / 7)));
+}
+function wkGateKeys(row, weeks) {
+  return Array.from({ length: weeks || wkWeeksInMonth() }, (_, i) => `cad.${row.id}.${i + 1}`);
+}
+/* Gate kinds — a coloured tag so the rhythm reads at a glance. */
+const WK_GATE_KINDS = [
+  { key: 'Plan', tone: 'blue', ico: 'calendar-check-fill' },
+  { key: 'Stand-up', tone: 'slate', ico: 'people-fill' },
+  { key: 'Audit', tone: 'amber', ico: 'search' },
+  { key: 'Delivery', tone: 'gold', ico: 'send-fill' },
+  { key: 'Review', tone: 'violet', ico: 'clipboard-data-fill' },
+  { key: 'Sync', tone: 'green', ico: 'arrow-repeat' }
+];
+function wkGateKind(k) { return WK_GATE_KINDS.find(x => x.key === k) || null; }
+/* Is this gate due today? Matches a weekday name, or anything daily. */
+function wkGateDueToday(dayLabel) {
+  const s = String(dayLabel || '').toLowerCase();
+  if (!s) return false;
+  if (/daily|every day/.test(s)) return true;
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long' }).toLowerCase();
+  return s.includes(today);
+}
+/* Areas the month-end close groups under. */
+const WK_CLOSE_CATS = ['Finance', 'People', 'Operations', 'Marketing', 'Digital', 'Other'];
+
 /* Priority drives the card's left rule: High red · Medium amber · Low green.
    Without a priority the card falls back to its delegation mode (navy/gold). */
 const WK_PRIORITIES = [
@@ -6295,21 +6368,59 @@ function drawWork() {
       <button type="button" class="btn btn-ghost btn-sm" data-wkact="dept-add"><i class="bi bi-plus-lg me-1"></i>Add department</button>
     </div>`;
 
-  const cadence = d.cadence.length ? `
-    <div class="wk-dept"><h2>Operating rhythm</h2><div class="wk-rule"></div><span class="wk-cnt">weekly gates</span></div>
-    <div class="wk-panel">
-      <table class="wk-table">
-        <thead><tr><th style="width:104px">Day</th><th style="width:154px">Gate</th><th>What happens</th><th style="width:132px">Week 1–4</th></tr></thead>
+  /* ---- Operating rhythm: recurring gates, ticked once per week ----
+     Week boxes are sized to the month actually on screen (a 5- or 6-week month
+     gets 5 or 6), rows due today are flagged, and each gate carries who runs it,
+     when, and what kind of gate it is. */
+  const weeks = wkWeeksInMonth();
+  const cadDone = d.cadence.reduce((a, r) => a + wkGateKeys(r, weeks).filter(wkOn).length, 0);
+  const cadTotal = d.cadence.length * weeks;
+  const cadence = `
+    <div class="wk-dept">
+      <h2>Operating rhythm</h2>
+      <button type="button" class="wk-add" data-wkact="cad-add" title="Add a gate"><i class="bi bi-plus-lg"></i></button>
+      <div class="wk-rule"></div>
+      <span class="wk-cnt">${d.cadence.length} gate${d.cadence.length === 1 ? '' : 's'} · ${cadDone}/${cadTotal} this month</span>
+    </div>
+    ${d.cadence.length ? `<div class="wk-panel">
+      <table class="wk-table wk-cad">
+        <thead><tr>
+          <th style="width:120px">Day</th><th style="width:180px">Gate</th><th>What happens</th>
+          <th style="width:${Math.max(120, weeks * 22 + 40)}px">Week 1–${weeks}</th><th style="width:64px"></th>
+        </tr></thead>
         <tbody>${d.cadence.map(row => {
-          const [day, gate, what] = row;
-          return `<tr><td class="wk-d">${wkText(day)}</td><td><strong>${wkText(gate)}</strong></td><td>${wkText(what)}</td>
-            <td><div class="wk-ticks">${[1, 2, 3, 4].map(n => {
-              const k = `cad.${gate}.${n}`;
-              return `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="Week ${n}">`;
-            }).join('')}</div></td></tr>`;
+          const kind = wkGateKind(row.kind);
+          const keys = wkGateKeys(row, weeks);
+          const n = keys.filter(wkOn).length;
+          const due = wkGateDueToday(row.day);
+          return `<tr class="${due ? 'is-due' : ''}">
+            <td class="wk-d">
+              ${wkText(row.day || '—')}
+              ${row.time ? `<span class="wk-gate-time">${wkText(row.time)}</span>` : ''}
+              ${due ? '<span class="wk-due-flag">today</span>' : ''}
+            </td>
+            <td>
+              <strong>${wkText(row.gate)}</strong>
+              ${kind ? `<span class="wk-kind t-${kind.tone}"><i class="bi bi-${kind.ico}"></i>${kind.key}</span>` : ''}
+              ${row.owner ? `<span class="wk-gate-owner">${wkText(row.owner)}</span>` : ''}
+            </td>
+            <td>${wkText(row.what)}</td>
+            <td>
+              <div class="wk-ticks">${keys.map((k, i) =>
+                `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="Week ${i + 1}">`).join('')}</div>
+              <div class="wk-gate-bar"><i style="width:${weeks ? n / weeks * 100 : 0}%"></i></div>
+            </td>
+            <td><div class="wk-row-tools">
+              <button type="button" data-wkact="cad-edit" data-id="${escapeHtml(row.id)}" title="Edit gate"><i class="bi bi-pencil"></i></button>
+              <button type="button" class="del" data-wkact="cad-del" data-id="${escapeHtml(row.id)}" title="Delete gate"><i class="bi bi-trash3"></i></button>
+            </div></td>
+          </tr>`;
         }).join('')}</tbody>
       </table>
-    </div>` : '';
+    </div>` : `<button type="button" class="wk-dept-empty" data-wkact="cad-add">
+        <i class="bi bi-plus-circle-dotted"></i>
+        <span><b>No gates yet</b>Add the rhythm you run the month on — stand-ups, audits, delivery points</span>
+      </button>`}`;
 
   const bossRows = d.workstreams.filter(w => w.boss);
   const register = bossRows.length ? `
@@ -6327,10 +6438,57 @@ function drawWork() {
       </table>
     </div>` : '';
 
-  const close = d.close.length ? `
-    <div class="wk-dept"><h2>Month-end close</h2><div class="wk-rule"></div><span class="wk-cnt">last 2 working days</span></div>
-    <div class="wk-panel"><div class="wk-closebox">${d.close.map((c, i) => `
-      <label class="wk-item"><input type="checkbox" data-k="close.${i}" ${wkOn('close.' + i) ? 'checked' : ''}><span class="wk-txt">${wkText(c)}</span></label>`).join('')}</div></div>` : '';
+  /* ---- Month-end close: grouped by area, criticals called out ---- */
+  const closeDone = d.close.filter(c => wkOn('close.' + c.id)).length;
+  const closeCrit = d.close.filter(c => c.critical);
+  const critLeft = closeCrit.filter(c => !wkOn('close.' + c.id)).length;
+  const closeGroups = (() => {
+    const order = [], byCat = new Map();
+    d.close.forEach(c => {
+      const k = c.category || '';
+      if (!byCat.has(k)) { byCat.set(k, []); order.push(k); }
+      byCat.get(k).push(c);
+    });
+    return order.map(k => [k, byCat.get(k)]);
+  })();
+  const close = `
+    <div class="wk-dept">
+      <h2>Month-end close</h2>
+      <button type="button" class="wk-add" data-wkact="close-add" title="Add a close item"><i class="bi bi-plus-lg"></i></button>
+      <div class="wk-rule"></div>
+      <span class="wk-cnt">${closeDone}/${d.close.length} done${critLeft ? ` · ${critLeft} critical left` : (closeCrit.length ? ' · criticals clear' : '')}</span>
+    </div>
+    ${d.close.length ? `<div class="wk-panel">
+      ${critLeft ? `<div class="wk-close-warn"><i class="bi bi-exclamation-triangle-fill"></i>
+        The month cannot be called closed — <b>${critLeft}</b> critical item${critLeft === 1 ? '' : 's'} still open.</div>`
+        : (closeCrit.length ? `<div class="wk-close-ok"><i class="bi bi-check-circle-fill"></i>
+        Every critical item is signed off.</div>` : '')}
+      <div class="wk-closebox">
+        ${closeGroups.map(([cat, items]) => `
+          ${cat ? `<div class="wk-close-cat">${wkText(cat)}<span>${items.filter(c => wkOn('close.' + c.id)).length}/${items.length}</span></div>` : ''}
+          ${items.map(c => {
+            const on = wkOn('close.' + c.id);
+            return `<div class="wk-close-row ${on ? 'is-done' : ''} ${c.critical ? 'is-crit' : ''}">
+              <label class="wk-sub-tick"><input type="checkbox" data-k="close.${escapeHtml(c.id)}" ${on ? 'checked' : ''} aria-label="Done"></label>
+              <div class="wk-close-body">
+                <div class="wk-close-title">${wkText(c.title)}${c.critical ? '<span class="wk-crit">critical</span>' : ''}</div>
+                ${(c.owner || c.due || c.notes) ? `<div class="wk-sb-meta">
+                  ${c.owner ? `<span class="wk-sb-bit"><i class="bi bi-person-fill"></i>${wkText(c.owner)}</span>` : ''}
+                  ${c.due ? `<span class="wk-sb-bit report"><i class="bi bi-calendar3"></i>${wkText(c.due)}</span>` : ''}
+                  ${c.notes ? `<span class="wk-sb-bit"><i class="bi bi-sticky"></i>${wkText(c.notes)}</span>` : ''}
+                </div>` : ''}
+              </div>
+              <div class="wk-row-tools">
+                <button type="button" data-wkact="close-edit" data-id="${escapeHtml(c.id)}" title="Edit"><i class="bi bi-pencil"></i></button>
+                <button type="button" class="del" data-wkact="close-del" data-id="${escapeHtml(c.id)}" title="Delete"><i class="bi bi-trash3"></i></button>
+              </div>
+            </div>`;
+          }).join('')}`).join('')}
+      </div>
+    </div>` : `<button type="button" class="wk-dept-empty" data-wkact="close-add">
+        <i class="bi bi-plus-circle-dotted"></i>
+        <span><b>No close list yet</b>Add what must be true before the month can be called closed</span>
+      </button>`}`;
 
   host.innerHTML = head + `
     <div class="wk">
@@ -6486,7 +6644,7 @@ function wkPaint() {
     (byDept[k] = byDept[k] || [0, 0])[0] += done;
     byDept[k][1] += keys.length;
   });
-  d.close.forEach((_, i) => { all[1]++; if (wkOn('close.' + i)) all[0]++; });
+  d.close.forEach(c => { all[1]++; if (wkOn('close.' + c.id)) all[0]++; });
 
   const pc = (a) => (a && a[1] ? Math.round(a[0] / a[1] * 100) : 0);
   const set = (key, text, width) => {
@@ -6538,6 +6696,12 @@ function wireWork() {
     else if (wkact === 'sub-del') workDeleteSub(ws, sub);
     else if (wkact === 'dept-add') openWorkDeptModal(null);
     else if (wkact === 'dept-edit') openWorkDeptModal(dept);
+    else if (wkact === 'cad-add') openWorkGateModal(null);
+    else if (wkact === 'cad-edit') openWorkGateModal(btn.dataset.id);
+    else if (wkact === 'cad-del') workDeleteRow('cadence', btn.dataset.id);
+    else if (wkact === 'close-add') openWorkCloseModal(null);
+    else if (wkact === 'close-edit') openWorkCloseModal(btn.dataset.id);
+    else if (wkact === 'close-del') workDeleteRow('close', btn.dataset.id);
   };
 
   const month = document.getElementById('wkMonth');
@@ -6762,7 +6926,7 @@ function openWorkSubModal(wsId, subId, phasePrefill) {
         <input name="title" value="${escapeHtml(rec.title || '')}" placeholder="e.g. Draft the payroll spec"></div>
 
       <div class="field"><label>Phase / group</label>
-        <input name="phase" list="wkPhaseList" value="${escapeHtml(rec.phase || '')}" placeholder="e.g. Days 1–5 · the spine">
+        <input name="phase" list="wkPhaseList" value="${escapeHtml(rec.phase || '')}" placeholder="e.g. Week 1 · groundwork">
         <datalist id="wkPhaseList">${phases.map(p => `<option value="${escapeHtml(p)}"></option>`).join('')}</datalist>
         <small class="text-faint" style="font-size:11px">Groups it under a heading. Type a new name to start a new phase.</small></div>
       <div class="field"><label>Day marker</label>
@@ -6774,7 +6938,7 @@ function openWorkSubModal(wsId, subId, phasePrefill) {
       <div class="field"><label>With whom</label><input name="withWhom" value="${escapeHtml(rec.withWhom || '')}" placeholder="Who you work on it with"></div>
       <div class="field"><label>Assign to</label><input name="assignTo" value="${escapeHtml(rec.assignTo || '')}" placeholder="Who it is handed to"></div>
       <div class="field"><label>Report up on</label><input type="date" name="reportOn" value="${escapeHtml(rec.reportOn || '')}">
-        <small class="text-faint" style="font-size:11px">When this gets reported to the Chairman / boss.</small></div>
+        <small class="text-faint" style="font-size:11px">When this gets reported up.</small></div>
       <div class="field"><label>Repeat count</label>
         <input type="number" name="ticks" min="0" max="60" step="1" value="${rec.ticks || ''}" placeholder="e.g. 10">
         <small class="text-faint" style="font-size:11px">For "do this N times" rows — shows N boxes. Leave blank for one.</small></div>
@@ -6822,8 +6986,118 @@ function openWorkSubModal(wsId, subId, phasePrefill) {
   };
 }
 
+/* ---- Operating-rhythm gate: add / edit ---- */
+function openWorkGateModal(id) {
+  if (!Security.guard(id ? 'edit this gate' : 'add a gate')) return;
+  const rows = WorkDB.data.cadence;
+  const row = id ? rows.find(r => r.id === id) : null;
+  if (id && !row) return;
+  const rec = row || { day: '', gate: '', what: '', owner: '', time: '', kind: '' };
+  const DAYS = ['Daily', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+    'Every 2nd day', 'Every 3rd day', 'Weekly', 'Fortnightly', 'Month-end'];
+
+  const { modal } = wkModal(
+    row ? 'Edit gate' : 'Add gate', 'arrow-repeat',
+    `<form id="wkGateForm" class="form-grid">
+      <div class="field col-span"><label>Gate name <span class="req">*</span></label>
+        <input name="gate" value="${escapeHtml(rec.gate || '')}" placeholder="e.g. Mid-week audit"></div>
+      <div class="field"><label>When</label>
+        <input name="day" list="wkDayList" value="${escapeHtml(rec.day || '')}" placeholder="e.g. Tuesday">
+        <datalist id="wkDayList">${DAYS.map(x => `<option value="${x}"></option>`).join('')}</datalist>
+        <small class="text-faint" style="font-size:11px">A weekday name (or "Daily") flags the row on the day it is due.</small></div>
+      <div class="field"><label>Time</label><input name="time" value="${escapeHtml(rec.time || '')}" placeholder="e.g. 10:00"></div>
+      <div class="field"><label>Kind</label><select name="kind">
+        <option value="">— none —</option>
+        ${WK_GATE_KINDS.map(k => `<option ${rec.kind === k.key ? 'selected' : ''}>${k.key}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Who runs it</label><input name="owner" value="${escapeHtml(rec.owner || '')}" placeholder="Who is in the room"></div>
+      <div class="field col-span"><label>What happens</label>
+        <textarea name="what" rows="3" placeholder="What actually gets done at this gate">${escapeHtml(rec.what || '')}</textarea></div>
+    </form>`,
+    `${row ? '<button type="button" class="btn btn-danger-soft me-auto" id="wkGateDel"><i class="bi bi-trash me-1"></i>Delete</button>' : ''}
+     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+     <button type="button" class="btn btn-primary" id="wkGateSave"><i class="bi bi-check-lg me-1"></i>${row ? 'Save changes' : 'Add gate'}</button>`
+  );
+
+  const del = document.getElementById('wkGateDel');
+  if (del) del.onclick = () => { modal.hide(); workDeleteRow('cadence', id); };
+
+  document.getElementById('wkGateSave').onclick = () => {
+    const f = document.getElementById('wkGateForm');
+    const gate = wkVal(f, 'gate');
+    if (!gate) { toast('Name the gate first.', 'err'); f.elements.namedItem('gate').focus(); return; }
+    const patch = { gate, day: wkVal(f, 'day'), time: wkVal(f, 'time'), kind: wkVal(f, 'kind'), owner: wkVal(f, 'owner'), what: wkVal(f, 'what') };
+    if (row) Object.assign(row, patch);
+    else rows.push(Object.assign({ id: uid() }, patch));
+    WorkDB.saveNow(); modal.hide(); drawWork();
+    toast(row ? 'Gate updated.' : 'Gate added.', 'ok');
+  };
+}
+
+/* ---- Month-end close item: add / edit ---- */
+function openWorkCloseModal(id) {
+  if (!Security.guard(id ? 'edit this close item' : 'add a close item')) return;
+  const rows = WorkDB.data.close;
+  const row = id ? rows.find(r => r.id === id) : null;
+  if (id && !row) return;
+  const rec = row || { title: '', owner: '', category: '', due: '', critical: false, notes: '' };
+
+  const { modal } = wkModal(
+    row ? 'Edit close item' : 'Add close item', 'clipboard-check-fill',
+    `<form id="wkCloseForm" class="form-grid">
+      <div class="field col-span"><label>What must be true <span class="req">*</span></label>
+        <input name="title" value="${escapeHtml(rec.title || '')}" placeholder="e.g. Payroll month closed and reconciled to GL"></div>
+      <div class="field"><label>Area</label><select name="category">
+        <option value="">— none —</option>
+        ${WK_CLOSE_CATS.map(c => `<option ${rec.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+      </select><small class="text-faint" style="font-size:11px">Groups the list under headings.</small></div>
+      <div class="field"><label>Owner</label><input name="owner" value="${escapeHtml(rec.owner || '')}" placeholder="Who signs it off"></div>
+      <div class="field col-span"><label>When</label>
+        <input name="due" value="${escapeHtml(rec.due || '')}" placeholder="e.g. Last working day">
+        <small class="text-faint" style="font-size:11px">Free text — "last 2 working days", a date, whatever fits.</small></div>
+      <div class="field col-span"><label class="switch-row">
+        <input type="checkbox" name="critical" ${rec.critical ? 'checked' : ''}>
+        <span>Critical — the month cannot be called closed until this is done</span></label></div>
+      <div class="field col-span"><label>Note</label>
+        <input name="notes" value="${escapeHtml(rec.notes || '')}" placeholder="Anything to remember"></div>
+    </form>`,
+    `${row ? '<button type="button" class="btn btn-danger-soft me-auto" id="wkCloseDel"><i class="bi bi-trash me-1"></i>Delete</button>' : ''}
+     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+     <button type="button" class="btn btn-primary" id="wkCloseSave"><i class="bi bi-check-lg me-1"></i>${row ? 'Save changes' : 'Add item'}</button>`
+  );
+
+  const del = document.getElementById('wkCloseDel');
+  if (del) del.onclick = () => { modal.hide(); workDeleteRow('close', id); };
+
+  document.getElementById('wkCloseSave').onclick = () => {
+    const f = document.getElementById('wkCloseForm');
+    const title = wkVal(f, 'title');
+    if (!title) { toast('Say what must be true.', 'err'); f.elements.namedItem('title').focus(); return; }
+    const patch = { title, category: wkVal(f, 'category'), owner: wkVal(f, 'owner'), due: wkVal(f, 'due'), critical: wkVal(f, 'critical'), notes: wkVal(f, 'notes') };
+    if (row) Object.assign(row, patch);
+    else rows.push(Object.assign({ id: uid() }, patch));
+    WorkDB.saveNow(); modal.hide(); drawWork();
+    toast(row ? 'Close item updated.' : 'Close item added.', 'ok');
+  };
+}
+
 /* ---- Deletes. Ticks for the removed rows are cleared from every month so
    they cannot linger in the counts. ---- */
+/* Shared delete for the flat rhythm / close lists. */
+function workDeleteRow(list, id) {
+  const label = list === 'cadence' ? 'gate' : 'close item';
+  if (!Security.guard(`delete this ${label}`)) return;
+  const rows = WorkDB.data[list] || [];
+  const row = rows.find(r => r.id === id);
+  if (!row) return;
+  if (!confirm(`Delete the ${label} "${row.gate || row.title}"?`)) return;
+  wkForgetKeys(list === 'cadence' ? wkGateKeys(row, 6) : ['close.' + id]);
+  WorkDB.data[list] = rows.filter(r => r.id !== id);
+  WorkDB.saveNow();
+  drawWork();
+  toast(`${label[0].toUpperCase() + label.slice(1)} deleted.`, 'ok');
+}
+
 function wkForgetKeys(keys) {
   const all = WorkDB.data.checks || {};
   Object.keys(all).forEach(month => keys.forEach(k => { delete all[month][k]; }));

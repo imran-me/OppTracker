@@ -2222,6 +2222,72 @@ label.wk-item.buf .wk-day { color: var(--wk-mute); }
 .wk-table td.wk-d { font-family: var(--wk-mono); font-size: 11px; color: var(--wk-panel); white-space: nowrap; }
 .wk-table tr:last-child td { border-bottom: none; }
 .wk-closebox { padding: 6px 14px 14px; }
+
+/* ---- Operating rhythm ---- */
+.wk-cad td { vertical-align: middle; }
+.wk-cad tr.is-due { background: #FBF7EA; }
+.wk-cad tr.is-due td.wk-d { color: #8A6C15; font-weight: 700; }
+.wk-gate-time { display: block; font-size: 9.5px; color: var(--wk-mute); letter-spacing: .06em; }
+.wk-due-flag {
+  display: inline-block; margin-top: 4px; font-family: var(--wk-mono); font-size: 8.5px;
+  letter-spacing: .14em; text-transform: uppercase; font-weight: 700;
+  background: var(--wk-gold); color: #fff; padding: 2px 6px; border-radius: 2px;
+}
+.wk-kind {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 7px;
+  font-family: var(--wk-mono); font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase;
+  font-weight: 700; padding: 2px 6px; border-radius: 2px; border: 1px solid; white-space: nowrap;
+}
+.wk-kind.t-blue   { color: #24457F; border-color: #B9CBEC; background: #EDF3FF; }
+.wk-kind.t-slate  { color: #4A5768; border-color: #CFD6E0; background: #F2F5F9; }
+.wk-kind.t-amber  { color: #8A6C15; border-color: #E4CE94; background: #FBF5E4; }
+.wk-kind.t-gold   { color: #fff;    border-color: var(--wk-gold); background: var(--wk-gold); }
+.wk-kind.t-violet { color: #573089; border-color: #CDBCE8; background: #F4EEFC; }
+.wk-kind.t-green  { color: #175942; border-color: #B3D8C8; background: #EAF6F0; }
+.wk-gate-owner { display: block; margin-top: 5px; font-family: var(--wk-mono); font-size: 9.5px; color: var(--wk-mute); }
+.wk-gate-bar { height: 3px; background: var(--wk-line-soft); margin-top: 7px; position: relative; overflow: hidden; }
+.wk-gate-bar > i { position: absolute; inset: 0 auto 0 0; background: var(--wk-gold); width: 0; transition: width .3s ease; }
+
+/* row edit/delete inside a table */
+.wk-row-tools { display: flex; gap: 2px; justify-content: flex-end; }
+.wk-row-tools button {
+  border: 1px solid transparent; background: transparent; color: var(--wk-mute);
+  width: 24px; height: 24px; border-radius: 4px; cursor: pointer; padding: 0;
+  display: grid; place-items: center; font-size: 11px; transition: all .15s;
+}
+.wk-row-tools button:hover { border-color: var(--wk-panel); color: var(--wk-panel); background: #fff; }
+.wk-row-tools button.del:hover { border-color: #A3261F; color: #A3261F; }
+
+/* ---- Month-end close ---- */
+.wk-close-warn, .wk-close-ok {
+  display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600;
+  padding: 10px 14px; border-bottom: 1px solid var(--wk-line-soft);
+}
+.wk-close-warn { color: #A3261F; background: #FBEEED; }
+.wk-close-ok { color: #175942; background: #EAF6F0; }
+.wk-close-cat {
+  display: flex; align-items: center; gap: 8px; margin: 14px 0 4px;
+  font-family: var(--wk-mono); font-size: 9px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--wk-mute); border-bottom: 1px solid var(--wk-line-soft); padding-bottom: 5px;
+}
+.wk-close-cat:first-child { margin-top: 4px; }
+.wk-close-cat span { margin-left: auto; font-variant-numeric: tabular-nums; }
+.wk-close-row {
+  display: flex; gap: 11px; align-items: flex-start; padding: 9px 2px;
+  border-bottom: 1px dotted var(--wk-line-soft);
+}
+.wk-close-row:last-child { border-bottom: none; }
+.wk-close-row:hover { background: #F7F9FC; }
+.wk-close-body { flex: 1; min-width: 0; }
+.wk-close-title { font-size: 13.5px; color: var(--wk-ink); }
+.wk-close-row.is-done .wk-close-title { color: var(--wk-mute); text-decoration: line-through; text-decoration-color: var(--wk-line); }
+.wk-close-row.is-crit:not(.is-done) { box-shadow: inset 3px 0 0 #C0392B; padding-left: 10px; }
+.wk-crit {
+  margin-left: 8px; font-family: var(--wk-mono); font-size: 8.5px; letter-spacing: .14em;
+  text-transform: uppercase; font-weight: 700; color: #fff; background: #C0392B;
+  padding: 2px 6px; border-radius: 2px; vertical-align: 1px;
+}
+.wk-close-row.is-done .wk-crit { background: var(--wk-line); color: var(--wk-mute); }
 .wk-ticks { display: inline-flex; flex-wrap: wrap; gap: 2px; }
 .wk-tick {
   appearance: none; -webkit-appearance: none; width: 14px; height: 14px;
