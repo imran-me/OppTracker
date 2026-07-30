@@ -5270,14 +5270,49 @@ function wkDefaultMonth() {
 
 let _wkMonth = null;          // the month label currently on screen
 
-/* Every tickable key for a workstream (a `ticks` item expands to N keys). */
+/* Every tickable key for a workstream: rich sub-tasks/phases first, then the
+   imported checklist (a `ticks` item expands to N keys).
+   Sub-task keys use the sub-task's own id, so ticks survive reordering and
+   editing — unlike the imported checklist, which is keyed by position. */
 function wkItemKeys(ws) {
   const out = [];
+  (ws.subtasks || []).forEach(st => out.push(`${ws.id}.sub.${st.id}`));
   (ws.groups || []).forEach((g, gi) => (g.items || []).forEach((it, ii) => {
     if (it.ticks) { for (let t = 0; t < it.ticks; t++) out.push(`${ws.id}.${gi}.${ii}.${t}`); }
     else out.push(`${ws.id}.${gi}.${ii}`);
   }));
   return out;
+}
+
+/* Next free workstream id — WS-01, WS-02, … */
+function wkNextId() {
+  const nums = (WorkDB.data.workstreams || [])
+    .map(w => parseInt(String(w.id || '').replace(/\D+/g, ''), 10))
+    .filter(n => !isNaN(n));
+  const next = (nums.length ? Math.max(...nums) : 0) + 1;
+  return 'WS-' + String(next).padStart(2, '0');
+}
+
+/* Priority drives the card's left rule: High red · Medium amber · Low green.
+   Without a priority the card falls back to its delegation mode (navy/gold). */
+const WK_PRIORITIES = [
+  { key: 'High', tone: 'red', ico: 'exclamation-triangle-fill' },
+  { key: 'Medium', tone: 'amber', ico: 'dash-circle-fill' },
+  { key: 'Low', tone: 'green', ico: 'check-circle-fill' }
+];
+function wkPriority(p) { return WK_PRIORITIES.find(x => x.key === p) || null; }
+
+/* Find a workstream / sub-task by id. */
+function wkFind(wsId) { return (WorkDB.data.workstreams || []).find(w => w.id === wsId); }
+function wkFindSub(wsId, subId) {
+  const ws = wkFind(wsId);
+  return ws && (ws.subtasks || []).find(s => s.id === subId);
+}
+/* A short "12 Aug → 20 Aug" style range (either end may be missing). */
+function wkRange(from, to) {
+  const a = from ? fmtDate(from) : '', b = to ? fmtDate(to) : '';
+  if (a && b) return a === b ? a : `${a} → ${b}`;
+  return a || b || '';
 }
 /* The tick map for the month on screen (created on first write). */
 function wkChecks() {
@@ -5329,8 +5364,8 @@ function drawWork() {
       <input type="file" id="wkFile" accept="application/json" hidden>
     </div>`;
 
-  // ---- Empty state: nothing imported yet on any device ----
-  if (!d.workstreams.length) {
+  // ---- Empty state: nothing imported AND no departments to build under ----
+  if (!d.workstreams.length && !d.depts.length) {
     host.innerHTML = head + `
       <div class="card card-pad wk-empty">
         <div class="e-ico"><i class="bi bi-briefcase"></i></div>
@@ -5345,20 +5380,38 @@ function drawWork() {
           store and then syncs to every device you sign in on — you only do this once.
         </p>
         <button class="btn btn-primary" id="wkImport2"><i class="bi bi-upload me-1"></i>Import sheet</button>
+        <button class="btn btn-ghost" data-wkact="dept-add"><i class="bi bi-plus-lg me-1"></i>Or start from scratch</button>
       </div>`;
     wireWork();
     return;
   }
 
+  /* Every department is rendered, INCLUDING empty ones — otherwise a department
+     you have not put work under yet is invisible and unreachable, with no way to
+     add its first main task. Each header carries its own + button. */
   const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams', tag: '' }];
   const board = depts.map(dep => {
     const list = d.workstreams.filter(w => (w.dept || '') === (dep.key || ''));
-    if (!list.length) return '';
     return `
-      <div class="wk-dept"><h2>${wkText(dep.label)}</h2><div class="wk-rule"></div>
-        <span class="wk-cnt">${list.length} workstream${list.length === 1 ? '' : 's'}${dep.tag ? ' · ' + wkText(dep.tag) : ''}</span></div>
-      ${list.map((ws, i) => wkWorkstreamHtml(ws, i === 0 && dep === depts[0])).join('')}`;
-  }).join('');
+      <div class="wk-dept">
+        <h2>${wkText(dep.label)}</h2>
+        <button type="button" class="wk-add" data-wkact="task-add" data-dept="${escapeHtml(dep.key || '')}"
+          title="Add a main task under ${escapeHtml(dep.label)}"><i class="bi bi-plus-lg"></i></button>
+        <button type="button" class="wk-dept-edit" data-wkact="dept-edit" data-dept="${escapeHtml(dep.key || '')}"
+          title="Rename or remove this department"><i class="bi bi-three-dots"></i></button>
+        <div class="wk-rule"></div>
+        <span class="wk-cnt">${list.length} workstream${list.length === 1 ? '' : 's'}${dep.tag ? ' · ' + wkText(dep.tag) : ''}</span>
+      </div>
+      ${list.length
+        ? list.map((ws, i) => wkWorkstreamHtml(ws, i === 0 && dep === depts[0])).join('')
+        : `<button type="button" class="wk-dept-empty" data-wkact="task-add" data-dept="${escapeHtml(dep.key || '')}">
+             <i class="bi bi-plus-circle-dotted"></i>
+             <span><b>Nothing here yet</b>Add the first main task for ${wkText(dep.label)}</span>
+           </button>`}`;
+  }).join('') + `
+    <div class="wk-dept-add-row">
+      <button type="button" class="btn btn-ghost btn-sm" data-wkact="dept-add"><i class="bi bi-plus-lg me-1"></i>Add department</button>
+    </div>`;
 
   const cadence = d.cadence.length ? `
     <div class="wk-dept"><h2>Operating rhythm</h2><div class="wk-rule"></div><span class="wk-cnt">weekly gates</span></div>
@@ -5441,29 +5494,86 @@ function drawWork() {
   wkPaint();
 }
 
-/* One workstream card. `open` auto-expands the first one. */
+/* One sub-task / phase row: tick + title, then its own timeline, the people on
+   it, who it is assigned to, and when it gets reported up. */
+function wkSubtaskHtml(ws, st) {
+  const k = `${ws.id}.sub.${st.id}`;
+  const on = wkOn(k);
+  const period = wkRange(st.from, st.to);
+  const bits = [
+    period ? `<span class="wk-sb-bit"><i class="bi bi-calendar3"></i>${wkText(period)}</span>` : '',
+    st.withWhom ? `<span class="wk-sb-bit"><i class="bi bi-people-fill"></i>${wkText(st.withWhom)}</span>` : '',
+    st.assignTo ? `<span class="wk-sb-bit assign"><i class="bi bi-person-check-fill"></i>${wkText(st.assignTo)}</span>` : '',
+    st.reportOn ? `<span class="wk-sb-bit report"><i class="bi bi-send-fill"></i>Report ${wkText(fmtDate(st.reportOn))}</span>` : ''
+  ].filter(Boolean).join('');
+  return `
+  <div class="wk-sub ${on ? 'is-done' : ''}">
+    <label class="wk-sub-tick">
+      <input type="checkbox" data-k="${escapeHtml(k)}" ${on ? 'checked' : ''} aria-label="Done">
+    </label>
+    <div class="wk-sub-body">
+      <div class="wk-sub-title">${wkText(st.title)}</div>
+      ${bits ? `<div class="wk-sb-meta">${bits}</div>` : ''}
+      ${st.notes ? `<div class="wk-sb-note">${wkText(st.notes)}</div>` : ''}
+    </div>
+    <div class="wk-sub-tools">
+      <button type="button" data-wkact="sub-edit" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Edit phase"><i class="bi bi-pencil"></i></button>
+      <button type="button" class="del" data-wkact="sub-del" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Delete phase"><i class="bi bi-trash3"></i></button>
+    </div>
+  </div>`;
+}
+
+/* One workstream (main task) card. `open` auto-expands the first one. */
 function wkWorkstreamHtml(ws, open) {
   const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
   const pct = keys.length ? done / keys.length * 100 : 0;
+  const pr = wkPriority(ws.priority);
+  const period = wkRange(ws.start, ws.end);
+  const subs = ws.subtasks || [];
   return `
-  <details class="wk-ws" data-mode="${escapeHtml(ws.mode || 'self')}" ${open ? 'open' : ''}>
+  <details class="wk-ws" data-mode="${escapeHtml(ws.mode || 'self')}" ${pr ? `data-priority="${pr.key}"` : ''} ${open ? 'open' : ''}>
     <summary>
       <div class="wk-ws-row">
         <div class="wk-ws-id">${wkText(ws.id)}</div>
         <div class="wk-ws-main">
           <div class="wk-ws-title">${wkText(ws.title)}</div>
           <div class="wk-ws-meta">
+            ${pr ? `<span class="wk-prio t-${pr.tone}"><i class="bi bi-${pr.ico}"></i>${pr.key}</span>` : ''}
             ${ws.modeLabel ? `<span class="wk-stamp mode ${ws.mode === 'deleg' ? 'deleg' : ''}">${wkText(ws.modeLabel)}</span>` : ''}
             ${ws.boss ? `<span class="wk-stamp seal">Delivery</span>` : ''}
+            ${period ? `<span class="wk-stamp"><i class="bi bi-calendar3 me-1"></i>${wkText(period)}</span>` : ''}
+            ${ws.myRole ? `<span class="wk-stamp">Me: ${wkText(ws.myRole)}</span>` : ''}
+            ${ws.devRole ? `<span class="wk-stamp">Dev: ${wkText(ws.devRole)}</span>` : ''}
+            ${ws.withWhom ? `<span class="wk-stamp">With: ${wkText(ws.withWhom)}</span>` : ''}
             ${ws.owner ? `<span class="wk-stamp">${wkText(ws.owner)}</span>` : ''}
           </div>
           <div class="wk-bar" style="margin-top:11px"><i style="width:${pct}%" data-wkbar="${escapeHtml(ws.id)}"></i></div>
         </div>
         <div class="wk-ws-num"><b data-wkn="${escapeHtml(ws.id)}">${done}/${keys.length}</b><span>items closed</span></div>
+        <div class="wk-ws-tools">
+          <button type="button" data-wkact="task-edit" data-ws="${escapeHtml(ws.id)}" title="Edit main task"><i class="bi bi-pencil"></i></button>
+          <button type="button" class="del" data-wkact="task-del" data-ws="${escapeHtml(ws.id)}" title="Delete main task"><i class="bi bi-trash3"></i></button>
+        </div>
       </div>
     </summary>
     <div class="wk-ws-body">
+      ${ws.description ? `<p class="wk-desc">${wkText(ws.description)}</p>` : ''}
       ${ws.note ? `<p class="wk-note">${wkText(ws.note)}</p>` : ''}
+      ${ws.boss && ws.bossItem ? `<p class="wk-note deliver"><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ` · <i>${wkText(ws.bossDue)}</i>` : ''}</p>` : ''}
+
+      <!-- Phases & sub-tasks (the rich layer) -->
+      <div class="wk-grp">
+        <div class="wk-grp-h">
+          <span>Phases &amp; sub-tasks</span><span class="wk-rule"></span>
+          <span class="wk-n">${subs.length}</span>
+          <button type="button" class="wk-add-sub" data-wkact="sub-add" data-ws="${escapeHtml(ws.id)}" title="Add a phase or sub-task"><i class="bi bi-plus-lg"></i>Add phase</button>
+        </div>
+        ${subs.length
+          ? `<div class="wk-subs">${subs.map(st => wkSubtaskHtml(ws, st)).join('')}</div>`
+          : `<p class="wk-sub-empty">No phases yet. Break this down — each one gets its own dates, people and report point.</p>`}
+      </div>
+
+      <!-- Imported checklist, kept exactly as it was -->
       ${(ws.groups || []).map((g, gi) => `
         <div class="wk-grp">
           <div class="wk-grp-h"><span>${wkText(g.name)}</span><span class="wk-rule"></span><span class="wk-n">${(g.items || []).length}</span></div>
@@ -5489,7 +5599,7 @@ function wkWorkstreamHtml(ws, open) {
 /* Update every counter + bar from the current tick state (no re-render). */
 function wkPaint() {
   const d = WorkDB.data;
-  if (!d || !d.workstreams.length) return;
+  if (!d) return;
   const all = [0, 0], byDept = {};
   d.workstreams.forEach(ws => {
     const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
@@ -5538,6 +5648,24 @@ function wireWork() {
     if (stamp) stamp.textContent = 'Saved ' + new Date().toLocaleString('en-GB');
   };
 
+  /* One delegated click handler for every add / edit / delete control. Buttons
+     live inside <summary>, so the default toggle is suppressed for them. */
+  host.onclick = (e) => {
+    const btn = e.target.closest('[data-wkact]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const { wkact, ws, sub, dept } = btn.dataset;
+    if (wkact === 'task-add') openWorkTaskModal(null, dept);
+    else if (wkact === 'task-edit') openWorkTaskModal(ws);
+    else if (wkact === 'task-del') workDeleteTask(ws);
+    else if (wkact === 'sub-add') openWorkSubModal(ws, null);
+    else if (wkact === 'sub-edit') openWorkSubModal(ws, sub);
+    else if (wkact === 'sub-del') workDeleteSub(ws, sub);
+    else if (wkact === 'dept-add') openWorkDeptModal(null);
+    else if (wkact === 'dept-edit') openWorkDeptModal(dept);
+  };
+
   const month = document.getElementById('wkMonth');
   if (month) month.onchange = () => {
     _wkMonth = month.value.trim() || wkDefaultMonth();
@@ -5580,6 +5708,241 @@ function wireWork() {
     drawWork();
     toast('Month cleared.', 'ok');
   };
+}
+
+/* ==========================================================
+   WORK SHEET EDITORS — departments, main tasks, phases
+   ----------------------------------------------------------
+   Dedicated private modals (the generic openEntityModal is wired to the
+   PUBLIC store, so it cannot be reused here). Every one is owner-guarded
+   and writes through WorkDB.saveNow().
+   ========================================================== */
+
+/* Shared modal scaffold: returns { modalEl, modal, close } */
+function wkModal(title, icon, bodyHtml, footerHtml) {
+  document.getElementById('wkEditModal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="wkEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="d-flex align-items-center gap-2">
+            <span class="stat-ico"><i class="bi bi-${icon}"></i></span>
+            <h5 class="modal-title">${escapeHtml(title)}</h5>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">${bodyHtml}</div>
+        <div class="modal-footer">${footerHtml}</div>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('wkEditModal');
+  const modal = new bootstrap.Modal(modalEl);
+  modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+  return { modalEl, modal };
+}
+const wkVal = (form, name) => {
+  const el = form.elements.namedItem(name);
+  return el ? (el.type === 'checkbox' ? el.checked : String(el.value || '').trim()) : '';
+};
+
+/* ---- Department: add / rename / remove ---- */
+function openWorkDeptModal(key) {
+  if (!Security.guard('manage departments')) return;
+  const isEdit = key != null && key !== undefined && WorkDB.data.depts.some(d => (d.key || '') === key);
+  const dep = isEdit ? WorkDB.data.depts.find(d => (d.key || '') === key) : { key: '', label: '', tag: '' };
+  const inUse = isEdit ? WorkDB.data.workstreams.filter(w => (w.dept || '') === key).length : 0;
+
+  const { modalEl, modal } = wkModal(
+    isEdit ? 'Department' : 'Add department', 'diagram-2',
+    `<form id="wkDeptForm" class="form-grid">
+      <div class="field col-span"><label>Department name <span class="req">*</span></label>
+        <input name="label" value="${escapeHtml(dep.label || '')}" placeholder="e.g. Operations &amp; Admin"></div>
+      <div class="field col-span"><label>Sub-label</label>
+        <input name="tag" value="${escapeHtml(dep.tag || '')}" placeholder="e.g. my own hands"></div>
+      ${isEdit && inUse ? `<div class="field col-span"><p class="text-faint" style="font-size:12.5px;margin:0">
+        <i class="bi bi-info-circle me-1"></i>${inUse} main task${inUse === 1 ? '' : 's'} sit under this department, so it cannot be removed until they are moved or deleted.</p></div>` : ''}
+    </form>`,
+    `${isEdit && !inUse ? '<button type="button" class="btn btn-danger-soft me-auto" id="wkDeptDel"><i class="bi bi-trash me-1"></i>Remove</button>' : ''}
+     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+     <button type="button" class="btn btn-primary" id="wkDeptSave"><i class="bi bi-check-lg me-1"></i>${isEdit ? 'Save' : 'Add department'}</button>`
+  );
+
+  const del = document.getElementById('wkDeptDel');
+  if (del) del.onclick = () => {
+    if (!confirm(`Remove the "${dep.label}" department?`)) return;
+    WorkDB.data.depts = WorkDB.data.depts.filter(d => (d.key || '') !== key);
+    WorkDB.saveNow(); modal.hide(); drawWork();
+    toast('Department removed.', 'ok');
+  };
+
+  document.getElementById('wkDeptSave').onclick = () => {
+    const f = document.getElementById('wkDeptForm');
+    const label = wkVal(f, 'label');
+    if (!label) { toast('Give the department a name.', 'err'); f.elements.namedItem('label').focus(); return; }
+    const tag = wkVal(f, 'tag');
+    if (isEdit) {
+      dep.label = label; dep.tag = tag;
+    } else {
+      // a stable slug key, kept unique; workstreams reference it
+      let k = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'dept';
+      while (WorkDB.data.depts.some(d => d.key === k)) k += '-2';
+      WorkDB.data.depts.push({ key: k, label, tag });
+    }
+    WorkDB.saveNow(); modal.hide(); drawWork();
+    toast(isEdit ? 'Department updated.' : 'Department added.', 'ok');
+  };
+}
+
+/* ---- Main task (workstream): add / edit ---- */
+function openWorkTaskModal(wsId, deptKey) {
+  if (!Security.guard(wsId ? 'edit this task' : 'add a task')) return;
+  const isEdit = !!wsId;
+  const ws = isEdit ? wkFind(wsId) : null;
+  if (isEdit && !ws) return;
+  const rec = ws || { dept: deptKey || (WorkDB.data.depts[0] || {}).key || '', priority: 'Medium' };
+  const depts = WorkDB.data.depts.length ? WorkDB.data.depts : [{ key: '', label: 'Workstreams' }];
+
+  const { modal } = wkModal(
+    isEdit ? `Edit ${ws.id}` : 'New main task', 'clipboard-check',
+    `<form id="wkTaskForm" class="form-grid">
+      <div class="field col-span"><label>Title <span class="req">*</span></label>
+        <input name="title" value="${escapeHtml(rec.title || '')}" placeholder="What is this workstream?"></div>
+      <div class="field col-span"><label>Description</label>
+        <textarea name="description" rows="3" placeholder="What it covers, and what done looks like">${escapeHtml(rec.description || '')}</textarea></div>
+
+      <div class="field"><label>Department</label><select name="dept">
+        ${depts.map(d => `<option value="${escapeHtml(d.key || '')}" ${(rec.dept || '') === (d.key || '') ? 'selected' : ''}>${escapeHtml(d.label)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Priority</label><select name="priority">
+        <option value="">— none —</option>
+        ${WK_PRIORITIES.map(p => `<option ${rec.priority === p.key ? 'selected' : ''}>${p.key}</option>`).join('')}
+      </select><small class="text-faint" style="font-size:11px">Colours the card's left rule: High red · Medium amber · Low green.</small></div>
+
+      <div class="field"><label>Timeline — from</label><input type="date" name="start" value="${escapeHtml(rec.start || '')}"></div>
+      <div class="field"><label>Timeline — to</label><input type="date" name="end" value="${escapeHtml(rec.end || '')}"></div>
+
+      <div class="field"><label>My role</label><input name="myRole" value="${escapeHtml(rec.myRole || '')}" placeholder="e.g. Spec + monitoring"></div>
+      <div class="field"><label>Dev role</label><input name="devRole" value="${escapeHtml(rec.devRole || '')}" placeholder="e.g. Full build"></div>
+      <div class="field col-span"><label>Working with / for</label>
+        <input name="withWhom" value="${escapeHtml(rec.withWhom || '')}" placeholder="Who you do this with, or who it is for"></div>
+
+      <div class="field col-span"><label class="switch-row">
+        <input type="checkbox" name="boss" ${rec.boss ? 'checked' : ''}>
+        <span>This is a delivery I report up — show it in the delivery register</span></label></div>
+      <div class="field"><label>Deliverable</label><input name="bossItem" value="${escapeHtml(rec.bossItem || '')}" placeholder="What gets handed over"></div>
+      <div class="field"><label>Due / gate</label><input name="bossDue" value="${escapeHtml(rec.bossDue || '')}" placeholder="e.g. Thursday gate"></div>
+
+      <div class="field col-span"><label>Note</label>
+        <textarea name="note" rows="2" placeholder="Anything to keep front of mind">${escapeHtml(rec.note || '')}</textarea></div>
+    </form>`,
+    `<button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+     <button type="button" class="btn btn-primary" id="wkTaskSave"><i class="bi bi-check-lg me-1"></i>${isEdit ? 'Save changes' : 'Add main task'}</button>`
+  );
+
+  document.getElementById('wkTaskSave').onclick = () => {
+    const f = document.getElementById('wkTaskForm');
+    const title = wkVal(f, 'title');
+    if (!title) { toast('Give the task a title.', 'err'); f.elements.namedItem('title').focus(); return; }
+    const start = wkVal(f, 'start'), end = wkVal(f, 'end');
+    if (start && end && end < start) { toast('The end date is before the start date.', 'err'); return; }
+    const patch = {
+      title, description: wkVal(f, 'description'), dept: wkVal(f, 'dept'),
+      priority: wkVal(f, 'priority'), start, end,
+      myRole: wkVal(f, 'myRole'), devRole: wkVal(f, 'devRole'), withWhom: wkVal(f, 'withWhom'),
+      boss: wkVal(f, 'boss'), bossItem: wkVal(f, 'bossItem'), bossDue: wkVal(f, 'bossDue'),
+      note: wkVal(f, 'note')
+    };
+    if (isEdit) {
+      Object.assign(ws, patch);
+    } else {
+      WorkDB.data.workstreams.push(Object.assign({
+        id: wkNextId(), mode: patch.devRole ? 'deleg' : 'self', subtasks: [], groups: []
+      }, patch));
+    }
+    WorkDB.saveNow(); modal.hide(); drawWork();
+    toast(isEdit ? 'Task updated.' : 'Main task added.', 'ok');
+  };
+}
+
+/* ---- Phase / sub-task: add / edit ---- */
+function openWorkSubModal(wsId, subId) {
+  if (!Security.guard(subId ? 'edit this phase' : 'add a phase')) return;
+  const ws = wkFind(wsId);
+  if (!ws) return;
+  const st = subId ? wkFindSub(wsId, subId) : null;
+  if (subId && !st) return;
+  const rec = st || {};
+
+  const { modal } = wkModal(
+    `${st ? 'Edit' : 'Add'} phase · ${ws.id}`, 'signpost-split',
+    `<form id="wkSubForm" class="form-grid">
+      <div class="field col-span"><label>Phase / sub-task <span class="req">*</span></label>
+        <input name="title" value="${escapeHtml(rec.title || '')}" placeholder="e.g. Draft the payroll spec"></div>
+      <div class="field"><label>From</label><input type="date" name="from" value="${escapeHtml(rec.from || '')}"></div>
+      <div class="field"><label>To</label><input type="date" name="to" value="${escapeHtml(rec.to || '')}"></div>
+      <div class="field"><label>With whom</label><input name="withWhom" value="${escapeHtml(rec.withWhom || '')}" placeholder="Who you work on it with"></div>
+      <div class="field"><label>Assign to</label><input name="assignTo" value="${escapeHtml(rec.assignTo || '')}" placeholder="Who it is handed to"></div>
+      <div class="field col-span"><label>Report up on</label><input type="date" name="reportOn" value="${escapeHtml(rec.reportOn || '')}">
+        <small class="text-faint" style="font-size:11px">The date this gets reported to the Chairman / boss.</small></div>
+      <div class="field col-span"><label>Notes</label>
+        <textarea name="notes" rows="2" placeholder="Detail, blockers, acceptance">${escapeHtml(rec.notes || '')}</textarea></div>
+    </form>`,
+    `${st ? '<button type="button" class="btn btn-danger-soft me-auto" id="wkSubDel"><i class="bi bi-trash me-1"></i>Delete</button>' : ''}
+     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+     <button type="button" class="btn btn-primary" id="wkSubSave"><i class="bi bi-check-lg me-1"></i>${st ? 'Save changes' : 'Add phase'}</button>`
+  );
+
+  const del = document.getElementById('wkSubDel');
+  if (del) del.onclick = () => { modal.hide(); workDeleteSub(wsId, subId); };
+
+  document.getElementById('wkSubSave').onclick = () => {
+    const f = document.getElementById('wkSubForm');
+    const title = wkVal(f, 'title');
+    if (!title) { toast('Name the phase first.', 'err'); f.elements.namedItem('title').focus(); return; }
+    const from = wkVal(f, 'from'), to = wkVal(f, 'to');
+    if (from && to && to < from) { toast('"To" is before "From".', 'err'); return; }
+    const patch = { title, from, to, withWhom: wkVal(f, 'withWhom'), assignTo: wkVal(f, 'assignTo'), reportOn: wkVal(f, 'reportOn'), notes: wkVal(f, 'notes') };
+    if (st) Object.assign(st, patch);
+    else (ws.subtasks = ws.subtasks || []).push(Object.assign({ id: uid() }, patch));
+    WorkDB.saveNow(); modal.hide(); drawWork();
+    toast(st ? 'Phase updated.' : 'Phase added.', 'ok');
+  };
+}
+
+/* ---- Deletes. Ticks for the removed rows are cleared from every month so
+   they cannot linger in the counts. ---- */
+function wkForgetKeys(keys) {
+  const all = WorkDB.data.checks || {};
+  Object.keys(all).forEach(month => keys.forEach(k => { delete all[month][k]; }));
+}
+function workDeleteTask(wsId) {
+  if (!Security.guard('delete this task')) return;
+  const ws = wkFind(wsId);
+  if (!ws) return;
+  const n = (ws.subtasks || []).length;
+  if (!confirm(`Delete "${ws.title}"?${n ? ` Its ${n} phase${n === 1 ? '' : 's'} go too.` : ''} This cannot be undone.`)) return;
+  wkForgetKeys(wkItemKeys(ws).concat('boss.' + ws.id));
+  WorkDB.data.workstreams = WorkDB.data.workstreams.filter(w => w.id !== wsId);
+  WorkDB.saveNow();
+  drawWork();
+  toast('Main task deleted.', 'ok');
+}
+function workDeleteSub(wsId, subId) {
+  if (!Security.guard('delete this phase')) return;
+  const ws = wkFind(wsId);
+  const st = wkFindSub(wsId, subId);
+  if (!ws || !st) return;
+  if (!confirm(`Delete the phase "${st.title}"?`)) return;
+  wkForgetKeys([`${ws.id}.sub.${subId}`]);
+  ws.subtasks = (ws.subtasks || []).filter(s => s.id !== subId);
+  WorkDB.saveNow();
+  drawWork();
+  toast('Phase deleted.', 'ok');
 }
 
 /* Import the sheet content from a JSON file. Existing ticks are preserved

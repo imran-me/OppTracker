@@ -461,11 +461,37 @@ A monthly **control sheet** at **`work.html`**, opened from the **briefcase icon
 bar. The icon is `.owner-only` (invisible to visitors) and the page is redirect-protected via
 `Security.PROTECTED_PAGES`, so a visitor who guesses the URL lands on the login page.
 
-It renders workstreams as collapsible cards with grouped checklists, per-workstream progress,
-department roll-ups, a weekly **cadence** grid (weeks 1–4), a **delivery register** of sign-offs,
-and a **month-end close** list. Ticks are stored **per month**, so each month starts clean while
-previous months stay on file. There is a print view that drops the app chrome and prints the
-sheet alone.
+It renders workstreams as collapsible cards with per-workstream progress, department roll-ups, a
+weekly **cadence** grid (weeks 1–4), a **delivery register** of sign-offs, and a **month-end
+close** list. Ticks are stored **per month**, so each month starts clean while previous months
+stay on file. There is a print view that drops the app chrome and prints the sheet alone.
+
+### Building the sheet in the browser
+
+Nothing needs editing by hand — departments, main tasks and phases are all managed on the page:
+
+| Control | Where | What it does |
+|---------|-------|--------------|
+| **+** | on every department heading | new **main task** under that department |
+| **⋯** | on every department heading | rename the department, or remove it once it is empty |
+| **Add department** | below the board | a new department (empty ones still render, so they are reachable) |
+| **Add phase** | on the *Phases & sub-tasks* heading inside a card | new sub-task under that main task |
+| ✏️ / 🗑 | main-task head and each phase row | edit or delete, with a confirm on deletes |
+
+**Main task** carries a title, description, department, **priority**, a from/to timeline, *my
+role*, *dev role*, who it is worked on with, and an optional delivery (deliverable + gate) that
+puts it in the delivery register.
+
+**Phase / sub-task** carries a title, its own **from → to** dates, who it is worked on **with**,
+who it is **assigned to**, the date it gets **reported up**, and notes.
+
+**Priority colours the card's left rule** — **High red · Medium amber · Low green**. With no
+priority set, the rule falls back to the delegation mode (navy for self-build, gold for
+delegated).
+
+Deleting a main task or a phase also clears its ticks from **every** month, so nothing lingers in
+the counts. Phase ticks are keyed by the phase's own id, so they survive edits and reordering —
+the imported checklist is keyed by position, so reordering *that* would shift its ticks.
 
 ### ⚠️ Why the sheet's content is NOT in this repository
 
@@ -520,6 +546,14 @@ were the band total); untagged spend is no longer silently assumed Discretionary
 _2026-07-30 — Tidied the Work Sheet masthead: the eyebrow now carries the group only, the long
 strapline is gone, and an **identity card** (name, role, company + photo) sits on the right. The
 card reads the live profile — set the photo on the **Profile** page and it appears here._
+
+_2026-07-30 — Work Sheet became fully editable in the browser: **+** on each department heading
+adds a main task (title, description, priority, timeline, my role, dev role, who it is with,
+delivery), with a richer **phase / sub-task** layer underneath each one (from → to, with whom,
+assigned to, report-up date, notes). Edit + delete on both, and department add / rename / remove.
+**Priority now drives the card's left rule — High red, Medium amber, Low green.** Empty
+departments render so they can be built into, and deleting anything clears its ticks from every
+month._
 
 ---
 

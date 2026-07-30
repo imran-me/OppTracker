@@ -1721,10 +1721,104 @@ body.reveal-on .pf-section.in-view { opacity: 1; transform: none; }
 .wk-rule { flex: 1; height: 1px; background: var(--wk-line); }
 .wk-cnt { font-family: var(--wk-mono); font-size: 10px; color: var(--wk-mute); letter-spacing: .1em; }
 
-/* Workstream card */
+/* Section-head controls: + adds a main task, ⋯ edits the department */
+.wk-dept .wk-add, .wk-dept .wk-dept-edit {
+  border: 1px solid var(--wk-line); background: var(--wk-card); color: var(--wk-panel);
+  width: 24px; height: 24px; border-radius: 4px; display: grid; place-items: center;
+  cursor: pointer; flex: none; padding: 0; line-height: 1; transition: all .15s;
+}
+.wk-dept .wk-add { color: var(--wk-gold); font-size: 13px; }
+.wk-dept .wk-add:hover { background: var(--wk-gold); border-color: var(--wk-gold); color: #fff; }
+.wk-dept .wk-dept-edit { font-size: 11px; color: var(--wk-mute); }
+.wk-dept .wk-dept-edit:hover { border-color: var(--wk-panel); color: var(--wk-panel); }
+
+/* An empty department still shows, with a way in */
+.wk-dept-empty {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: var(--wk-card); border: 1px dashed var(--wk-line); border-left: 3px solid var(--wk-line);
+  padding: 16px; margin-bottom: 12px; cursor: pointer; color: var(--wk-mute); transition: all .15s;
+}
+.wk-dept-empty:hover { border-color: var(--wk-gold); color: var(--wk-panel); }
+.wk-dept-empty i { font-size: 20px; color: var(--wk-gold); }
+.wk-dept-empty span { display: block; font-size: 12.5px; }
+.wk-dept-empty b { display: block; font-family: var(--wk-serif); font-size: 15px; color: var(--wk-ink); font-weight: 400; }
+.wk-dept-add-row { margin: 22px 0 4px; display: flex; justify-content: center; }
+
+/* Workstream card. PRIORITY owns the left rule — High red, Medium amber, Low
+   green — falling back to the delegation mode when no priority is set. */
 details.wk-ws { background: var(--wk-card); border: 1px solid var(--wk-line); border-left: 3px solid var(--wk-panel); margin-bottom: 12px; }
 details.wk-ws[data-mode="deleg"] { border-left-color: var(--wk-gold); }
 details.wk-ws[data-mode="co"] { border-left-color: var(--wk-panel-2); }
+details.wk-ws[data-priority="High"]   { border-left-color: #C0392B; }
+details.wk-ws[data-priority="Medium"] { border-left-color: #D9A11B; }
+details.wk-ws[data-priority="Low"]    { border-left-color: #1C6B50; }
+/* the rule reads as a solid bar, so widen it a touch when a priority is set */
+details.wk-ws[data-priority] { border-left-width: 4px; }
+
+/* Priority pill in the card head */
+.wk-prio {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--wk-mono); font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+  font-weight: 700; padding: 3px 8px; border-radius: 2px; border: 1px solid;
+}
+.wk-prio.t-red    { color: #fff; background: #C0392B; border-color: #C0392B; }
+.wk-prio.t-amber  { color: #6b4d05; background: #F5D77E; border-color: #D9A11B; }
+.wk-prio.t-green  { color: #fff; background: #1C6B50; border-color: #1C6B50; }
+
+/* Edit / delete on the main task, tucked to the right of the summary row */
+.wk-ws-tools { display: flex; gap: 4px; align-items: flex-start; padding-top: 2px; flex: none; }
+.wk-ws-tools button, .wk-sub-tools button {
+  border: 1px solid transparent; background: transparent; color: var(--wk-mute);
+  width: 26px; height: 26px; border-radius: 4px; cursor: pointer; padding: 0;
+  display: grid; place-items: center; font-size: 12px; transition: all .15s;
+}
+.wk-ws-tools button:hover, .wk-sub-tools button:hover { border-color: var(--wk-panel); color: var(--wk-panel); background: #fff; }
+.wk-ws-tools button.del:hover, .wk-sub-tools button.del:hover { border-color: var(--wk-flag, #A3261F); color: #A3261F; }
+
+/* Main-task description + delivery note */
+.wk-desc { font-size: 13.5px; color: var(--wk-ink); margin: 10px 0 0; white-space: pre-wrap; }
+.wk-note.deliver { border-left-color: var(--wk-gold); color: var(--wk-panel); }
+
+/* Phases & sub-tasks */
+.wk-add-sub {
+  margin-left: 8px; border: 1px solid var(--wk-gold); background: #FBF5E4; color: #8A6C15;
+  font-family: var(--wk-mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+  font-weight: 700; padding: 4px 8px; border-radius: 2px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; flex: none; transition: all .15s;
+}
+.wk-add-sub:hover { background: var(--wk-gold); color: #fff; }
+.wk-subs { margin-top: 4px; }
+.wk-sub {
+  display: flex; gap: 11px; align-items: flex-start; padding: 10px 2px;
+  border-bottom: 1px solid var(--wk-line-soft);
+}
+.wk-sub:last-child { border-bottom: none; }
+.wk-sub:hover { background: #F7F9FC; }
+.wk-sub-tick { margin: 0; flex: none; padding-top: 2px; }
+.wk-sub-tick input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; width: 15px; height: 15px;
+  border: 1.5px solid var(--wk-panel); border-radius: 3px; cursor: pointer;
+  background: #fff; position: relative; display: block;
+}
+.wk-sub-tick input[type="checkbox"]:checked { background: var(--wk-panel); border-color: var(--wk-panel); }
+.wk-sub-tick input[type="checkbox"]:checked::after {
+  content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+  border: 2px solid #fff; border-top: 0; border-left: 0; transform: rotate(42deg);
+}
+.wk-sub-body { flex: 1; min-width: 0; }
+.wk-sub-title { font-size: 13.5px; font-weight: 600; color: var(--wk-ink); }
+.wk-sub.is-done .wk-sub-title { color: var(--wk-mute); text-decoration: line-through; text-decoration-color: var(--wk-line); }
+.wk-sb-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.wk-sb-bit {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--wk-mono); font-size: 9.5px; letter-spacing: .06em;
+  color: var(--wk-mute); background: #F1F4F8; border-radius: 2px; padding: 3px 7px; white-space: nowrap;
+}
+.wk-sb-bit.assign { background: #EEF3FF; color: #2A4A85; }
+.wk-sb-bit.report { background: #FBF5E4; color: #8A6C15; }
+.wk-sb-note { font-size: 12px; color: var(--wk-mute); margin-top: 6px; }
+.wk-sub-tools { display: flex; gap: 2px; flex: none; }
+.wk-sub-empty { font-size: 12.5px; color: var(--wk-mute); margin: 10px 0 2px; }
 details.wk-ws > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: block; }
 details.wk-ws > summary::-webkit-details-marker { display: none; }
 .wk-ws-row { display: flex; gap: 14px; align-items: flex-start; }
@@ -1818,6 +1912,16 @@ label.wk-item.buf .wk-day { color: var(--wk-mute); }
   .wk-ws-num { text-align: left; min-width: 0; }
   .wk-topbar .fin-actions { margin-left: 0; }
   .wk-month-input { width: 120px; }
+  /* edit/delete drop to their own line rather than squeezing the title */
+  .wk-ws-tools { width: 100%; justify-content: flex-end; padding-top: 0; }
+  .wk-sub { gap: 9px; }
+  .wk-sub-tools { flex-direction: column; }
+  .wk-sb-bit { font-size: 9px; padding: 2px 6px; }
+  /* department head: name + controls on line one, count underneath */
+  .wk-dept { flex-wrap: wrap; }
+  .wk-dept .wk-rule { order: 9; width: 100%; flex: none; }
+  .wk-cnt { order: 10; }
+  .wk-add-sub { margin-left: auto; }
 }
 
 /* Print: the sheet only — app chrome, controls and EON drop away */
