@@ -56,6 +56,8 @@ npx serve .
 ├── categories.html         # Module 9 — master category settings (feeds all dropdowns)
 ├── profile.html            # Module 10 — public portfolio (about, stats, showcase)
 │
+├── work.html               # Work Sheet — PRIVATE professional to-do / monthly control sheet (owner-only)
+│
 ├── login.html              # Owner login page (password gate)
 ├── owner.html              # Owner Dashboard — secure content-management hub
 │
@@ -197,6 +199,7 @@ client code; the security rule is the protection.
 9. **Category Manager** — edit every dropdown list; changes apply system-wide instantly.
 10. **Portfolio** — public about/stats/showcase page generated from your data.
 11. **Owner Dashboard** — *(owner only)* secure hub: content counts, management links, quick-add, backup/restore and reset.
+12. **Work Sheet** — *(owner only, private)* the professional to-do: a monthly control sheet of workstreams, cadence gates, a delivery register and a month-end close. Reached from the **briefcase icon** in the top bar.
 
 ---
 
@@ -416,6 +419,39 @@ Until that rule exists the page shows a subtle **"Private · this device"** pill
 
 ---
 
+## Work Sheet — private professional to-do (owner-only)
+
+A monthly **control sheet** at **`work.html`**, opened from the **briefcase icon** in the top
+bar. The icon is `.owner-only` (invisible to visitors) and the page is redirect-protected via
+`Security.PROTECTED_PAGES`, so a visitor who guesses the URL lands on the login page.
+
+It renders workstreams as collapsible cards with grouped checklists, per-workstream progress,
+department roll-ups, a weekly **cadence** grid (weeks 1–4), a **delivery register** of sign-offs,
+and a **month-end close** list. Ticks are stored **per month**, so each month starts clean while
+previous months stay on file. There is a print view that drops the app chrome and prints the
+sheet alone.
+
+### ⚠️ Why the sheet's content is NOT in this repository
+
+**This repo is public.** Login-gating a *page* does not hide *source code* — anything committed
+here is readable at `github.com/…` and at `…/assets/js/app.js` regardless of who is signed in.
+A work sheet naturally names people, internal systems and staff-management rules, so:
+
+- **Only the renderer ships.** `app.js` contains no workstreams, names or checklist text.
+- **The content lives solely in your private store:** localStorage `pomls_work_v1` +
+  Firestore **`opptrack_private/worksheet`** — the same private collection Accounts uses, so the
+  **existing `match /opptrack_private/{doc}` rule already covers it** and no new Firestore rule
+  is needed. Without that rule it stays on the device and shows *"Private · this device"*.
+- **You load it once** with **Import sheet** (a JSON file). `data/work-*.json` is in
+  `.gitignore` so the sheet file can live in the project folder without ever being committed.
+  After the first import it syncs to every device you sign in on, and **Export** gives you a
+  copy back.
+
+> Never paste the sheet's content into `app.js`, a HTML file, or the README. Keep it in the
+> private Firestore doc and the git-ignored JSON.
+
+---
+
 ## Design directives & change log
 
 Living record of the owner's intent (per request, kept in the repo):
@@ -433,6 +469,10 @@ Living record of the owner's intent (per request, kept in the repo):
 
 _2026-07-02 — Added the private Accounts module; luxury UI polish + mobile density pass across
 the public portfolio and dashboard._
+
+_2026-07-30 — Removed the global "Add new" dropdown from the top bar (every section already has
+its own Add button). Added the owner-only **Work Sheet** (briefcase icon → `work.html`) with its
+content held outside the public repo — see the section above._
 
 ---
 

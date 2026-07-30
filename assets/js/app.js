@@ -930,6 +930,11 @@ function renderChrome(activePage, title, sub) {
         <input type="text" id="globalSearch" placeholder="Search opportunities, tasks, contacts…" autocomplete="off">
       </div>
       <div class="topbar-actions">
+        <!-- Work Sheet (professional to-do). Owner-only: hidden from visitors by
+             CSS, and work.html itself redirects non-owners (PROTECTED_PAGES). -->
+        <a class="btn btn-ghost btn-icon owner-only" href="work.html" aria-label="Work sheet" title="Work sheet — professional to-do">
+          <i class="bi bi-briefcase-fill"></i>
+        </a>
         <!-- Auth control (owner badge + logout, or "Owner login") rendered by Security.renderAuthControl -->
         <div id="authSlot" class="auth-slot d-flex align-items-center gap-2"></div>
         <!-- Backup menu is a management action → owner-only -->
@@ -4966,6 +4971,479 @@ function openFinanceSettings() {
   };
 }
 
+/* ==========================================================
+   6.8  WORK SHEET — private professional to-do / control sheet
+   ----------------------------------------------------------
+   OWNER-ONLY & PRIVATE, on the same footing as Accounts: the page
+   is redirect-protected (Security.PROTECTED_PAGES), reachable only
+   from the owner-only briefcase icon in the top bar.
+
+   WHY THERE IS NO CONTENT IN THIS FILE
+   This repository is PUBLIC. Anything hard-coded here is readable
+   at github.com/… and /assets/js/app.js even though work.html
+   itself is login-gated — a runtime gate cannot hide source code.
+   The sheet names people, payroll internals and staff-monitoring
+   rules, so only the RENDERER ships. The content lives solely in:
+     • localStorage `pomls_work_v1`           (instant, offline)
+     • Firestore  opptrack_private/worksheet  (owner-only rule —
+       the same `match /opptrack_private/{doc}` rule Accounts uses,
+       so no new Firestore rule is needed)
+   Load it once via "Import sheet" from a JSON file kept off the
+   repo (data/work-seed.json is git-ignored).
+
+   Ticks are stored per month, so each month starts clean while
+   previous months stay on file.
+   ========================================================== */
+const WORK_STORE_KEY = 'pomls_work_v1';
+
+/* ---- WorkDB : the private storage layer (mirrors FinanceDB) ---- */
+const WorkDB = {
+  data: null,
+  _clientId: 'w-' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36),
+  _unsub: null,
+  _saveTimer: null,
+  _doc() {
+    if (typeof fbDB === 'undefined' || !fbDB) return null;
+    // Same private collection as Accounts — deliberately NOT under
+    // `opptrack`, so no public rule on the portfolio doc can ever match.
+    try { return fbDB.collection('opptrack_private').doc('worksheet'); } catch { return null; }
+  },
+  _hydrate(raw) {
+    const d = (raw && typeof raw === 'object') ? raw : {};
+    if (!Array.isArray(d.workstreams)) d.workstreams = [];
+    if (!Array.isArray(d.depts)) d.depts = [];
+    if (!Array.isArray(d.cadence)) d.cadence = [];
+    if (!Array.isArray(d.close)) d.close = [];
+    if (!d.checks || typeof d.checks !== 'object') d.checks = {};
+    return d;
+  },
+  loadLocal() {
+    try {
+      const raw = localStorage.getItem(WORK_STORE_KEY);
+      this.data = this._hydrate(raw ? JSON.parse(raw) : null);
+    } catch { this.data = this._hydrate(null); }
+    return this.data;
+  },
+  async loadCloud() {
+    const doc = this._doc();
+    if (!doc || !Security.isOwner()) { this._cloudBlocked = true; return this.loadLocal(); }
+    try {
+      const snap = await doc.get();
+      if (snap.exists) {
+        const d = snap.data() || {};
+        this.data = this._hydrate(d.store || d);
+        this._persistLocal();
+        this._cloudBlocked = false;
+      } else {
+        if (!this.data) this.loadLocal();
+        // Only seed the cloud once there is something worth seeding.
+        if (this.data.workstreams.length) await this._persistCloud();
+        else this._cloudBlocked = false;
+      }
+    } catch (e) {
+      // No rule yet / offline — run privately from this device. Never leaks.
+      if (!this.data) this.loadLocal();
+      this._cloudBlocked = true;
+    }
+    return this.data;
+  },
+  subscribe(onRemote) {
+    const doc = this._doc();
+    if (!doc || !Security.isOwner()) return;
+    if (this._unsub) { this._unsub(); this._unsub = null; }
+    try {
+      this._unsub = doc.onSnapshot(snap => {
+        if (!snap.exists) return;
+        const d = snap.data() || {};
+        if (d.writer === this._clientId) return;   // ignore our own echo
+        this.data = this._hydrate(d.store || d);
+        this._persistLocal();
+        if (typeof onRemote === 'function') onRemote();
+      }, () => {});
+    } catch {}
+  },
+  _persistLocal() { try { localStorage.setItem(WORK_STORE_KEY, JSON.stringify(this.data)); } catch {} },
+  async _persistCloud() {
+    const doc = this._doc();
+    if (!doc || !Security.isOwner()) return;
+    try {
+      await doc.set({ store: this.data, writer: this._clientId, updatedAt: Date.now() });
+      this._cloudBlocked = false;
+    } catch (e) { this._cloudBlocked = true; }
+  },
+  /* Ticking a box fires often, so the cloud write is debounced while the
+     local cache is written immediately (nothing is ever lost on reload). */
+  save() {
+    if (!Security.guard('save the work sheet')) return;
+    this._persistLocal();
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => this._persistCloud(), 400);
+  },
+  saveNow() {
+    if (!Security.guard('save the work sheet')) return;
+    this._persistLocal();
+    clearTimeout(this._saveTimer);
+    this._persistCloud();
+  }
+};
+
+/* Safe inline text for sheet content: escape everything first, then re-enable
+   a tiny markup subset (`code`, **strong**, *em*) — same discipline as
+   mdToHtml, so imported content can never inject HTML. */
+function wkText(s) {
+  return escapeHtml(s == null ? '' : s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+}
+
+/* Month label ("July 2026") → storage slug ("july-2026"). */
+function wkSlug(label) { return String(label || 'current').trim().toLowerCase().replace(/\s+/g, '-'); }
+function wkDefaultMonth() {
+  const d = new Date();
+  return d.toLocaleString('en-GB', { month: 'long' }) + ' ' + d.getFullYear();
+}
+
+let _wkMonth = null;          // the month label currently on screen
+
+/* Every tickable key for a workstream (a `ticks` item expands to N keys). */
+function wkItemKeys(ws) {
+  const out = [];
+  (ws.groups || []).forEach((g, gi) => (g.items || []).forEach((it, ii) => {
+    if (it.ticks) { for (let t = 0; t < it.ticks; t++) out.push(`${ws.id}.${gi}.${ii}.${t}`); }
+    else out.push(`${ws.id}.${gi}.${ii}`);
+  }));
+  return out;
+}
+/* The tick map for the month on screen (created on first write). */
+function wkChecks() {
+  const slug = wkSlug(_wkMonth);
+  const all = WorkDB.data.checks || (WorkDB.data.checks = {});
+  return all[slug] || (all[slug] = {});
+}
+function wkOn(key) { return !!wkChecks()[key]; }
+
+function initWork() {
+  // Hard gate — this page never renders for a visitor.
+  if (!Security.isOwner()) { location.replace(Security.LOGIN_PAGE); return; }
+  const host = document.getElementById('workHost');
+  if (!host) return;
+
+  host.innerHTML = `<div class="empty"><div class="e-ico"><i class="bi bi-hourglass-split"></i></div><b>Opening your work sheet…</b></div>`;
+
+  WorkDB.loadLocal();
+  WorkDB.loadCloud().then(() => {
+    if (!_wkMonth) _wkMonth = WorkDB.data.month || wkDefaultMonth();
+    drawWork();
+    // Live sync from another device — never redraw over an open dialog.
+    WorkDB.subscribe(() => { if (!document.querySelector('.modal.show')) drawWork(); });
+  });
+}
+
+/* Full render. Ticking a box does NOT come back through here — wkPaint()
+   updates the numbers in place so open sections and scroll position hold. */
+function drawWork() {
+  const host = document.getElementById('workHost');
+  if (!host) return;
+  const d = WorkDB.data;
+  const priv = WorkDB._cloudBlocked
+    ? `<span class="fin-priv" title="Private to this device — add the opptrack_private rule to sync across devices"><i class="bi bi-hdd"></i> Private · this device</span>`
+    : `<span class="fin-priv is-sync" title="Private &amp; synced to your account only"><i class="bi bi-shield-lock-fill"></i> Private · synced</span>`;
+
+  const head = `
+    <div class="fin-topbar wk-topbar">
+      <div class="fin-priv-wrap">${priv}
+        <span class="text-faint" style="font-size:12px"><i class="bi bi-eye-slash me-1"></i>Never shown on your public portfolio</span>
+      </div>
+      <div class="fin-actions">
+        <input class="wk-month-input" id="wkMonth" value="${escapeHtml(_wkMonth || '')}" placeholder="Month" aria-label="Month">
+        <button class="btn btn-ghost btn-sm" id="wkImport"><i class="bi bi-upload me-1"></i>Import sheet</button>
+        <button class="btn btn-ghost btn-sm" id="wkExport"><i class="bi bi-download me-1"></i>Export</button>
+        <button class="btn btn-ghost btn-sm" id="wkPrint"><i class="bi bi-printer me-1"></i>Print</button>
+        <button class="btn btn-ghost btn-sm text-danger" id="wkReset"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset month</button>
+      </div>
+      <input type="file" id="wkFile" accept="application/json" hidden>
+    </div>`;
+
+  // ---- Empty state: nothing imported yet on any device ----
+  if (!d.workstreams.length) {
+    host.innerHTML = head + `
+      <div class="card card-pad wk-empty">
+        <div class="e-ico"><i class="bi bi-briefcase"></i></div>
+        <b>Your work sheet is empty</b>
+        <p>
+          The sheet's content is deliberately <b>not</b> stored in this site's code — this repository
+          is public, so anything in the source would be readable by anyone even though this page is
+          login-gated. Your workstreams live only in your private cloud document.
+        </p>
+        <p class="text-faint" style="font-size:12.5px">
+          Click <b>Import sheet</b> and pick <code>data/work-seed.json</code>. It saves to your private
+          store and then syncs to every device you sign in on — you only do this once.
+        </p>
+        <button class="btn btn-primary" id="wkImport2"><i class="bi bi-upload me-1"></i>Import sheet</button>
+      </div>`;
+    wireWork();
+    return;
+  }
+
+  const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams', tag: '' }];
+  const board = depts.map(dep => {
+    const list = d.workstreams.filter(w => (w.dept || '') === (dep.key || ''));
+    if (!list.length) return '';
+    return `
+      <div class="wk-dept"><h2>${wkText(dep.label)}</h2><div class="wk-rule"></div>
+        <span class="wk-cnt">${list.length} workstream${list.length === 1 ? '' : 's'}${dep.tag ? ' · ' + wkText(dep.tag) : ''}</span></div>
+      ${list.map((ws, i) => wkWorkstreamHtml(ws, i === 0 && dep === depts[0])).join('')}`;
+  }).join('');
+
+  const cadence = d.cadence.length ? `
+    <div class="wk-dept"><h2>Operating rhythm</h2><div class="wk-rule"></div><span class="wk-cnt">weekly gates</span></div>
+    <div class="wk-panel">
+      <table class="wk-table">
+        <thead><tr><th style="width:104px">Day</th><th style="width:154px">Gate</th><th>What happens</th><th style="width:132px">Week 1–4</th></tr></thead>
+        <tbody>${d.cadence.map(row => {
+          const [day, gate, what] = row;
+          return `<tr><td class="wk-d">${wkText(day)}</td><td><strong>${wkText(gate)}</strong></td><td>${wkText(what)}</td>
+            <td><div class="wk-ticks">${[1, 2, 3, 4].map(n => {
+              const k = `cad.${gate}.${n}`;
+              return `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="Week ${n}">`;
+            }).join('')}</div></td></tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  const bossRows = d.workstreams.filter(w => w.boss);
+  const register = bossRows.length ? `
+    <div class="wk-dept"><h2>Delivery register</h2><div class="wk-rule"></div><span class="wk-cnt">what leaves my desk</span></div>
+    <div class="wk-panel">
+      <table class="wk-table">
+        <thead><tr><th style="width:64px">WS</th><th>Deliverable</th><th style="width:124px">Due</th><th style="width:132px">Built by</th><th style="width:84px">Signed off</th></tr></thead>
+        <tbody>${bossRows.map(w => `<tr>
+          <td class="wk-d">${wkText(w.id)}</td>
+          <td>${wkText(w.bossItem || '')}</td>
+          <td class="wk-d">${wkText(w.bossDue || 'Thursday gate')}</td>
+          <td class="wk-d">${wkText(w.bossBy || (w.mode === 'self' ? 'Self' : 'Delegated → me'))}</td>
+          <td><input class="wk-tick" type="checkbox" data-k="boss.${escapeHtml(w.id)}" ${wkOn('boss.' + w.id) ? 'checked' : ''} aria-label="Signed off"></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  const close = d.close.length ? `
+    <div class="wk-dept"><h2>Month-end close</h2><div class="wk-rule"></div><span class="wk-cnt">last 2 working days</span></div>
+    <div class="wk-panel"><div class="wk-closebox">${d.close.map((c, i) => `
+      <label class="wk-item"><input type="checkbox" data-k="close.${i}" ${wkOn('close.' + i) ? 'checked' : ''}><span class="wk-txt">${wkText(c)}</span></label>`).join('')}</div></div>` : '';
+
+  host.innerHTML = head + `
+    <div class="wk">
+      <header class="wk-mast">
+        ${d.org ? `<div class="wk-brand">${wkText(d.org)}</div>` : ''}
+        <h1>${wkText(d.title || 'Work Sheet')}</h1>
+        ${d.subtitle ? `<div class="wk-mast-sub">${wkText(d.subtitle)}</div>` : ''}
+      </header>
+
+      <div class="wk-control">
+        <div class="wk-cell">
+          <div class="wk-k">Month closed</div>
+          <div class="wk-v" data-wkpc="all">0%</div>
+          <div class="wk-bar gold"><i data-wkbar="all"></i></div>
+        </div>
+        ${depts.map(dep => `
+        <div class="wk-cell">
+          <div class="wk-k">${wkText(dep.label)}</div>
+          <div class="wk-v" data-wkpc="${escapeHtml(dep.key)}">0%</div>
+          <div class="wk-bar"><i data-wkbar="${escapeHtml(dep.key)}"></i></div>
+        </div>`).join('')}
+        <div class="wk-cell">
+          <div class="wk-k">Deliveries signed off</div>
+          <div class="wk-v" data-wkpc="boss">0</div>
+          <div class="wk-bar gold"><i data-wkbar="boss"></i></div>
+        </div>
+      </div>
+
+      ${board}
+      ${cadence}
+      ${register}
+      ${close}
+
+      <div class="wk-foot">
+        <span>${wkText(d.signature || '')}</span>
+        <span id="wkStamp">—</span>
+      </div>
+    </div>`;
+
+  wireWork();
+  wkPaint();
+}
+
+/* One workstream card. `open` auto-expands the first one. */
+function wkWorkstreamHtml(ws, open) {
+  const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
+  const pct = keys.length ? done / keys.length * 100 : 0;
+  return `
+  <details class="wk-ws" data-mode="${escapeHtml(ws.mode || 'self')}" ${open ? 'open' : ''}>
+    <summary>
+      <div class="wk-ws-row">
+        <div class="wk-ws-id">${wkText(ws.id)}</div>
+        <div class="wk-ws-main">
+          <div class="wk-ws-title">${wkText(ws.title)}</div>
+          <div class="wk-ws-meta">
+            ${ws.modeLabel ? `<span class="wk-stamp mode ${ws.mode === 'deleg' ? 'deleg' : ''}">${wkText(ws.modeLabel)}</span>` : ''}
+            ${ws.boss ? `<span class="wk-stamp seal">Delivery</span>` : ''}
+            ${ws.owner ? `<span class="wk-stamp">${wkText(ws.owner)}</span>` : ''}
+          </div>
+          <div class="wk-bar" style="margin-top:11px"><i style="width:${pct}%" data-wkbar="${escapeHtml(ws.id)}"></i></div>
+        </div>
+        <div class="wk-ws-num"><b data-wkn="${escapeHtml(ws.id)}">${done}/${keys.length}</b><span>items closed</span></div>
+      </div>
+    </summary>
+    <div class="wk-ws-body">
+      ${ws.note ? `<p class="wk-note">${wkText(ws.note)}</p>` : ''}
+      ${(ws.groups || []).map((g, gi) => `
+        <div class="wk-grp">
+          <div class="wk-grp-h"><span>${wkText(g.name)}</span><span class="wk-rule"></span><span class="wk-n">${(g.items || []).length}</span></div>
+          ${(g.items || []).map((it, ii) => it.ticks
+            ? `<label class="wk-item ${g.buf ? 'buf' : ''}" style="cursor:default">
+                 <span style="width:14px"></span>
+                 <span class="wk-txt">${wkText(it.t)}
+                   <span class="wk-ticks" style="margin-top:6px">${Array.from({ length: it.ticks }, (_, t) => {
+                     const k = `${ws.id}.${gi}.${ii}.${t}`;
+                     return `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="Item ${t + 1}">`;
+                   }).join('')}</span>
+                 </span></label>`
+            : `<label class="wk-item ${g.buf ? 'buf' : ''}">
+                 <input type="checkbox" data-k="${escapeHtml(`${ws.id}.${gi}.${ii}`)}" ${wkOn(`${ws.id}.${gi}.${ii}`) ? 'checked' : ''}>
+                 <span class="wk-txt">${it.d ? `<span class="wk-day">${wkText(it.d)}</span>` : ''}${wkText(it.t)}${it.who ? `<span class="wk-who">${wkText(it.who)}</span>` : ''}</span>
+               </label>`
+          ).join('')}
+        </div>`).join('')}
+    </div>
+  </details>`;
+}
+
+/* Update every counter + bar from the current tick state (no re-render). */
+function wkPaint() {
+  const d = WorkDB.data;
+  if (!d || !d.workstreams.length) return;
+  const all = [0, 0], byDept = {};
+  d.workstreams.forEach(ws => {
+    const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
+    const n = document.querySelector(`[data-wkn="${CSS.escape(ws.id)}"]`);
+    if (n) n.textContent = `${done}/${keys.length}`;
+    const b = document.querySelector(`[data-wkbar="${CSS.escape(ws.id)}"]`);
+    if (b) b.style.width = (keys.length ? done / keys.length * 100 : 0) + '%';
+    all[0] += done; all[1] += keys.length;
+    const k = ws.dept || '';
+    (byDept[k] = byDept[k] || [0, 0])[0] += done;
+    byDept[k][1] += keys.length;
+  });
+  d.close.forEach((_, i) => { all[1]++; if (wkOn('close.' + i)) all[0]++; });
+
+  const pc = (a) => (a && a[1] ? Math.round(a[0] / a[1] * 100) : 0);
+  const set = (key, text, width) => {
+    const t = document.querySelector(`[data-wkpc="${CSS.escape(key)}"]`);
+    if (t) t.innerHTML = text;
+    const b = document.querySelector(`[data-wkbar="${CSS.escape(key)}"]`);
+    if (b) b.style.width = width + '%';
+  };
+  set('all', pc(all) + '%', pc(all));
+  (d.depts.length ? d.depts : [{ key: '' }]).forEach(dep => set(dep.key, pc(byDept[dep.key]) + '%', pc(byDept[dep.key])));
+
+  const boss = d.workstreams.filter(w => w.boss);
+  const bossDone = boss.filter(w => wkOn('boss.' + w.id)).length;
+  set('boss', `${bossDone}<small>/${boss.length} signed off</small>`, boss.length ? bossDone / boss.length * 100 : 0);
+}
+
+/* Wire the sheet: tick delegation, month, import / export / print / reset. */
+function wireWork() {
+  const host = document.getElementById('workHost');
+  if (!host) return;
+
+  // Every checkbox goes through one delegated handler (change bubbles), so a
+  // redraw can never stack duplicate listeners.
+  host.onchange = (e) => {
+    const cb = e.target;
+    if (!cb.matches('input[type="checkbox"][data-k]')) return;
+    if (!Security.guard('update the work sheet')) { cb.checked = !cb.checked; return; }
+    const checks = wkChecks();
+    if (cb.checked) checks[cb.dataset.k] = 1; else delete checks[cb.dataset.k];
+    wkPaint();
+    WorkDB.save();
+    const stamp = document.getElementById('wkStamp');
+    if (stamp) stamp.textContent = 'Saved ' + new Date().toLocaleString('en-GB');
+  };
+
+  const month = document.getElementById('wkMonth');
+  if (month) month.onchange = () => {
+    _wkMonth = month.value.trim() || wkDefaultMonth();
+    WorkDB.data.month = _wkMonth;
+    WorkDB.saveNow();
+    drawWork();       // different month → different tick set
+  };
+
+  const file = document.getElementById('wkFile');
+  const pick = () => file && file.click();
+  const imp1 = document.getElementById('wkImport');
+  const imp2 = document.getElementById('wkImport2');
+  if (imp1) imp1.onclick = pick;
+  if (imp2) imp2.onclick = pick;
+  if (file) file.onchange = () => { if (file.files[0]) workImport(file.files[0]); file.value = ''; };
+
+  const exp = document.getElementById('wkExport');
+  if (exp) exp.onclick = () => {
+    const blob = new Blob([JSON.stringify(WorkDB.data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `work-sheet-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Work sheet exported. Keep it out of the public repo.', 'ok');
+  };
+
+  const pr = document.getElementById('wkPrint');
+  if (pr) pr.onclick = () => {
+    document.querySelectorAll('.wk-ws').forEach(x => x.open = true);
+    window.print();
+  };
+
+  const rs = document.getElementById('wkReset');
+  if (rs) rs.onclick = () => {
+    if (!Security.guard('reset the work sheet')) return;
+    if (!confirm(`Clear every tick for ${_wkMonth}? The workstreams themselves stay.`)) return;
+    (WorkDB.data.checks || {})[wkSlug(_wkMonth)] = {};
+    WorkDB.saveNow();
+    drawWork();
+    toast('Month cleared.', 'ok');
+  };
+}
+
+/* Import the sheet content from a JSON file. Existing ticks are preserved
+   unless the file brings its own, so re-importing an edited structure never
+   wipes the month's progress. */
+function workImport(file) {
+  if (!Security.guard('import a work sheet')) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const obj = JSON.parse(reader.result);
+      if (!obj || !Array.isArray(obj.workstreams) || !obj.workstreams.length) {
+        throw new Error('No workstreams in that file.');
+      }
+      const keepChecks = WorkDB.data && WorkDB.data.checks;
+      const hasOwnChecks = obj.checks && Object.keys(obj.checks).length;
+      WorkDB.data = WorkDB._hydrate(obj);
+      if (!hasOwnChecks && keepChecks) WorkDB.data.checks = keepChecks;
+      delete WorkDB.data._comment;
+      if (!_wkMonth) _wkMonth = WorkDB.data.month || wkDefaultMonth();
+      WorkDB.saveNow();
+      drawWork();
+      toast(`Sheet loaded — ${WorkDB.data.workstreams.length} workstreams.`, 'ok');
+    } catch (e) {
+      toast('That file could not be read as a work sheet.', 'err');
+    }
+  };
+  reader.readAsText(file);
+}
+
 /* Portfolio scroll-reveal — a gentle, premium fade-up as each section
    enters view. Purely cosmetic: it only adds classes, sections stay
    fully visible if this never runs, and it honours reduced-motion. */
@@ -5001,6 +5479,7 @@ const PAGE_INIT = {
   categories: initCategories,
   profile: initProfile,
   owner: initOwner,
+  work: initWork,
   index: initIndex
 };
 
@@ -5075,7 +5554,8 @@ function renderActivePage(page) {
       research: ['Research Hub', 'Ideas, problem statements and references'],
       projects: ['Projects', 'Project ideas and active builds'],
       categories: ['Category Manager', 'Edit the lists used across every dropdown'],
-      owner: ['Owner Dashboard', 'Manage all content from one secure place']
+      owner: ['Owner Dashboard', 'Manage all content from one secure place'],
+      work: ['Work Sheet', 'Private professional to-do & monthly control sheet — owner only']
     };
     const [t, s] = titles[page] || ['', ''];
     renderChrome(page, t, s);

@@ -4,3 +4,11 @@
 # OS / editor cruft
 .DS_Store
 Thumbs.db
+
+# PRIVATE work-sheet content. The Work Sheet page ships as an empty renderer;
+# the actual workstreams live only in the private Firestore doc
+# (opptrack_private/worksheet). This repo is PUBLIC — anything committed here is
+# world-readable even though the page itself is login-gated, so the sheet
+# content must never be checked in. Import it once via Work Sheet → Import sheet.
+data/work-seed.json
+data/work-*.json
