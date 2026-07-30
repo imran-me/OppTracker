@@ -4434,6 +4434,13 @@ const FinanceDB = {
     if (!Array.isArray(d.categories.depositCategories)) d.categories.depositCategories = FIN_DEFAULTS.depositCategories.slice();
     if (typeof d.monthlyBudget !== 'number') d.monthlyBudget = 0;
     if (typeof d.savingsGoal !== 'number') d.savingsGoal = 0;
+    /* Month rollover (additive — no record is ever touched):
+       openingBalance = cash in hand before your first recorded month;
+       carryForward   = roll each month's leftover into the next;
+       closes         = saved month reviews, keyed by 'YYYY-MM'. */
+    if (typeof d.openingBalance !== 'number') d.openingBalance = 0;
+    if (typeof d.carryForward !== 'boolean') d.carryForward = true;
+    if (!d.closes || typeof d.closes !== 'object') d.closes = {};
 
     /* ---- v2 migration: split DEPOSITS out of expenses ----
        Records saved before deposits existed put savings under an expense
@@ -4689,7 +4696,107 @@ function finBarRow(label, amt, max, tone) {
   </div>`;
 }
 
-let _finMonth = null;   // currently viewed month (YYYY-MM)
+/* ==========================================================
+   ACCOUNTS COCKPIT — view state
+   The page is one cockpit, not a stack of reports: a sticky command
+   bar, a KPI strip you can click (each KPI is a LENS over everything
+   below it), the money river, and one tabbed workspace.
+   All of this is presentation only — every figure is still derived
+   from your transactions, and no record is ever rewritten.
+   ========================================================== */
+let _finMonth = null;                 // month on screen (YYYY-MM)
+let _finLens = '';                    // '', income, deposit, expense, leak, net
+let _finTab = 'ledger';               // workspace tab
+let _finQ = '';                       // ledger search
+let _finDay = '';                     // YYYY-MM-DD, set by clicking a calendar day
+let _finFilt = { category: '', necessity: '', method: '' };
+let _finSel = new Set();              // bulk-selected transaction ids
+
+/* ---- Carry-forward: what you walked into the month with ----------
+   NOTHING IS EVER CLOSED OFF DESTRUCTIVELY. Every record stays filed
+   under the month of its own date, forever; July stays July. The
+   opening balance is DERIVED by replaying all earlier months, so a
+   record you add to July tomorrow still corrects August automatically.
+
+     opening(m) = starting balance + Σ (income − deposit − expense) of months < m
+     closing(m) = opening(m) + this month's net          → next month's opening
+     vault(m)   = Σ deposits up to and including m       → the pot, never resets  */
+function finCarry(monthKey) {
+  const d = FinanceDB.data;
+  const on = d.carryForward !== false;
+  let opening = on ? (Number(d.openingBalance) || 0) : 0;
+  let vault = 0;
+  FinanceDB.all().forEach(t => {
+    const k = finMonthKey(t.date);
+    if (!k) return;
+    const amt = Number(t.amount) || 0;
+    // a deposit and an expense both leave your hand; only income adds to it
+    if (on && k < monthKey) opening += (t.type === 'income' ? amt : -amt);
+    if (t.type === 'deposit' && k <= monthKey) vault += amt;
+  });
+  return { on, opening, vault };
+}
+
+/* ---- Spend-quality score: the necessity mix as one number ----
+   Weighted share of TAGGED spending only — untagged money is never
+   guessed at, it just isn't scored (and the page says so). */
+const FIN_Q_WEIGHT = { Essential: 1, Important: .85, Discretionary: .45, Avoidable: 0 };
+function finQuality(s) {
+  const tagged = FIN_NEED.reduce((n, b) => n + (s.byNeed[b.key] || 0), 0);
+  if (tagged <= 0) return { score: null, grade: '—', tone: 'slate', tagged: 0 };
+  const score = FIN_NEED.reduce((n, b) => n + (s.byNeed[b.key] || 0) * FIN_Q_WEIGHT[b.key], 0) / tagged * 100;
+  return {
+    score, tagged,
+    grade: score >= 90 ? 'A+' : score >= 80 ? 'A' : score >= 70 ? 'B' : score >= 58 ? 'C' : score >= 45 ? 'D' : 'E',
+    tone: score >= 80 ? 'green' : score >= 65 ? 'blue' : score >= 50 ? 'amber' : 'red'
+  };
+}
+
+/* ---- Recurring radar: repeats already sitting in your ledger ----
+   No new data entry — a "repeat" is the same detail line (or category)
+   on the same flow seen in 2+ different months. Subscriptions are
+   exactly what quietly slips past you. */
+function finRecurring(monthKey) {
+  const map = new Map();
+  FinanceDB.all().forEach(t => {
+    if (t.type === 'income') return;
+    const k = finMonthKey(t.date);
+    if (!k || k > monthKey) return;
+    const label = String(t.note || t.category || '').trim();
+    if (!label) return;
+    const id = t.type + '|' + label.toLowerCase();
+    const e = map.get(id) || { label, type: t.type, category: t.category || '', months: new Set(), total: 0, n: 0, last: '' };
+    e.months.add(k); e.total += Number(t.amount) || 0; e.n++;
+    if (k > e.last) e.last = k;
+    map.set(id, e);
+  });
+  return [...map.values()]
+    .filter(e => e.months.size >= 2)
+    .map(e => ({ label: e.label, type: e.type, category: e.category, months: e.months.size, avg: e.total / e.n, last: e.last, live: e.last === monthKey }))
+    .sort((a, b) => b.avg - a.avg);
+}
+
+/* Saved month reviews. A close is a BOOKMARK, never a freeze: it stores
+   your note and the figures as they stood, and the live numbers keep
+   recomputing underneath if you edit an old record. */
+function finCloses() {
+  const d = FinanceDB.data;
+  if (!d.closes || typeof d.closes !== 'object') d.closes = {};
+  return d.closes;
+}
+/* Every month that has at least one record, oldest first. */
+function finAllMonths() {
+  return [...new Set(FinanceDB.all().map(t => finMonthKey(t.date)).filter(Boolean))].sort();
+}
+/* Add several records in one write (bulk actions / bringing recurring
+   items forward) — one cloud save instead of one per row. */
+function finAddMany(recs) {
+  if (!recs.length) return 0;
+  if (!Security.guard('add records')) return 0;
+  recs.forEach(r => { r.id = uid(); r.createdAt = new Date().toISOString(); FinanceDB.data.tx.push(r); });
+  FinanceDB.save();
+  return recs.length;
+}
 
 function initAccounts() {
   // Hard gate — this page never renders for a visitor.
@@ -4717,213 +4824,843 @@ function initAccounts() {
   FinanceDB.loadCloud().then(boot);
 }
 
+/* The six lenses. Clicking a KPI focuses the whole page on one flow
+   instead of opening a dead-end tooltip. */
+const FIN_LENS = {
+  income:  { label: 'Income',      tone: 'green',   ico: 'arrow-down-left' },
+  deposit: { label: 'Deposited',   tone: 'blue',    ico: 'bank' },
+  expense: { label: 'Spending',    tone: 'red',     ico: 'arrow-up-right' },
+  leak:    { label: 'Could save',  tone: 'amber',   ico: 'scissors' },
+  net:     { label: 'Balance',     tone: 'primary', ico: 'piggy-bank' }
+};
+
 function drawAccounts() {
   const host = document.getElementById('acctHost');
   if (!host) return;
   const mk = _finMonth;
   const s = finSummary(mk);
-  const allMonths = [...new Set(FinanceDB.all().map(t => finMonthKey(t.date)).filter(Boolean))].sort();
-  const insights = finInsights(mk, s);
-  const maxIn = Math.max(1, ...s.incomeSectors.map(x => x[1]));
-  const maxOut = Math.max(1, ...s.expenseSectors.map(x => x[1]));
-  const needMax = Math.max(1, ...Object.values(s.byNeed));
+  const prev = finSummary(finShiftMonth(mk, -1));
+  const carry = finCarry(mk);
+  const q = finQuality(s);
+  const closing = carry.opening + s.net;
+  const months = finAllMonths();
+  const closed = finCloses()[mk];
+
   const cloudNote = FinanceDB._cloudBlocked
     ? `<span class="fin-priv" title="Private to this device — add the finance security rule to sync across devices"><i class="bi bi-hdd"></i> Private · this device</span>`
     : `<span class="fin-priv is-sync" title="Private &amp; synced to your account only"><i class="bi bi-shield-lock-fill"></i> Private · synced</span>`;
 
-  // ---- last-6-months trend (deposits ride alongside income vs expense) ----
-  const trend = [];
-  for (let i = 5; i >= 0; i--) { const k = finShiftMonth(mk, -i); const t = finSummary(k); trend.push({ k, in: t.totalIn, out: t.totalOut, dep: t.totalDeposit }); }
-  const trendMax = Math.max(1, ...trend.flatMap(t => [t.in, t.out, t.dep]));
-  const anyDeposits = trend.some(t => t.dep > 0);
+  // % movement vs last month, as a small chip. Null when there is no base.
+  const delta = (now, was) => {
+    if (!(was > 0)) return '';
+    const p = (now - was) / was * 100;
+    if (Math.abs(p) < 1) return `<span class="fin-delta is-flat">≈ same</span>`;
+    return `<span class="fin-delta ${p > 0 ? 'is-up' : 'is-down'}"><i class="bi bi-arrow-${p > 0 ? 'up' : 'down'}-right"></i>${Math.abs(p).toFixed(0)}%</span>`;
+  };
 
   host.innerHTML = `
-  <!-- Private banner + month navigator -->
-  <div class="fin-topbar">
+  ${finRolloverHtml(mk)}
+
+  <!-- ============ Command bar (sticky) ============ -->
+  <div class="fin-cmd">
     <div class="fin-priv-wrap">${cloudNote}
-      <span class="text-faint" style="font-size:12px"><i class="bi bi-eye-slash me-1"></i>Never shown on your public portfolio</span>
+      <span class="text-faint fin-cmd-hide" style="font-size:12px"><i class="bi bi-eye-slash me-1"></i>Never shown on your public portfolio</span>
     </div>
     <div class="fin-monthnav">
       <button class="btn btn-ghost btn-icon" id="finPrev" title="Previous month"><i class="bi bi-chevron-left"></i></button>
-      <div class="fin-month"><b>${finMonthLabel(mk)}</b><small>${s.count} record${s.count === 1 ? '' : 's'}</small></div>
+      <div class="fin-month"><b>${finMonthLabel(mk)}</b>
+        <small>${s.count} record${s.count === 1 ? '' : 's'}${closed ? ' · closed' : ''}</small></div>
       <button class="btn btn-ghost btn-icon" id="finNext" title="Next month"><i class="bi bi-chevron-right"></i></button>
       <button class="btn btn-ghost btn-icon" id="finToday" title="Jump to this month"><i class="bi bi-calendar-event"></i></button>
     </div>
+    ${finScrubHtml(mk)}
+    <div class="fin-search">
+      <i class="bi bi-search"></i>
+      <input id="finSearch" value="${escapeHtml(_finQ)}" placeholder="Search ${escapeHtml(finMonthLabel(mk))}…" aria-label="Search this month">
+      ${_finQ ? '<button id="finSearchX" title="Clear"><i class="bi bi-x-lg"></i></button>' : ''}
+    </div>
     <div class="fin-actions">
-      <button class="btn btn-ghost btn-sm" id="finSettings"><i class="bi bi-sliders me-1"></i>Categories &amp; budget</button>
+      <button class="btn btn-ghost btn-sm" id="finSettings"><i class="bi bi-sliders me-1"></i><span class="fin-cmd-hide">Categories &amp; budget</span></button>
       <button class="btn btn-primary btn-sm" id="finAdd"><i class="bi bi-plus-lg me-1"></i>Add record</button>
     </div>
   </div>
 
-  <!-- KPI cards. Deposited sits right after Income because it is subtracted
-       from it: income − deposited − expense = net saved. -->
-  <div class="fin-kpis">
-    <div class="fin-kpi t-green"><div class="fk-ico"><i class="bi bi-arrow-down-left"></i></div>
-      <div class="fk-v num">${fmtBDT(s.totalIn)}</div><div class="fk-l">Income</div></div>
-    <div class="fin-kpi t-blue" title="Money you kept — savings, DPS, FDR, shares. Taken out of spendable income, never counted as spending.">
-      <div class="fk-ico"><i class="bi bi-bank"></i></div>
-      <div class="fk-v num">${s.totalDeposit > 0 ? '−' + fmtBDT(s.totalDeposit) : fmtBDT(0)}</div>
-      <div class="fk-l">Deposited</div></div>
-    <div class="fin-kpi t-red"><div class="fk-ico"><i class="bi bi-arrow-up-right"></i></div>
-      <div class="fk-v num">${fmtBDT(s.totalOut)}</div><div class="fk-l">Expense</div></div>
-    <div class="fin-kpi ${s.net >= 0 ? 't-primary' : 't-red'}" title="Income − deposited − expense: what is still in hand.">
-      <div class="fk-ico"><i class="bi bi-piggy-bank"></i></div>
-      <div class="fk-v num">${fmtBDT(s.net)}</div><div class="fk-l">${s.net >= 0 ? 'Net saved' : 'Overspent'}</div></div>
-    <div class="fin-kpi t-violet" title="Share of income you kept — deposits plus what is still in hand.">
-      <div class="fk-ico"><i class="bi bi-graph-up-arrow"></i></div>
-      <div class="fk-v num">${s.savingsRate.toFixed(0)}<span style="font-size:16px">%</span></div><div class="fk-l">Savings rate</div>
-      <div class="fk-ring"><span style="width:${Math.max(0, Math.min(100, s.savingsRate))}%"></span></div></div>
-    <div class="fin-kpi t-amber" title="Avoidable spending plus half of discretionary — the realistically reclaimable slice.">
-      <div class="fk-ico"><i class="bi bi-scissors"></i></div>
-      <div class="fk-v num">${fmtBDT(s.leak)}</div><div class="fk-l">Could save</div></div>
-  </div>
-  ${s.totalDeposit > 0 ? `<div class="fin-eq"><i class="bi bi-calculator me-1"></i>
-    <b>${fmtBDT(s.totalIn)}</b> income − <b>${fmtBDT(s.totalDeposit)}</b> deposited − <b>${fmtBDT(s.totalOut)}</b> spent =
-    <b>${fmtBDT(s.net)}</b> in hand · <b>${fmtBDT(s.kept)}</b> kept in total</div>` : ''}
-
-  <!-- Insights -->
-  <div class="card card-pad fin-card mb-4">
-    <div class="section-title mb-3"><i class="bi bi-stars me-1"></i>What your money is telling you</div>
-    <div class="fin-insights">
-      ${insights.map(i => `<div class="fin-insight t-${i.tone}"><i class="bi bi-${i.ico}"></i><div>${i.text}</div></div>`).join('')}
-    </div>
-  </div>
-
-  <!-- Necessity / spending quality -->
-  <div class="card card-pad fin-card mb-4">
-    <div class="d-flex align-items-center mb-1 flex-wrap gap-2">
-      <div class="section-title mb-0"><i class="bi bi-clipboard-heart me-1"></i>Was it worth it? · Spending quality</div>
-      <span class="ms-auto text-faint" style="font-size:11.5px">Every expense you tag builds this picture</span>
-    </div>
-    <div class="fin-need">
-      ${FIN_NEED.map(n => {
-        const amt = s.byNeed[n.key] || 0;
-        const pct = s.totalOut > 0 ? (amt / s.totalOut * 100) : 0;
-        return `<div class="fin-need-cell">
-          <div class="fin-need-top"><span class="stat-ico-sm t-${n.tone}"><i class="bi bi-${n.ico}"></i></span>
-            <div><b>${n.key}</b><small>${n.desc}</small></div>
-            <span class="fin-need-amt num t-${n.tone}">${fmtBDT(amt)}</span></div>
-          <div class="fin-bar-track"><span class="t-${n.tone}" style="width:${Math.max(pct > 0 ? 3 : 0, pct)}%"></span></div>
-          <div class="fin-need-pct">${pct.toFixed(0)}% of spend</div>
-        </div>`;
-      }).join('')}
-    </div>
-    ${s.untagged > 0 ? `<div class="fin-untagged"><i class="bi bi-question-circle me-1"></i>
-      <b>${fmtBDT(s.untagged)}</b> (${(s.untagged / s.totalOut * 100).toFixed(0)}% of spend) has no necessity tag yet, so it is
-      counted in your spending but left out of these bands — it is never guessed for you.</div>` : ''}
-  </div>
-
-  <!-- Sector breakdowns -->
-  <div class="grid-2 mb-4 fin-grid-2">
-    <div class="card card-pad fin-card">
-      <div class="section-title mb-3"><i class="bi bi-arrow-down-left-circle me-1"></i>Where money came from</div>
-      ${s.incomeSectors.length ? s.incomeSectors.map(([c, a]) => finBarRow(c, a, maxIn, 'green')).join('')
-        : '<p class="text-faint" style="font-size:13px">No income logged this month.</p>'}
-    </div>
-    <div class="card card-pad fin-card">
-      <div class="section-title mb-3"><i class="bi bi-arrow-up-right-circle me-1"></i>Where money went</div>
-      ${s.expenseSectors.length ? s.expenseSectors.map(([c, a]) => finBarRow(c, a, maxOut, 'red')).join('')
-        : '<p class="text-faint" style="font-size:13px">No expenses logged this month.</p>'}
-      ${s.depositSectors.length ? `
-        <div class="fin-subhead"><i class="bi bi-bank me-1"></i>Deposited (not spending)</div>
-        ${s.depositSectors.map(([c, a]) => finBarRow(c, a, Math.max(1, ...s.depositSectors.map(x => x[1])), 'blue')).join('')}` : ''}
-    </div>
-  </div>
-
-  <!-- 6-month trend + payment methods -->
-  <div class="grid-2 mb-4 fin-grid-2" style="grid-template-columns:1.5fr 1fr">
-    <div class="card card-pad fin-card">
-      <div class="section-title mb-3"><i class="bi bi-bar-chart-line me-1"></i>Last 6 months · income vs expense${anyDeposits ? ' vs deposits' : ''}</div>
-      <div class="fin-trend">
-        ${trend.map(t => `<div class="fin-tcol ${t.k === mk ? 'is-cur' : ''}">
-          <div class="fin-tbars">
-            <span class="fin-tbar t-green" style="height:${t.in / trendMax * 100}%" title="Income ${fmtBDT(t.in)}"></span>
-            <span class="fin-tbar t-red" style="height:${t.out / trendMax * 100}%" title="Expense ${fmtBDT(t.out)}"></span>
-            ${anyDeposits ? `<span class="fin-tbar t-blue" style="height:${t.dep / trendMax * 100}%" title="Deposited ${fmtBDT(t.dep)}"></span>` : ''}
-          </div>
-          <div class="fin-tlabel">${finMonthLabel(t.k).slice(0, 3)}</div>
-        </div>`).join('')}
+  <!-- ============ Cockpit: hero balance + clickable KPI lenses ============ -->
+  <div class="fin-cockpit">
+    <button class="fin-hero ${_finLens === 'net' ? 'on' : ''}" data-lens="net"
+            title="What is actually in your hand — last month's leftover plus this month's flow">
+      <div class="fh-top">
+        <span class="fh-k"><i class="bi bi-wallet2 me-1"></i>In hand at month end</span>
+        ${q.score != null ? `<span class="fh-grade t-${q.tone}" title="Spend-quality grade — the weighted necessity mix of your tagged spending">${q.grade}</span>` : ''}
       </div>
-      <div class="fin-legend"><span><i class="dot t-green"></i>Income</span><span><i class="dot t-red"></i>Expense</span>${anyDeposits ? '<span><i class="dot t-blue"></i>Deposited</span>' : ''}</div>
+      <div class="fh-v num ${closing < 0 ? 'is-neg' : ''}">${fmtBDT(closing)}</div>
+      <div class="fh-flow">
+        ${carry.on ? `<span title="Carried in from ${escapeHtml(finMonthLabel(finShiftMonth(mk, -1)))}">Opened <b class="num">${fmtBDT(carry.opening)}</b></span><i class="bi bi-chevron-right"></i>` : ''}
+        <span class="t-green">+${fmtBDTk(s.totalIn)}</span>
+        <span class="t-blue">−${fmtBDTk(s.totalDeposit)}</span>
+        <span class="t-red">−${fmtBDTk(s.totalOut)}</span>
+      </div>
+      <div class="fh-ring" title="Savings rate — the share of income you kept"><span style="width:${Math.max(0, Math.min(100, s.savingsRate))}%"></span></div>
+      <div class="fh-foot">
+        <span>Kept <b class="num">${fmtBDT(s.kept)}</b> · ${s.savingsRate.toFixed(0)}% of income</span>
+        <span class="fh-vault" title="Everything you have deposited to date — savings, DPS, FDR, shares"><i class="bi bi-safe me-1"></i>Vault ${fmtBDTk(carry.vault)}</span>
+      </div>
+    </button>
+
+    <div class="fin-sats">
+      <button class="fin-kpi t-green ${_finLens === 'income' ? 'on' : ''}" data-lens="income">
+        <div class="fk-ico"><i class="bi bi-arrow-down-left"></i></div>
+        <div class="fk-v num">${fmtBDT(s.totalIn)}</div>
+        <div class="fk-l">Income ${delta(s.totalIn, prev.totalIn)}</div>
+      </button>
+      <button class="fin-kpi t-blue ${_finLens === 'deposit' ? 'on' : ''}" data-lens="deposit"
+              title="Money you kept — savings, DPS, FDR, shares. Taken out of spendable income, never counted as spending.">
+        <div class="fk-ico"><i class="bi bi-bank"></i></div>
+        <div class="fk-v num">${s.totalDeposit > 0 ? '−' + fmtBDT(s.totalDeposit) : fmtBDT(0)}</div>
+        <div class="fk-l">Deposited ${delta(s.totalDeposit, prev.totalDeposit)}</div>
+      </button>
+      <button class="fin-kpi t-red ${_finLens === 'expense' ? 'on' : ''}" data-lens="expense">
+        <div class="fk-ico"><i class="bi bi-arrow-up-right"></i></div>
+        <div class="fk-v num">${fmtBDT(s.totalOut)}</div>
+        <div class="fk-l">Spent ${delta(s.totalOut, prev.totalOut)}</div>
+        ${FinanceDB.data.monthlyBudget > 0 ? `<div class="fk-ring" title="${fmtBDT(s.totalOut)} of your ${fmtBDT(FinanceDB.data.monthlyBudget)} budget">
+          <span class="${s.totalOut > FinanceDB.data.monthlyBudget ? 'is-over' : ''}" style="width:${Math.min(100, s.totalOut / FinanceDB.data.monthlyBudget * 100)}%"></span></div>` : ''}
+      </button>
+      <button class="fin-kpi t-amber ${_finLens === 'leak' ? 'on' : ''}" data-lens="leak"
+              title="Avoidable spending plus half of discretionary — the realistically reclaimable slice.">
+        <div class="fk-ico"><i class="bi bi-scissors"></i></div>
+        <div class="fk-v num">${fmtBDT(s.leak)}</div>
+        <div class="fk-l">Could save</div>
+      </button>
     </div>
-    <!-- Payment methods, kept PER FLOW so a figure is never income+expense added together -->
-    <div class="card card-pad fin-card">
-      <div class="section-title mb-3"><i class="bi bi-wallet2 me-1"></i>By payment method</div>
+  </div>
+
+  ${finRiverHtml(s)}
+
+  ${_finLens ? `<div class="fin-lensbar">
+    <span class="fin-lenschip t-${FIN_LENS[_finLens].tone}"><i class="bi bi-${FIN_LENS[_finLens].ico}"></i>
+      Focused on <b>${FIN_LENS[_finLens].label}</b></span>
+    <span class="text-faint" style="font-size:12px">${_finLens === 'net'
+      ? 'The balance rail above is the focus — the ledger still shows the whole month.'
+      : 'Everything below is filtered to this flow.'}</span>
+    <button class="btn btn-ghost btn-sm ms-auto" id="finLensX"><i class="bi bi-x-lg me-1"></i>Clear focus</button>
+  </div>` : ''}
+
+  <!-- ============ Workspace ============ -->
+  <div class="card fin-card fin-work" id="finWork"></div>
+  `;
+
+  finDrawPanel();
+
+  // ---- command-bar wiring ----
+  const go = (mkey) => { _finMonth = mkey; _finDay = ''; _finSel.clear(); drawAccounts(); };
+  document.getElementById('finPrev').onclick = () => go(finShiftMonth(mk, -1));
+  document.getElementById('finNext').onclick = () => go(finShiftMonth(mk, 1));
+  document.getElementById('finToday').onclick = () => go(finMonthKey(new Date().toISOString()));
+  document.getElementById('finAdd').onclick = () => openFinanceModal(null);
+  document.getElementById('finSettings').onclick = openFinanceSettings;
+  host.querySelectorAll('[data-scrub]').forEach(b => b.onclick = () => go(b.dataset.scrub));
+
+  // search redraws only the workspace, so the field never loses focus
+  const search = document.getElementById('finSearch');
+  if (search) {
+    search.oninput = () => { _finQ = search.value; _finTab = 'ledger'; finDrawPanel(); };
+    search.onkeydown = (e) => { if (e.key === 'Escape') { _finQ = ''; search.value = ''; finDrawPanel(); } };
+  }
+  document.getElementById('finSearchX')?.addEventListener('click', () => { _finQ = ''; drawAccounts(); });
+
+  // a KPI is a lens: click to focus, click again to release
+  host.querySelectorAll('[data-lens]').forEach(b => b.onclick = () => {
+    _finLens = (_finLens === b.dataset.lens) ? '' : b.dataset.lens;
+    _finSel.clear();
+    drawAccounts();
+  });
+  document.getElementById('finLensX')?.addEventListener('click', () => { _finLens = ''; drawAccounts(); });
+
+  // money-river segments focus the same way
+  host.querySelectorAll('[data-river]').forEach(b => b.onclick = () => {
+    const [lens, need] = b.dataset.river.split(':');
+    _finLens = lens || '';
+    _finFilt.necessity = need || '';
+    _finTab = 'ledger';
+    drawAccounts();
+  });
+
+  // rollover banner
+  document.getElementById('finCloseBtn')?.addEventListener('click', (e) => openFinanceClose(e.currentTarget.dataset.m));
+  document.getElementById('finRollX')?.addEventListener('click', () => {
+    _finRollDismissed = document.getElementById('finRollX').dataset.m;
+    drawAccounts();
+  });
+  document.getElementById('finRollGo')?.addEventListener('click', (e) => go(e.currentTarget.dataset.m));
+}
+
+/* ---- 12-month scrub: the year at a glance, click to travel ---- */
+function finScrubHtml(mk) {
+  const bars = [];
+  for (let i = 11; i >= 0; i--) {
+    const k = finShiftMonth(mk, -i);
+    const t = finSummary(k);
+    bars.push({ k, out: t.totalOut, in: t.totalIn });
+  }
+  const max = Math.max(1, ...bars.flatMap(b => [b.in, b.out]));
+  return `<div class="fin-scrub" title="Last 12 months — click any month to travel">
+    ${bars.map(b => `<button data-scrub="${b.k}" class="${b.k === mk ? 'on' : ''}"
+      title="${escapeHtml(finMonthLabel(b.k))} · in ${fmtBDTk(b.in)} · out ${fmtBDTk(b.out)}">
+      <i class="sc-in" style="height:${Math.max(4, b.in / max * 100)}%"></i>
+      <i class="sc-out" style="height:${Math.max(4, b.out / max * 100)}%"></i>
+    </button>`).join('')}
+  </div>`;
+}
+
+/* ---- The money river ------------------------------------------------
+   One bar that shows the whole month: income splits into what you kept,
+   what each necessity band consumed, and what is still in hand. It
+   replaces three separate breakdown cards and every segment is a lens. */
+function finRiverHtml(s) {
+  const outflow = s.totalDeposit + s.totalOut;
+  const base = Math.max(1, s.totalIn, outflow);
+  const segs = [];
+  if (s.totalDeposit > 0) segs.push({ label: 'Deposited', amt: s.totalDeposit, tone: 'blue', go: 'deposit:' });
+  FIN_NEED.forEach(n => {
+    const amt = s.byNeed[n.key] || 0;
+    if (amt > 0) segs.push({ label: n.key, amt, tone: n.tone, go: 'expense:' + n.key });
+  });
+  if (s.untagged > 0) segs.push({ label: 'Untagged', amt: s.untagged, tone: 'slate', go: 'expense:Untagged' });
+  if (s.net > 0) segs.push({ label: 'In hand', amt: s.net, tone: 'primary', go: 'net:' });
+  if (!segs.length) return '';
+
+  const over = s.net < 0 ? Math.abs(s.net) : 0;
+  return `
+  <div class="fin-river">
+    <div class="fin-river-head">
+      <span class="section-title mb-0"><i class="bi bi-water me-1"></i>Where this month's money went</span>
+      <span class="text-faint" style="font-size:11.5px">${fmtBDT(s.totalIn)} in${over ? ` · <b class="t-red">${fmtBDT(over)} beyond income</b>` : ''} — click any band to focus</span>
+    </div>
+    <div class="fin-river-bar">
+      ${segs.map(g => `<button class="fr-seg t-${g.tone}" data-river="${escapeHtml(g.go)}"
+        style="flex:${(g.amt / base * 100).toFixed(3)} 1 0"
+        title="${escapeHtml(g.label)} · ${fmtBDT(g.amt)} (${(g.amt / base * 100).toFixed(0)}%)">
+        <span class="fr-lbl">${escapeHtml(g.label)}</span><span class="fr-amt num">${fmtBDTk(g.amt)}</span>
+      </button>`).join('')}
+      ${over ? `<button class="fr-seg is-over t-red" data-river="expense:" style="flex:${(over / base * 100).toFixed(3)} 1 0"
+        title="Spent beyond this month's income — covered by what you carried in"><span class="fr-lbl">Over</span><span class="fr-amt num">${fmtBDTk(over)}</span></button>` : ''}
+    </div>
+  </div>`;
+}
+
+/* ---- Month rollover ------------------------------------------------
+   On the turn of a month the previous one is offered up for review. It
+   is only ever an OFFER: your data already rolled over by itself. */
+let _finRollDismissed = '';
+function finRolloverHtml(mk) {
+  const months = finAllMonths();
+  if (!months.length) return '';
+  const nowKey = finMonthKey(new Date().toISOString());
+  // the newest month that has records and is genuinely in the past
+  const last = months.filter(k => k < nowKey).pop();
+  if (!last || finCloses()[last] || _finRollDismissed === last) return '';
+  const t = finSummary(last);
+  if (!t.count) return '';
+  const c = finCarry(last);
+  const closing = c.opening + t.net;
+  return `
+  <div class="fin-roll">
+    <span class="fin-roll-ico"><i class="bi bi-calendar-check"></i></span>
+    <div class="fin-roll-txt">
+      <b>${escapeHtml(finMonthLabel(last))} is done — ${fmtBDT(t.totalIn)} in, ${fmtBDT(t.totalOut)} spent, ${fmtBDT(t.totalDeposit)} deposited.</b>
+      <span>${c.on
+        ? `Its <b class="num">${fmtBDT(closing)}</b> leftover already carries into ${escapeHtml(finMonthLabel(finShiftMonth(last, 1)))} — nothing to do. Close it to save a note and keep the month on file.`
+        : `Carry-forward is off, so each month starts at zero. Turn it on in <b>Categories &amp; budget</b> to roll leftovers forward.`}</span>
+    </div>
+    ${mk !== last ? `<button class="btn btn-ghost btn-sm" id="finRollGo" data-m="${last}"><i class="bi bi-box-arrow-in-right me-1"></i>Open ${escapeHtml(finMonthLabel(last).split(' ')[0])}</button>` : ''}
+    <button class="btn btn-primary btn-sm" id="finCloseBtn" data-m="${last}"><i class="bi bi-check2-square me-1"></i>Review &amp; close</button>
+    <button class="fin-roll-x" id="finRollX" data-m="${last}" title="Not now"><i class="bi bi-x-lg"></i></button>
+  </div>`;
+}
+
+/* ---- Workspace: tabs + the active panel --------------------------- */
+const FIN_TABS = [
+  { key: 'ledger',    label: 'Ledger',    ico: 'list-ul' },
+  { key: 'calendar',  label: 'Calendar',  ico: 'calendar3' },
+  { key: 'breakdown', label: 'Breakdown', ico: 'pie-chart' },
+  { key: 'trends',    label: 'Trends',    ico: 'bar-chart-line' },
+  { key: 'months',    label: 'Months',    ico: 'archive' },
+  { key: 'insights',  label: 'Insights',  ico: 'stars' }
+];
+
+function finDrawPanel() {
+  const work = document.getElementById('finWork');
+  if (!work) return;
+  const s = finSummary(_finMonth);
+  const rows = finRows(s);
+  const body =
+    _finTab === 'calendar'  ? finCalendarHtml(s) :
+    _finTab === 'breakdown' ? finBreakdownHtml(s) :
+    _finTab === 'trends'    ? finTrendsHtml(s) :
+    _finTab === 'months'    ? finMonthsHtml() :
+    _finTab === 'insights'  ? finInsightsHtml(s) :
+                              finLedgerHtml(s, rows);
+
+  work.innerHTML = `
+    <div class="fin-tabs" role="tablist">
+      ${FIN_TABS.map(t => `<button class="${_finTab === t.key ? 'on' : ''}" data-tab="${t.key}" role="tab">
+        <i class="bi bi-${t.ico}"></i>${t.label}${t.key === 'ledger' ? `<span class="fin-tabn">${rows.length}</span>` : ''}</button>`).join('')}
+    </div>
+    <div class="fin-panel">${body}</div>`;
+
+  work.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { _finTab = b.dataset.tab; finDrawPanel(); });
+  finWirePanel(s);
+}
+
+/* The ledger rows after lens + filters + search. One place, so every
+   tab and the counters can agree on what "showing" means. */
+function finRows(s) {
+  let rows = s.tx.slice();
+  if (_finLens === 'income' || _finLens === 'expense' || _finLens === 'deposit') rows = rows.filter(t => t.type === _finLens);
+  if (_finLens === 'leak') rows = rows.filter(t => t.type === 'expense' && (t.necessity === 'Avoidable' || t.necessity === 'Discretionary'));
+  if (_finDay) rows = rows.filter(t => t.date === _finDay);
+  if (_finFilt.category) rows = rows.filter(t => (t.category || '') === _finFilt.category);
+  if (_finFilt.necessity) rows = rows.filter(t => (t.necessity || 'Untagged') === _finFilt.necessity);
+  if (_finFilt.method) rows = rows.filter(t => (t.method || '') === _finFilt.method);
+  const q = _finQ.trim().toLowerCase();
+  if (q) rows = rows.filter(t => [t.note, t.category, t.method, t.necessity, t.amount].some(v => String(v == null ? '' : v).toLowerCase().includes(q)));
+  return rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+/* ---- Ledger: searchable, filterable, grouped by day, bulk-taggable -- */
+function finLedgerHtml(s, rows) {
+  const cats = [...new Set(s.tx.map(t => t.category).filter(Boolean))].sort();
+  const methods = [...new Set(s.tx.map(t => t.method).filter(Boolean))].sort();
+  const opt = (v, sel) => `<option value="${escapeHtml(v)}" ${v === sel ? 'selected' : ''}>${escapeHtml(v)}</option>`;
+  const activeFilters = (_finDay ? 1 : 0) + (_finFilt.category ? 1 : 0) + (_finFilt.necessity ? 1 : 0) + (_finFilt.method ? 1 : 0) + (_finQ ? 1 : 0);
+
+  const bar = `
+    <div class="fin-filters">
+      <select class="filter-select" id="fltCat"><option value="">All categories</option>${cats.map(c => opt(c, _finFilt.category)).join('')}</select>
+      <select class="filter-select" id="fltNeed"><option value="">All necessity</option>${[...FIN_NEED.map(n => n.key), 'Untagged'].map(c => opt(c, _finFilt.necessity)).join('')}</select>
+      <select class="filter-select" id="fltMethod"><option value="">All methods</option>${methods.map(c => opt(c, _finFilt.method)).join('')}</select>
+      ${_finDay ? `<span class="fin-daychip"><i class="bi bi-calendar3 me-1"></i>${fmtDate(_finDay)}<button id="fltDayX" title="Clear day"><i class="bi bi-x"></i></button></span>` : ''}
+      ${activeFilters ? `<button class="btn btn-ghost btn-sm" id="fltClear"><i class="bi bi-x-circle me-1"></i>Clear ${activeFilters} filter${activeFilters === 1 ? '' : 's'}</button>` : ''}
+      <span class="ms-auto text-faint" style="font-size:12px">
+        ${rows.length} of ${s.tx.length} record${s.tx.length === 1 ? '' : 's'}${rows.length !== s.tx.length ? ` · ${fmtBDT(rows.reduce((n, t) => n + (Number(t.amount) || 0), 0))} shown` : ''}
+      </span>
+      <button class="btn btn-soft btn-sm" id="finAdd2"><i class="bi bi-plus-lg me-1"></i>Add</button>
+    </div>`;
+
+  if (!rows.length) {
+    return bar + `<div class="empty" style="padding:40px 20px"><div class="e-ico"><i class="bi bi-receipt"></i></div>
+      <b>${s.tx.length ? 'Nothing matches those filters' : 'No transactions yet'}</b>
+      <p>${s.tx.length ? 'Loosen a filter or clear the search to see the rest of the month.' : 'Add your income, deposits and expenses to see the full picture.'}</p></div>`;
+  }
+
+  // group by day, newest first, with a per-day net
+  const days = [];
+  rows.forEach(t => {
+    const d = days.find(x => x.date === t.date);
+    (d || days[days.push({ date: t.date, items: [] }) - 1]).items.push(t);
+  });
+
+  const sel = _finSel;
+  const bulk = sel.size ? `
+    <div class="fin-bulk">
+      <b>${sel.size} selected</b>
+      <select class="filter-select" id="bulkNeed"><option value="">Tag necessity…</option>
+        ${FIN_NEED.map(n => `<option>${n.key}</option>`).join('')}<option value="__clear">Clear tag</option></select>
+      <select class="filter-select" id="bulkCat"><option value="">Set category…</option>${cats.map(c => opt(c, '')).join('')}</select>
+      <button class="btn btn-ghost btn-sm text-danger" id="bulkDel"><i class="bi bi-trash me-1"></i>Delete</button>
+      <button class="btn btn-ghost btn-sm ms-auto" id="bulkNone">Clear selection</button>
+    </div>` : '';
+
+  return bar + bulk + `
+  <div class="fin-tablewrap">
+  <table class="dt fin-dt"><thead><tr>
+    <th style="width:34px"><input type="checkbox" id="selAll" title="Select all shown" ${sel.size && sel.size === rows.length ? 'checked' : ''}></th>
+    <th>Detail</th><th style="width:150px">Category</th><th style="width:135px">Necessity</th>
+    <th style="width:120px">Method</th><th style="width:120px;text-align:right">Amount</th><th style="width:70px"></th>
+  </tr></thead>
+  <tbody>
+  ${days.map(d => {
+    const net = d.items.reduce((n, t) => n + (t.type === 'income' ? 1 : -1) * (Number(t.amount) || 0), 0);
+    return `<tr class="fin-dayrow"><td colspan="5"><b>${fmtDate(d.date)}</b>
+        <span class="text-faint">${d.items.length} record${d.items.length === 1 ? '' : 's'}</span></td>
+      <td colspan="2" style="text-align:right" class="num ${net >= 0 ? 'fin-pos' : 'fin-neg'}">${net >= 0 ? '+' : '−'}${fmtBDT(Math.abs(net))}</td></tr>
+    ` + d.items.map(t => {
+      const inc = t.type === 'income', dep = t.type === 'deposit';
+      const fallback = inc ? 'Income' : dep ? 'Deposit' : 'Expense';
+      const amtCls = inc ? 'fin-pos' : dep ? 'fin-dep' : 'fin-neg';
+      return `<tr${dep ? ' class="is-deposit"' : ''}${sel.has(t.id) ? ' data-sel="1"' : ''}>
+        <td><input type="checkbox" class="fin-rowsel" data-id="${escapeHtml(t.id)}" ${sel.has(t.id) ? 'checked' : ''}></td>
+        <td class="name-cell"><b>${escapeHtml(t.note || fallback)}</b>
+          ${dep ? '<small><i class="bi bi-bank"></i> deposited — kept, not spent</small>' : ''}
+          ${t.recurring && t.recurring !== 'One-time' ? `<small title="Marked as recurring for your reference — it is not added to future months automatically"><i class="bi bi-arrow-repeat"></i> ${escapeHtml(t.recurring)}</small>` : ''}</td>
+        <td>${escapeHtml(t.category || '—')}</td>
+        <td>${(inc || dep)
+          ? '<span class="text-faint">—</span>'
+          : `<button class="chip fin-needchip t-${FIN_NEED_TONE[t.necessity] || 'slate'}" data-need="${escapeHtml(t.id)}"
+               title="Click to retag — no need to open the record"><span class="dot"></span>${escapeHtml(t.necessity || 'Untagged')}</button>`}</td>
+        <td class="text-soft">${escapeHtml(t.method || '—')}</td>
+        <td style="text-align:right" class="num ${amtCls}">${inc ? fmtBDT(t.amount, true) : '−' + fmtBDT(t.amount)}</td>
+        <td><div class="row-actions"><button title="Edit" data-fe="${escapeHtml(t.id)}"><i class="bi bi-pencil"></i></button>
+          <button class="del" title="Delete" data-fd="${escapeHtml(t.id)}"><i class="bi bi-trash"></i></button></div></td>
+      </tr>`;
+    }).join('');
+  }).join('')}
+  </tbody></table></div>`;
+}
+
+/* ---- Calendar heatmap: the month's rhythm at a glance -------------- */
+function finCalendarHtml(s) {
+  const [y, m] = _finMonth.split('-').map(Number);
+  const daysIn = new Date(y, m, 0).getDate();
+  const pad = new Date(y, m - 1, 1).getDay();
+  const per = {};
+  s.tx.forEach(t => {
+    const d = per[t.date] || (per[t.date] = { in: 0, out: 0, dep: 0, n: 0 });
+    const amt = Number(t.amount) || 0;
+    if (t.type === 'income') d.in += amt; else if (t.type === 'deposit') d.dep += amt; else d.out += amt;
+    d.n++;
+  });
+  const maxOut = Math.max(1, ...Object.values(per).map(d => d.out));
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  const cells = [];
+  for (let i = 0; i < pad; i++) cells.push('<span class="fin-cell is-pad"></span>');
+  for (let day = 1; day <= daysIn; day++) {
+    const iso = `${_finMonth}-${String(day).padStart(2, '0')}`;
+    const d = per[iso];
+    const heat = d ? Math.min(1, d.out / maxOut) : 0;
+    const tip = d
+      ? `${fmtDate(iso)} · ${d.n} record${d.n === 1 ? '' : 's'}${d.in ? ' · in ' + fmtBDTk(d.in) : ''}${d.out ? ' · spent ' + fmtBDTk(d.out) : ''}${d.dep ? ' · deposited ' + fmtBDTk(d.dep) : ''}`
+      : `${fmtDate(iso)} · nothing logged`;
+    cells.push(`<button class="fin-cell ${d ? 'has' : ''} ${_finDay === iso ? 'on' : ''} ${iso === todayISO ? 'is-today' : ''}"
+      data-day="${iso}" style="--heat:${heat.toFixed(3)}" title="${escapeHtml(tip)}">
+      <span class="fc-d">${day}</span>
+      ${d && d.out ? `<span class="fc-a num">${fmtBDTk(d.out)}</span>` : ''}
+      <span class="fc-dots">${d && d.in ? '<i class="t-green"></i>' : ''}${d && d.dep ? '<i class="t-blue"></i>' : ''}</span>
+    </button>`);
+  }
+
+  const busiest = Object.entries(per).sort((a, b) => b[1].out - a[1].out)[0];
+  const spendDays = Object.values(per).filter(d => d.out > 0).length;
+  return `
+  <div class="fin-calhead">
+    <span class="section-title mb-0"><i class="bi bi-calendar3 me-1"></i>${escapeHtml(finMonthLabel(_finMonth))} · daily rhythm</span>
+    <span class="text-faint" style="font-size:12px">
+      ${spendDays} spending day${spendDays === 1 ? '' : 's'}${busiest ? ` · heaviest ${fmtDate(busiest[0])} at ${fmtBDT(busiest[1].out)}` : ''} — click a day to open it in the ledger</span>
+  </div>
+  <div class="fin-cal">
+    ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<span class="fin-caldow">${d}</span>`).join('')}
+    ${cells.join('')}
+  </div>
+  <div class="fin-legend"><span><i class="dot t-red"></i>Shade = how much you spent</span><span><i class="dot t-green"></i>Income that day</span><span><i class="dot t-blue"></i>Deposit that day</span></div>`;
+}
+
+/* ---- Breakdown: the sector + payment-method detail ----------------- */
+function finBreakdownHtml(s) {
+  const maxIn = Math.max(1, ...s.incomeSectors.map(x => x[1]));
+  const maxOut = Math.max(1, ...s.expenseSectors.map(x => x[1]));
+  const needMax = Math.max(1, s.totalOut);
+  return `
+  <div class="fin-split">
+    <div>
+      <div class="section-title"><i class="bi bi-clipboard-heart me-1"></i>Was it worth it? · Spending quality</div>
+      <div class="fin-need">
+        ${FIN_NEED.map(n => {
+          const amt = s.byNeed[n.key] || 0;
+          const pct = s.totalOut > 0 ? (amt / s.totalOut * 100) : 0;
+          return `<div class="fin-need-cell">
+            <div class="fin-need-top"><span class="stat-ico-sm t-${n.tone}"><i class="bi bi-${n.ico}"></i></span>
+              <div><b>${n.key}</b><small>${n.desc}</small></div>
+              <span class="fin-need-amt num t-${n.tone}">${fmtBDT(amt)}</span></div>
+            <div class="fin-bar-track"><span class="t-${n.tone}" style="width:${Math.max(pct > 0 ? 3 : 0, pct)}%"></span></div>
+            <div class="fin-need-pct">${pct.toFixed(0)}% of spend</div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${s.untagged > 0 ? `<div class="fin-untagged"><i class="bi bi-question-circle me-1"></i>
+        <b>${fmtBDT(s.untagged)}</b> (${(s.untagged / needMax * 100).toFixed(0)}% of spend) has no necessity tag yet, so it is
+        counted in your spending but left out of these bands — it is never guessed for you.
+        <button class="btn btn-ghost btn-sm" id="finTagGo"><i class="bi bi-tags me-1"></i>Tag them now</button></div>` : ''}
+    </div>
+    <div>
+      <div class="section-title"><i class="bi bi-wallet2 me-1"></i>By payment method</div>
       ${(s.byMethodIn.length || s.byMethodOut.length || s.byMethodDep.length) ? [
         ['Money in', s.byMethodIn, 'green', 'arrow-down-left'],
         ['Money out', s.byMethodOut, 'red', 'arrow-up-right'],
         ['Deposited', s.byMethodDep, 'blue', 'bank']
       ].filter(([, rows]) => rows.length).map(([label, rows, tone, ico]) => `
         <div class="fin-subhead"><i class="bi bi-${ico} me-1"></i>${label}</div>
-        ${rows.map(([m, a]) => finBarRow(m, a, Math.max(1, ...rows.map(x => x[1])), tone)).join('')}`).join('')
+        ${rows.map(([mm, a]) => finBarRow(mm, a, Math.max(1, ...rows.map(x => x[1])), tone)).join('')}`).join('')
         : '<p class="text-faint" style="font-size:13px">Nothing logged this month.</p>'}
     </div>
   </div>
-
-  <!-- Transactions -->
-  <div class="card table-card fin-card">
-    <div class="card-head"><h3>Transactions · ${finMonthLabel(mk)}</h3>
-      <div class="ms-auto d-flex gap-2 align-items-center">
-        <select class="filter-select btn-sm" id="finFilterType" style="height:34px">
-          <option value="">All types</option><option value="income">Income</option><option value="expense">Expense</option><option value="deposit">Deposit</option>
-        </select>
-        <button class="btn btn-soft btn-sm" id="finAdd2"><i class="bi bi-plus-lg me-1"></i>Add</button>
-      </div>
+  <div class="fin-split" style="margin-top:22px">
+    <div>
+      <div class="section-title"><i class="bi bi-arrow-down-left-circle me-1"></i>Where money came from</div>
+      ${s.incomeSectors.length ? s.incomeSectors.map(([c, a]) => finBarRow(c, a, maxIn, 'green')).join('')
+        : '<p class="text-faint" style="font-size:13px">No income logged this month.</p>'}
     </div>
-    <div id="finTxWrap"></div>
+    <div>
+      <div class="section-title"><i class="bi bi-arrow-up-right-circle me-1"></i>Where money went</div>
+      ${s.expenseSectors.length ? s.expenseSectors.map(([c, a]) => finBarRow(c, a, maxOut, 'red')).join('')
+        : '<p class="text-faint" style="font-size:13px">No expenses logged this month.</p>'}
+      ${s.depositSectors.length ? `
+        <div class="fin-subhead"><i class="bi bi-bank me-1"></i>Deposited (not spending)</div>
+        ${s.depositSectors.map(([c, a]) => finBarRow(c, a, Math.max(1, ...s.depositSectors.map(x => x[1])), 'blue')).join('')}` : ''}
+    </div>
+  </div>`;
+}
+
+/* ---- Trends: 12 months of flow, with the kept-rate on top ---------- */
+function finTrendsHtml(s) {
+  const trend = [];
+  for (let i = 11; i >= 0; i--) {
+    const k = finShiftMonth(_finMonth, -i);
+    const t = finSummary(k);
+    trend.push({ k, in: t.totalIn, out: t.totalOut, dep: t.totalDeposit, rate: t.savingsRate, count: t.count });
+  }
+  const max = Math.max(1, ...trend.flatMap(t => [t.in, t.out, t.dep]));
+  const anyDep = trend.some(t => t.dep > 0);
+  const live = trend.filter(t => t.count);
+  const avgOut = live.length ? live.reduce((n, t) => n + t.out, 0) / live.length : 0;
+  const avgRate = live.length ? live.reduce((n, t) => n + t.rate, 0) / live.length : 0;
+  const budget = FinanceDB.data.monthlyBudget || 0;
+
+  return `
+  <div class="fin-calhead">
+    <span class="section-title mb-0"><i class="bi bi-bar-chart-line me-1"></i>Last 12 months</span>
+    <span class="text-faint" style="font-size:12px">
+      Average spend ${fmtBDT(avgOut)} · average kept ${avgRate.toFixed(0)}% — click a month to travel</span>
+  </div>
+  <div class="fin-trend is-year">
+    ${budget > 0 && budget <= max ? `<span class="fin-budgetline" style="bottom:${budget / max * 100}%" title="Monthly budget ${fmtBDT(budget)}"><b>budget</b></span>` : ''}
+    ${trend.map(t => `<div class="fin-tcol ${t.k === _finMonth ? 'is-cur' : ''}" data-scrub2="${t.k}" title="${escapeHtml(finMonthLabel(t.k))} · in ${fmtBDTk(t.in)} · out ${fmtBDTk(t.out)}${t.dep ? ' · dep ' + fmtBDTk(t.dep) : ''}">
+      <div class="fin-tbars">
+        <span class="fin-tbar t-green" style="height:${t.in / max * 100}%"></span>
+        <span class="fin-tbar t-red" style="height:${t.out / max * 100}%"></span>
+        ${anyDep ? `<span class="fin-tbar t-blue" style="height:${t.dep / max * 100}%"></span>` : ''}
+      </div>
+      <div class="fin-tlabel">${finMonthLabel(t.k).slice(0, 3)}</div>
+    </div>`).join('')}
+  </div>
+  <div class="fin-legend"><span><i class="dot t-green"></i>Income</span><span><i class="dot t-red"></i>Expense</span>${anyDep ? '<span><i class="dot t-blue"></i>Deposited</span>' : ''}</div>`;
+}
+
+/* ---- Months: the archive. Every month you have ever recorded ------- */
+function finMonthsHtml() {
+  const months = finAllMonths().reverse();
+  if (!months.length) return `<div class="empty" style="padding:40px"><div class="e-ico"><i class="bi bi-archive"></i></div><b>No history yet</b><p>Once you record a month it is kept here for good.</p></div>`;
+  const closes = finCloses();
+  return `
+  <div class="fin-calhead">
+    <span class="section-title mb-0"><i class="bi bi-archive me-1"></i>Month archive</span>
+    <span class="text-faint" style="font-size:12px">Every month keeps its own records for good — the leftover of one opens the next.</span>
+  </div>
+  <div class="fin-tablewrap">
+  <table class="dt fin-dt"><thead><tr>
+    <th>Month</th><th style="text-align:right">Opened</th><th style="text-align:right">In</th>
+    <th style="text-align:right">Deposited</th><th style="text-align:right">Spent</th>
+    <th style="text-align:right">Closed with</th><th style="width:78px">Quality</th><th style="width:150px"></th>
+  </tr></thead><tbody>
+  ${months.map(k => {
+    const t = finSummary(k);
+    const c = finCarry(k);
+    const q = finQuality(t);
+    const rec = closes[k];
+    return `<tr class="${k === _finMonth ? 'is-cur' : ''}">
+      <td class="name-cell"><b>${escapeHtml(finMonthLabel(k))}</b>
+        <small>${t.count} record${t.count === 1 ? '' : 's'}${rec ? ` · closed ${fmtDate(String(rec.closedAt || '').slice(0, 10))}` : ''}</small>
+        ${rec && rec.note ? `<small class="fin-notepeek"><i class="bi bi-sticky me-1"></i>${escapeHtml(rec.note)}</small>` : ''}</td>
+      <td style="text-align:right" class="num text-soft">${c.on ? fmtBDT(c.opening) : '—'}</td>
+      <td style="text-align:right" class="num fin-pos">${fmtBDTk(t.totalIn)}</td>
+      <td style="text-align:right" class="num fin-dep">${fmtBDTk(t.totalDeposit)}</td>
+      <td style="text-align:right" class="num">${fmtBDTk(t.totalOut)}</td>
+      <td style="text-align:right" class="num"><b>${fmtBDT(c.opening + t.net)}</b></td>
+      <td>${q.score != null ? `<span class="fin-gradepill t-${q.tone}">${q.grade}</span>` : '<span class="text-faint">—</span>'}</td>
+      <td><div class="d-flex gap-1 justify-content-end">
+        <button class="btn btn-ghost btn-sm" data-open="${k}" title="Open this month"><i class="bi bi-box-arrow-in-right"></i></button>
+        ${rec
+          ? `<button class="btn btn-ghost btn-sm" data-reopen="${k}" title="Reopen — removes the saved review, never the records"><i class="bi bi-unlock"></i></button>`
+          : `<button class="btn btn-soft btn-sm" data-close="${k}" title="Review &amp; close"><i class="bi bi-check2-square"></i></button>`}
+      </div></td>
+    </tr>`;
+  }).join('')}
+  </tbody></table></div>`;
+}
+
+/* ---- Insights: the narrative, the radar and the what-if ------------ */
+function finInsightsHtml(s) {
+  const insights = finInsights(_finMonth, s);
+  const rec = finRecurring(_finMonth);
+  const recTotal = rec.filter(r => r.live).reduce((n, r) => n + r.avg, 0);
+  const q = finQuality(s);
+
+  return `
+  <div class="section-title"><i class="bi bi-stars me-1"></i>What your money is telling you</div>
+  <div class="fin-insights">
+    ${insights.map(i => `<div class="fin-insight t-${i.tone}"><i class="bi bi-${i.ico}"></i><div>${i.text}</div></div>`).join('')}
+    ${q.score != null ? `<div class="fin-insight t-${q.tone}"><i class="bi bi-award"></i><div>
+      Spend quality <b>${q.grade}</b> (${q.score.toFixed(0)}/100) — the weighted mix of your <b>${fmtBDT(q.tagged)}</b> of tagged spending.
+      Essential and Important lift it; Avoidable drags it to zero.</div></div>` : ''}
   </div>
 
-  <!-- quick month chips -->
-  ${allMonths.length > 1 ? `<div class="fin-months">${allMonths.slice().reverse().map(k => `<button class="fin-mchip ${k === mk ? 'on' : ''}" data-m="${k}">${finMonthLabel(k)}</button>`).join('')}</div>` : ''}
-  `;
+  <div class="fin-split" style="margin-top:24px">
+    <div>
+      <div class="section-title"><i class="bi bi-arrow-repeat me-1"></i>Recurring radar</div>
+      ${rec.length ? `
+        <p class="text-faint" style="font-size:12.5px;margin:-4px 0 12px">
+          Found in your own ledger — the same line paid across ${rec.length === 1 ? 'two or more months' : 'multiple months'}.
+          ${recTotal > 0 ? `Still live this month: <b>${fmtBDT(recTotal)}/mo</b> ≈ <b>${fmtBDT(recTotal * 12)}/yr</b>.` : ''}
+        </p>
+        <div class="fin-recs">
+          ${rec.slice(0, 8).map(r => `<div class="fin-rec ${r.live ? '' : 'is-past'}">
+            <span class="fin-rec-ico t-${r.type === 'deposit' ? 'blue' : 'amber'}"><i class="bi bi-${r.type === 'deposit' ? 'bank' : 'arrow-repeat'}"></i></span>
+            <div><b>${escapeHtml(r.label)}</b><small>${r.months} months${r.category ? ' · ' + escapeHtml(r.category) : ''}${r.live ? '' : ' · last seen ' + escapeHtml(finMonthLabel(r.last))}</small></div>
+            <span class="num">${fmtBDT(r.avg)}<small>/mo avg</small></span>
+          </div>`).join('')}
+        </div>` : '<p class="text-faint" style="font-size:13px">Nothing repeats across months yet. Once a line shows up twice it lands here automatically.</p>'}
+    </div>
+    <div>
+      <div class="section-title"><i class="bi bi-sliders2 me-1"></i>What if you trimmed the soft spend?</div>
+      ${s.softSpend > 0 ? `
+        <p class="text-faint" style="font-size:12.5px;margin:-4px 0 14px">
+          <b>${fmtBDT(s.softSpend)}</b> sat in Avoidable + Discretionary this month. Drag to see what cutting part of it is worth.</p>
+        <input type="range" class="fin-range" id="finWhatIf" min="0" max="100" step="5" value="30">
+        <div class="fin-whatif" id="finWhatIfOut"></div>`
+        : '<p class="text-faint" style="font-size:13px">No Avoidable or Discretionary spending tagged this month — nothing to trim.</p>'}
+    </div>
+  </div>`;
+}
 
-  // ---- transactions table ----
-  const drawTx = () => {
-    const ft = document.getElementById('finFilterType')?.value || '';
-    let rows = s.tx.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-    if (ft) rows = rows.filter(t => t.type === ft);
-    const wrap = document.getElementById('finTxWrap');
-    if (!rows.length) { wrap.innerHTML = `<div class="empty" style="padding:36px"><div class="e-ico"><i class="bi bi-receipt"></i></div><b>No transactions</b><p>Add your income and expenses to see the full picture.</p></div>`; return; }
-    wrap.innerHTML = `<table class="dt"><thead><tr>
-      <th>Date</th><th>Detail</th><th>Category</th><th>Necessity</th><th>Method</th><th style="text-align:right">Amount</th><th></th>
-    </tr></thead><tbody>${rows.map(t => {
-      const inc = t.type === 'income';
-      const dep = t.type === 'deposit';
-      const fallback = inc ? 'Income' : dep ? 'Deposit' : 'Expense';
-      // Deposits leave your hand like an expense (shown negative) but are
-      // money kept, so they get their own tone and no necessity band.
-      const amtCls = inc ? 'fin-pos' : dep ? 'fin-dep' : 'fin-neg';
-      return `<tr${dep ? ' class="is-deposit"' : ''}>
-        <td class="date-cell">${fmtDate(t.date)}</td>
-        <td class="name-cell"><b>${escapeHtml(t.note || fallback)}</b>
-          ${dep ? '<small><i class="bi bi-bank"></i> deposited — kept, not spent</small>' : ''}
-          ${t.recurring && t.recurring !== 'One-time' ? `<small title="Marked as recurring for your reference — it is not added to future months automatically"><i class="bi bi-arrow-repeat"></i> ${escapeHtml(t.recurring)}</small>` : ''}</td>
-        <td>${escapeHtml(t.category || '—')}</td>
-        <td>${(inc || dep) ? '<span class="text-faint">—</span>' : `<span class="chip t-${FIN_NEED_TONE[t.necessity] || 'slate'}"><span class="dot"></span>${escapeHtml(t.necessity || 'Untagged')}</span>`}</td>
-        <td class="text-soft">${escapeHtml(t.method || '—')}</td>
-        <td style="text-align:right" class="num ${amtCls}">${inc ? fmtBDT(t.amount, true) : '−' + fmtBDT(t.amount)}</td>
-        <td><div class="row-actions"><button title="Edit" data-fe="${t.id}"><i class="bi bi-pencil"></i></button>
-          <button class="del" title="Delete" data-fd="${t.id}"><i class="bi bi-trash"></i></button></div></td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
-    wrap.querySelectorAll('[data-fe]').forEach(b => b.onclick = () => openFinanceModal(b.dataset.fe));
-    wrap.querySelectorAll('[data-fd]').forEach(b => b.onclick = () => {
-      if (!Security.guard('delete finance data')) return;
-      if (confirm('Delete this transaction?')) { FinanceDB.remove(b.dataset.fd); toast('Deleted.', 'ok'); drawAccounts(); }
-    });
+/* ---- Panel wiring (re-attached on every panel redraw) -------------- */
+function finWirePanel(s) {
+  const work = document.getElementById('finWork');
+  if (!work) return;
+  const redraw = () => finDrawPanel();
+
+  // ledger: filters
+  const set = (id, key) => { const el = document.getElementById(id); if (el) el.onchange = () => { _finFilt[key] = el.value; redraw(); }; };
+  set('fltCat', 'category'); set('fltNeed', 'necessity'); set('fltMethod', 'method');
+  document.getElementById('fltDayX')?.addEventListener('click', () => { _finDay = ''; redraw(); });
+  document.getElementById('fltClear')?.addEventListener('click', () => {
+    _finFilt = { category: '', necessity: '', method: '' }; _finDay = ''; _finQ = '';
+    const box = document.getElementById('finSearch'); if (box) box.value = '';
+    redraw();
+  });
+  document.getElementById('finAdd2')?.addEventListener('click', () => openFinanceModal(null));
+  document.getElementById('finTagGo')?.addEventListener('click', () => {
+    _finTab = 'ledger'; _finLens = 'expense'; _finFilt.necessity = 'Untagged'; drawAccounts();
+  });
+
+  // ledger: selection + bulk actions
+  work.querySelectorAll('.fin-rowsel').forEach(cb => cb.onchange = () => {
+    if (cb.checked) _finSel.add(cb.dataset.id); else _finSel.delete(cb.dataset.id);
+    redraw();
+  });
+  const all = document.getElementById('selAll');
+  if (all) all.onchange = () => {
+    _finSel.clear();
+    if (all.checked) finRows(s).forEach(t => _finSel.add(t.id));
+    redraw();
   };
-  drawTx();
+  document.getElementById('bulkNone')?.addEventListener('click', () => { _finSel.clear(); redraw(); });
+  const bulkApply = (fn, msg) => {
+    if (!Security.guard('edit finance data')) return;
+    let n = 0;
+    FinanceDB.data.tx.forEach(t => { if (_finSel.has(t.id)) { fn(t); n++; } });
+    FinanceDB.save(); _finSel.clear();
+    toast(`${msg} ${n} record${n === 1 ? '' : 's'}.`, 'ok');
+    drawAccounts();
+  };
+  const bn = document.getElementById('bulkNeed');
+  if (bn) bn.onchange = () => {
+    const v = bn.value; if (!v) return;
+    // deposits and income have no necessity band, so they are skipped
+    bulkApply(t => { if (t.type === 'expense') t.necessity = (v === '__clear' ? '' : v); }, 'Retagged');
+  };
+  const bc = document.getElementById('bulkCat');
+  if (bc) bc.onchange = () => { const v = bc.value; if (v) bulkApply(t => { t.category = v; }, 'Recategorised'); };
+  document.getElementById('bulkDel')?.addEventListener('click', () => {
+    if (!confirm(`Delete ${_finSel.size} selected record(s)? This cannot be undone.`)) return;
+    if (!Security.guard('delete finance data')) return;
+    FinanceDB.data.tx = FinanceDB.all().filter(t => !_finSel.has(t.id));
+    FinanceDB.save(); _finSel.clear();
+    toast('Deleted.', 'ok');
+    drawAccounts();
+  });
 
-  // ---- wiring ----
-  const go = (mkey) => { _finMonth = mkey; drawAccounts(); };
-  document.getElementById('finPrev').onclick = () => go(finShiftMonth(mk, -1));
-  document.getElementById('finNext').onclick = () => go(finShiftMonth(mk, 1));
-  document.getElementById('finToday').onclick = () => go(finMonthKey(new Date().toISOString()));
-  document.getElementById('finFilterType').onchange = drawTx;
-  document.getElementById('finAdd').onclick = () => openFinanceModal(null);
-  document.getElementById('finAdd2').onclick = () => openFinanceModal(null);
-  document.getElementById('finSettings').onclick = openFinanceSettings;
-  host.querySelectorAll('.fin-mchip').forEach(b => b.onclick = () => go(b.dataset.m));
+  // ledger: inline necessity retag — the fastest way to clear the untagged pile
+  work.querySelectorAll('[data-need]').forEach(btn => btn.onclick = () => {
+    const t = FinanceDB.get(btn.dataset.need);
+    if (!t) return;
+    const sel = document.createElement('select');
+    sel.className = 'filter-select fin-needsel';
+    sel.innerHTML = `<option value="">Untagged</option>` +
+      FIN_NEED.map(n => `<option ${n.key === t.necessity ? 'selected' : ''}>${n.key}</option>`).join('');
+    btn.replaceWith(sel);
+    sel.focus();
+    sel.onchange = () => {
+      if (!Security.guard('edit finance data')) return;
+      t.necessity = sel.value;
+      FinanceDB.save();
+      toast('Necessity updated.', 'ok');
+      drawAccounts();
+    };
+    sel.onblur = () => redraw();
+  });
+
+  // ledger: row edit / delete
+  work.querySelectorAll('[data-fe]').forEach(b => b.onclick = () => openFinanceModal(b.dataset.fe));
+  work.querySelectorAll('[data-fd]').forEach(b => b.onclick = () => {
+    if (!Security.guard('delete finance data')) return;
+    if (confirm('Delete this transaction?')) { FinanceDB.remove(b.dataset.fd); toast('Deleted.', 'ok'); drawAccounts(); }
+  });
+
+  // calendar: a day opens in the ledger
+  work.querySelectorAll('[data-day]').forEach(b => b.onclick = () => {
+    _finDay = (_finDay === b.dataset.day) ? '' : b.dataset.day;
+    _finTab = 'ledger';
+    redraw();
+  });
+
+  // trends: click a column to travel
+  work.querySelectorAll('[data-scrub2]').forEach(b => b.onclick = () => {
+    _finMonth = b.dataset.scrub2; _finDay = ''; _finSel.clear(); drawAccounts();
+  });
+
+  // months archive
+  work.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { _finMonth = b.dataset.open; _finDay = ''; drawAccounts(); });
+  work.querySelectorAll('[data-close]').forEach(b => b.onclick = () => openFinanceClose(b.dataset.close));
+  work.querySelectorAll('[data-reopen]').forEach(b => b.onclick = () => {
+    if (!confirm('Reopen this month? Only the saved review note is removed — every transaction stays exactly where it is.')) return;
+    if (!Security.guard('edit finance data')) return;
+    delete finCloses()[b.dataset.reopen];
+    FinanceDB.save();
+    toast('Month reopened.', 'ok');
+    drawAccounts();
+  });
+
+  // insights: what-if slider
+  const wi = document.getElementById('finWhatIf');
+  if (wi) {
+    const out = document.getElementById('finWhatIfOut');
+    const paint = () => {
+      const pct = Number(wi.value);
+      const save = s.softSpend * pct / 100;
+      out.innerHTML = `<div class="fw-v num">${fmtBDT(save)}<small>/month</small></div>
+        <div class="fw-l">Cutting <b>${pct}%</b> of soft spend puts <b>${fmtBDT(save * 12)}</b> away in a year${
+          s.totalIn > 0 ? ` — lifting this month's kept rate to <b>${Math.min(100, (s.kept + save) / s.totalIn * 100).toFixed(0)}%</b>` : ''}.</div>`;
+    };
+    wi.oninput = paint;
+    paint();
+  }
+}
+
+/* ---- Month close: a saved review, never a lock --------------------
+   Closing writes ONE new entry under `closes` (your note + the figures
+   as they stood). It does not touch, freeze or move a single record —
+   reopening simply deletes that entry. Optionally it copies the lines
+   you tick into the next month as brand-new records. */
+function openFinanceClose(mk) {
+  if (!Security.guard('close a month')) return;
+  document.getElementById('finCloseModal')?.remove();
+  const s = finSummary(mk);
+  const c = finCarry(mk);
+  const q = finQuality(s);
+  const closing = c.opening + s.net;
+  const nextKey = finShiftMonth(mk, 1);
+  const prevClose = finCloses()[mk];
+
+  // monthly-tagged lines are the natural candidates to bring forward
+  const repeats = s.tx.filter(t => t.recurring === 'Monthly');
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+  <div class="modal fade" id="finCloseModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="d-flex align-items-center gap-2"><span class="stat-ico"><i class="bi bi-calendar-check"></i></span>
+            <h5 class="modal-title">Close ${escapeHtml(finMonthLabel(mk))}</h5></div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="fin-closegrid">
+            <div><span>Income</span><b class="num fin-pos">${fmtBDT(s.totalIn)}</b></div>
+            <div><span>Deposited</span><b class="num fin-dep">${fmtBDT(s.totalDeposit)}</b></div>
+            <div><span>Spent</span><b class="num">${fmtBDT(s.totalOut)}</b></div>
+            <div><span>Kept</span><b class="num">${fmtBDT(s.kept)} · ${s.savingsRate.toFixed(0)}%</b></div>
+            <div><span>Quality</span><b>${q.score != null ? q.grade + ' · ' + q.score.toFixed(0) + '/100' : '—'}</b></div>
+            <div><span>Vault after</span><b class="num">${fmtBDT(c.vault)}</b></div>
+          </div>
+
+          <div class="fin-carrynote">
+            <i class="bi bi-arrow-right-circle"></i>
+            <div>${c.on
+              ? `<b>${fmtBDT(closing)}</b> carries into <b>${escapeHtml(finMonthLabel(nextKey))}</b> as its opening balance
+                 (${fmtBDT(c.opening)} opened + ${fmtBDT(s.net)} this month). This happens on its own — closing just files the month.`
+              : `Carry-forward is <b>off</b>, so ${escapeHtml(finMonthLabel(nextKey))} starts at zero. Turn it on in <b>Categories &amp; budget</b> if you want leftovers to roll.`}</div>
+          </div>
+
+          <div class="field" style="margin-top:16px"><label>Note for the archive <span class="text-faint">(optional)</span></label>
+            <input type="text" id="finCloseNote" value="${escapeHtml(prevClose && prevClose.note || '')}" placeholder="e.g. Tuition paid early; travel pushed spend up."></div>
+
+          ${repeats.length ? `
+          <div class="card card-pad" style="margin-top:16px">
+            <div class="d-flex align-items-center gap-2 mb-2"><span class="stat-ico-sm t-primary"><i class="bi bi-arrow-repeat"></i></span>
+              <b>Bring monthly items into ${escapeHtml(finMonthLabel(nextKey))}?</b></div>
+            <p class="text-faint" style="font-size:12.5px">These are marked <b>Monthly</b> in ${escapeHtml(finMonthLabel(mk))}. Ticking one creates a
+              <b>new</b> record next month — the original is never touched. Amounts stay editable afterwards.</p>
+            <div class="fin-repeats">
+              ${repeats.map(t => `<label class="fin-repeat"><input type="checkbox" data-rep="${escapeHtml(t.id)}">
+                <span><b>${escapeHtml(t.note || t.category || t.type)}</b><small>${escapeHtml(t.category || '—')} · ${fmtDate(t.date)}</small></span>
+                <span class="num">${fmtBDT(t.amount)}</span></label>`).join('')}
+            </div>
+          </div>` : ''}
+
+          <p class="text-faint" style="font-size:12px;margin-top:14px">
+            <i class="bi bi-shield-check me-1"></i>Closing is reversible and never edits your records — ${escapeHtml(finMonthLabel(mk))} keeps every
+            transaction exactly as it is, and you can still add to it later.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="finCloseSave"><i class="bi bi-check-lg me-1"></i>Close month</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  const modalEl = document.getElementById('finCloseModal');
+  const modal = new bootstrap.Modal(modalEl);
+  modal.show();
+  modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
+
+  document.getElementById('finCloseSave').onclick = () => {
+    if (!Security.guard('close a month')) return;
+    // copy forward only what was ticked — as new records, same day next month
+    const picked = [...modalEl.querySelectorAll('[data-rep]:checked')].map(cb => FinanceDB.get(cb.dataset.rep)).filter(Boolean);
+    const [ny, nm] = nextKey.split('-').map(Number);
+    const lastDay = new Date(ny, nm, 0).getDate();
+    const copies = picked.map(t => ({
+      type: t.type, amount: t.amount, category: t.category, necessity: t.necessity,
+      method: t.method, recurring: t.recurring, note: t.note,
+      date: `${nextKey}-${String(Math.min(Number(String(t.date).slice(-2)) || 1, lastDay)).padStart(2, '0')}`
+    }));
+
+    finCloses()[mk] = {
+      closedAt: new Date().toISOString(),
+      note: document.getElementById('finCloseNote').value.trim(),
+      // the figures as they stood at close; live numbers keep recomputing
+      snapshot: { in: s.totalIn, out: s.totalOut, deposit: s.totalDeposit, net: s.net, opening: c.opening, closing, score: q.score }
+    };
+    FinanceDB.save();
+    const n = finAddMany(copies);
+    _finRollDismissed = '';
+    toast(`${finMonthLabel(mk)} closed${n ? ` · ${n} item${n === 1 ? '' : 's'} carried into ${finMonthLabel(nextKey)}` : ''}.`, 'ok');
+    modal.hide();
+    drawAccounts();
+  };
 }
 
 /* ---- Add / edit a transaction (dedicated private modal) ---- */
@@ -5064,6 +5801,21 @@ function openFinanceSettings() {
             <div class="field"><label>Monthly budget (৳)</label><input type="number" id="finBudget" min="0" step="100" value="${d.monthlyBudget || ''}" placeholder="e.g. 30000"></div>
             <div class="field"><label>Monthly savings goal (৳)</label><input type="number" id="finGoal" min="0" step="100" value="${d.savingsGoal || ''}" placeholder="e.g. 8000"></div>
           </div>
+
+          <!-- Month rollover. Every record always stays filed under its own
+               month; these two settings only decide how the leftover travels. -->
+          <div class="card card-pad mb-3">
+            <div class="d-flex align-items-center gap-2 mb-2"><span class="stat-ico-sm t-primary"><i class="bi bi-arrow-right-circle"></i></span>
+              <b>Month rollover</b></div>
+            <label class="fin-switch">
+              <input type="checkbox" id="finCarry" ${d.carryForward !== false ? 'checked' : ''}>
+              <span><b>Carry the leftover into the next month</b>
+                <small>What is left at the end of a month becomes the next month's opening balance, worked out live from your records — so a late entry still corrects it later.</small></span>
+            </label>
+            <div class="field" style="margin-top:14px"><label>Starting balance before your first record (৳)</label>
+              <input type="number" id="finOpening" step="100" value="${d.openingBalance || ''}" placeholder="0">
+              <small class="text-faint" style="font-size:11.5px">Cash you already had when you began tracking. Anchors every opening balance after it.</small></div>
+          </div>
           ${groups.map(g => `<div class="card card-pad mb-3" data-grp="${g.key}">
             <div class="d-flex align-items-center gap-2 mb-3"><span class="stat-ico-sm t-primary"><i class="bi bi-${g.ico}"></i></span><b>${g.label}</b></div>
             <div class="d-flex flex-wrap gap-2 mb-3" data-chips="${g.key}">${chips(g.key)}</div>
@@ -5102,7 +5854,10 @@ function openFinanceSettings() {
   document.getElementById('finSetSave').onclick = () => {
     d.monthlyBudget = parseFloat(document.getElementById('finBudget').value) || 0;
     d.savingsGoal = parseFloat(document.getElementById('finGoal').value) || 0;
+    d.carryForward = !!document.getElementById('finCarry').checked;
+    d.openingBalance = parseFloat(document.getElementById('finOpening').value) || 0;
     FinanceDB.save(); toast('Settings saved.', 'ok'); modal.hide();
+    if (document.getElementById('acctHost')) drawAccounts();
   };
 }
 
@@ -5150,6 +5905,52 @@ const WorkDB = {
     if (!Array.isArray(d.cadence)) d.cadence = [];
     if (!Array.isArray(d.close)) d.close = [];
     if (!d.checks || typeof d.checks !== 'object') d.checks = {};
+
+    /* ---- Fold the imported checklist into sub-tasks ----
+       The imported shape was groups → items, rendered as a separate read-only
+       checklist below the sub-task list. But those items ARE the sub-tasks, so
+       two parallel layers only split the same work in half. Each item becomes a
+       real sub-task and its group name becomes the sub-task's PHASE, which means
+       every line gets dates, people, a report point, edit and delete.
+
+       Runs whenever any workstream still carries groups (not just on a version
+       check), so it self-heals after a re-import — and cannot double up, because
+       the groups are removed as they are converted. Tick state is carried across
+       from the old position-based keys to the new id-based ones, in every month. */
+    const needsFold = d.workstreams.some(w => Array.isArray(w.groups) && w.groups.length);
+    if (needsFold) {
+      const remap = {};
+      d.workstreams.forEach(ws => {
+        if (!Array.isArray(ws.groups) || !ws.groups.length) return;
+        ws.subtasks = Array.isArray(ws.subtasks) ? ws.subtasks : [];
+        ws.groups.forEach((g, gi) => {
+          (g.items || []).forEach((it, ii) => {
+            const id = uid();
+            const st = { id, phase: g.name || '', title: it.t || '' };
+            if (it.d) st.day = it.d;
+            if (it.who) st.assignTo = it.who;
+            if (g.buf) st.buf = true;
+            if (it.ticks) st.ticks = it.ticks;
+            ws.subtasks.push(st);
+            if (it.ticks) {
+              for (let t = 0; t < it.ticks; t++) remap[`${ws.id}.${gi}.${ii}.${t}`] = `${ws.id}.sub.${id}.${t}`;
+            } else {
+              remap[`${ws.id}.${gi}.${ii}`] = `${ws.id}.sub.${id}`;
+            }
+          });
+        });
+        delete ws.groups;
+      });
+      Object.values(d.checks).forEach(month => {
+        Object.keys(month).forEach(k => {
+          if (remap[k]) { month[remap[k]] = month[k]; delete month[k]; }
+        });
+      });
+      const n = Object.keys(remap).length;
+      this._didWkFold = n > 0;
+      if (n) console.info(`[Work Sheet] folded ${n} checklist item(s) into sub-tasks.`);
+    }
+    d._wkV = 3;
     return d;
   },
   loadLocal() {
@@ -5272,16 +6073,35 @@ let _wkMonth = null;          // the month label currently on screen
 
 /* Every tickable key for a workstream: rich sub-tasks/phases first, then the
    imported checklist (a `ticks` item expands to N keys).
-   Sub-task keys use the sub-task's own id, so ticks survive reordering and
-   editing — unlike the imported checklist, which is keyed by position. */
+   Keys are built from the sub-task's own id, so ticks survive reordering,
+   editing and phase changes. A sub-task with `ticks: n` (e.g. "10 videos")
+   expands to n keys. */
+function wkSubKeys(ws, st) {
+  if (st.ticks) return Array.from({ length: st.ticks }, (_, t) => `${ws.id}.sub.${st.id}.${t}`);
+  return [`${ws.id}.sub.${st.id}`];
+}
 function wkItemKeys(ws) {
   const out = [];
-  (ws.subtasks || []).forEach(st => out.push(`${ws.id}.sub.${st.id}`));
-  (ws.groups || []).forEach((g, gi) => (g.items || []).forEach((it, ii) => {
-    if (it.ticks) { for (let t = 0; t < it.ticks; t++) out.push(`${ws.id}.${gi}.${ii}.${t}`); }
-    else out.push(`${ws.id}.${gi}.${ii}`);
-  }));
+  (ws.subtasks || []).forEach(st => out.push(...wkSubKeys(ws, st)));
   return out;
+}
+
+/* Sub-tasks grouped into their phases, in first-seen order. Sub-tasks with no
+   phase collect under a single unnamed group. Returns [[phaseName, items], …] */
+function wkPhases(ws) {
+  const order = [], byPhase = new Map();
+  (ws.subtasks || []).forEach(st => {
+    const p = st.phase || '';
+    if (!byPhase.has(p)) { byPhase.set(p, []); order.push(p); }
+    byPhase.get(p).push(st);
+  });
+  return order.map(p => [p, byPhase.get(p)]);
+}
+/* Every distinct phase name across the sheet — powers the datalist in the editor. */
+function wkAllPhases() {
+  const set = new Set();
+  (WorkDB.data.workstreams || []).forEach(w => (w.subtasks || []).forEach(s => { if (s.phase) set.add(s.phase); }));
+  return [...set];
 }
 
 /* Next free workstream id — WS-01, WS-02, … */
@@ -5333,6 +6153,13 @@ function initWork() {
   WorkDB.loadLocal();
   WorkDB.loadCloud().then(() => {
     if (!_wkMonth) _wkMonth = WorkDB.data.month || wkDefaultMonth();
+    // The checklist→sub-task fold rewrote the sheet in memory (carrying every
+    // tick across). Persist it once so it sticks and reaches other devices.
+    if (WorkDB._didWkFold) {
+      WorkDB._didWkFold = false;
+      WorkDB.saveNow();
+      toast('Checklist items are now sub-tasks — each one is editable.', 'ok');
+    }
     drawWork();
     // Live sync from another device — never redraw over an open dialog.
     WorkDB.subscribe(() => { if (!document.querySelector('.modal.show')) drawWork(); });
@@ -5494,11 +6321,14 @@ function drawWork() {
   wkPaint();
 }
 
-/* One sub-task / phase row: tick + title, then its own timeline, the people on
-   it, who it is assigned to, and when it gets reported up. */
+/* One sub-task row: tick + day marker + title, then its own timeline, the people
+   on it, who it is assigned to, and when it gets reported up.
+   A sub-task with `ticks: n` shows n small boxes instead of one (e.g. "10
+   videos"), and counts as n items toward the total. */
 function wkSubtaskHtml(ws, st) {
-  const k = `${ws.id}.sub.${st.id}`;
-  const on = wkOn(k);
+  const keys = wkSubKeys(ws, st);
+  const doneN = keys.filter(wkOn).length;
+  const allDone = doneN === keys.length;
   const period = wkRange(st.from, st.to);
   const bits = [
     period ? `<span class="wk-sb-bit"><i class="bi bi-calendar3"></i>${wkText(period)}</span>` : '',
@@ -5506,19 +6336,22 @@ function wkSubtaskHtml(ws, st) {
     st.assignTo ? `<span class="wk-sb-bit assign"><i class="bi bi-person-check-fill"></i>${wkText(st.assignTo)}</span>` : '',
     st.reportOn ? `<span class="wk-sb-bit report"><i class="bi bi-send-fill"></i>Report ${wkText(fmtDate(st.reportOn))}</span>` : ''
   ].filter(Boolean).join('');
+  const tick = st.ticks
+    ? `<span class="wk-sub-multi">${keys.map((k, i) =>
+        `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="${escapeHtml(st.title)} ${i + 1}">`).join('')}</span>`
+    : `<label class="wk-sub-tick"><input type="checkbox" data-k="${escapeHtml(keys[0])}" ${allDone ? 'checked' : ''} aria-label="Done"></label>`;
   return `
-  <div class="wk-sub ${on ? 'is-done' : ''}">
-    <label class="wk-sub-tick">
-      <input type="checkbox" data-k="${escapeHtml(k)}" ${on ? 'checked' : ''} aria-label="Done">
-    </label>
+  <div class="wk-sub ${allDone ? 'is-done' : ''} ${st.buf ? 'buf' : ''}">
+    ${st.ticks ? '<span class="wk-sub-tick placeholder"></span>' : tick}
     <div class="wk-sub-body">
-      <div class="wk-sub-title">${wkText(st.title)}</div>
+      <div class="wk-sub-title">${st.day ? `<span class="wk-day">${wkText(st.day)}</span>` : ''}${wkText(st.title)}${st.ticks ? `<span class="wk-sub-count">${doneN}/${st.ticks}</span>` : ''}</div>
+      ${st.ticks ? tick : ''}
       ${bits ? `<div class="wk-sb-meta">${bits}</div>` : ''}
       ${st.notes ? `<div class="wk-sb-note">${wkText(st.notes)}</div>` : ''}
     </div>
     <div class="wk-sub-tools">
-      <button type="button" data-wkact="sub-edit" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Edit phase"><i class="bi bi-pencil"></i></button>
-      <button type="button" class="del" data-wkact="sub-del" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Delete phase"><i class="bi bi-trash3"></i></button>
+      <button type="button" data-wkact="sub-edit" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Edit sub-task"><i class="bi bi-pencil"></i></button>
+      <button type="button" class="del" data-wkact="sub-del" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Delete sub-task"><i class="bi bi-trash3"></i></button>
     </div>
   </div>`;
 }
@@ -5561,37 +6394,23 @@ function wkWorkstreamHtml(ws, open) {
       ${ws.note ? `<p class="wk-note">${wkText(ws.note)}</p>` : ''}
       ${ws.boss && ws.bossItem ? `<p class="wk-note deliver"><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ` · <i>${wkText(ws.bossDue)}</i>` : ''}</p>` : ''}
 
-      <!-- Phases & sub-tasks (the rich layer) -->
-      <div class="wk-grp">
-        <div class="wk-grp-h">
-          <span>Phases &amp; sub-tasks</span><span class="wk-rule"></span>
-          <span class="wk-n">${subs.length}</span>
-          <button type="button" class="wk-add-sub" data-wkact="sub-add" data-ws="${escapeHtml(ws.id)}" title="Add a phase or sub-task"><i class="bi bi-plus-lg"></i>Add phase</button>
-        </div>
-        ${subs.length
-          ? `<div class="wk-subs">${subs.map(st => wkSubtaskHtml(ws, st)).join('')}</div>`
-          : `<p class="wk-sub-empty">No phases yet. Break this down — each one gets its own dates, people and report point.</p>`}
+      <!-- Sub-tasks, grouped into their phases. One system: the imported
+           checklist was folded in here, its group names becoming phases. -->
+      <div class="wk-subhead">
+        <span>Sub-tasks</span><span class="wk-rule"></span>
+        <span class="wk-cnt">${keys.length} item${keys.length === 1 ? '' : 's'} · ${done} closed</span>
+        <button type="button" class="wk-add-sub" data-wkact="sub-add" data-ws="${escapeHtml(ws.id)}" title="Add a sub-task"><i class="bi bi-plus-lg"></i>Add sub-task</button>
       </div>
-
-      <!-- Imported checklist, kept exactly as it was -->
-      ${(ws.groups || []).map((g, gi) => `
+      ${subs.length ? wkPhases(ws).map(([phase, items]) => `
         <div class="wk-grp">
-          <div class="wk-grp-h"><span>${wkText(g.name)}</span><span class="wk-rule"></span><span class="wk-n">${(g.items || []).length}</span></div>
-          ${(g.items || []).map((it, ii) => it.ticks
-            ? `<label class="wk-item ${g.buf ? 'buf' : ''}" style="cursor:default">
-                 <span style="width:14px"></span>
-                 <span class="wk-txt">${wkText(it.t)}
-                   <span class="wk-ticks" style="margin-top:6px">${Array.from({ length: it.ticks }, (_, t) => {
-                     const k = `${ws.id}.${gi}.${ii}.${t}`;
-                     return `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="Item ${t + 1}">`;
-                   }).join('')}</span>
-                 </span></label>`
-            : `<label class="wk-item ${g.buf ? 'buf' : ''}">
-                 <input type="checkbox" data-k="${escapeHtml(`${ws.id}.${gi}.${ii}`)}" ${wkOn(`${ws.id}.${gi}.${ii}`) ? 'checked' : ''}>
-                 <span class="wk-txt">${it.d ? `<span class="wk-day">${wkText(it.d)}</span>` : ''}${wkText(it.t)}${it.who ? `<span class="wk-who">${wkText(it.who)}</span>` : ''}</span>
-               </label>`
-          ).join('')}
-        </div>`).join('')}
+          <div class="wk-grp-h">
+            <span>${phase ? wkText(phase) : 'Ungrouped'}</span><span class="wk-rule"></span>
+            <span class="wk-n">${items.length}</span>
+            <button type="button" class="wk-add-mini" data-wkact="sub-add" data-ws="${escapeHtml(ws.id)}" data-phase="${escapeHtml(phase)}" title="Add a sub-task to ${escapeHtml(phase || 'this group')}"><i class="bi bi-plus-lg"></i></button>
+          </div>
+          <div class="wk-subs">${items.map(st => wkSubtaskHtml(ws, st)).join('')}</div>
+        </div>`).join('')
+        : `<p class="wk-sub-empty">No sub-tasks yet. Break this down — each one gets its own dates, people and report point.</p>`}
     </div>
   </details>`;
 }
@@ -5655,11 +6474,11 @@ function wireWork() {
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
-    const { wkact, ws, sub, dept } = btn.dataset;
+    const { wkact, ws, sub, dept, phase } = btn.dataset;
     if (wkact === 'task-add') openWorkTaskModal(null, dept);
     else if (wkact === 'task-edit') openWorkTaskModal(ws);
     else if (wkact === 'task-del') workDeleteTask(ws);
-    else if (wkact === 'sub-add') openWorkSubModal(ws, null);
+    else if (wkact === 'sub-add') openWorkSubModal(ws, null, phase || '');
     else if (wkact === 'sub-edit') openWorkSubModal(ws, sub);
     else if (wkact === 'sub-del') workDeleteSub(ws, sub);
     else if (wkact === 'dept-add') openWorkDeptModal(null);
@@ -5869,32 +6688,50 @@ function openWorkTaskModal(wsId, deptKey) {
   };
 }
 
-/* ---- Phase / sub-task: add / edit ---- */
-function openWorkSubModal(wsId, subId) {
-  if (!Security.guard(subId ? 'edit this phase' : 'add a phase')) return;
+/* ---- Sub-task: add / edit ----
+   `phase` groups sub-tasks under a heading inside the card. Typing a new name
+   creates that phase; the datalist offers the ones already in use. */
+function openWorkSubModal(wsId, subId, phasePrefill) {
+  if (!Security.guard(subId ? 'edit this sub-task' : 'add a sub-task')) return;
   const ws = wkFind(wsId);
   if (!ws) return;
   const st = subId ? wkFindSub(wsId, subId) : null;
   if (subId && !st) return;
-  const rec = st || {};
+  const rec = st || { phase: phasePrefill || '' };
+  const phases = wkAllPhases();
 
   const { modal } = wkModal(
-    `${st ? 'Edit' : 'Add'} phase · ${ws.id}`, 'signpost-split',
+    `${st ? 'Edit' : 'Add'} sub-task · ${ws.id}`, 'signpost-split',
     `<form id="wkSubForm" class="form-grid">
-      <div class="field col-span"><label>Phase / sub-task <span class="req">*</span></label>
+      <div class="field col-span"><label>Sub-task <span class="req">*</span></label>
         <input name="title" value="${escapeHtml(rec.title || '')}" placeholder="e.g. Draft the payroll spec"></div>
+
+      <div class="field"><label>Phase / group</label>
+        <input name="phase" list="wkPhaseList" value="${escapeHtml(rec.phase || '')}" placeholder="e.g. Days 1–5 · the spine">
+        <datalist id="wkPhaseList">${phases.map(p => `<option value="${escapeHtml(p)}"></option>`).join('')}</datalist>
+        <small class="text-faint" style="font-size:11px">Groups it under a heading. Type a new name to start a new phase.</small></div>
+      <div class="field"><label>Day marker</label>
+        <input name="day" value="${escapeHtml(rec.day || '')}" placeholder="e.g. D3">
+        <small class="text-faint" style="font-size:11px">Short tag shown before the title.</small></div>
+
       <div class="field"><label>From</label><input type="date" name="from" value="${escapeHtml(rec.from || '')}"></div>
       <div class="field"><label>To</label><input type="date" name="to" value="${escapeHtml(rec.to || '')}"></div>
       <div class="field"><label>With whom</label><input name="withWhom" value="${escapeHtml(rec.withWhom || '')}" placeholder="Who you work on it with"></div>
       <div class="field"><label>Assign to</label><input name="assignTo" value="${escapeHtml(rec.assignTo || '')}" placeholder="Who it is handed to"></div>
-      <div class="field col-span"><label>Report up on</label><input type="date" name="reportOn" value="${escapeHtml(rec.reportOn || '')}">
-        <small class="text-faint" style="font-size:11px">The date this gets reported to the Chairman / boss.</small></div>
+      <div class="field"><label>Report up on</label><input type="date" name="reportOn" value="${escapeHtml(rec.reportOn || '')}">
+        <small class="text-faint" style="font-size:11px">When this gets reported to the Chairman / boss.</small></div>
+      <div class="field"><label>Repeat count</label>
+        <input type="number" name="ticks" min="0" max="60" step="1" value="${rec.ticks || ''}" placeholder="e.g. 10">
+        <small class="text-faint" style="font-size:11px">For "do this N times" rows — shows N boxes. Leave blank for one.</small></div>
+      <div class="field col-span"><label class="switch-row">
+        <input type="checkbox" name="buf" ${rec.buf ? 'checked' : ''}>
+        <span>Buffer / only-if-needed — shown dimmed</span></label></div>
       <div class="field col-span"><label>Notes</label>
         <textarea name="notes" rows="2" placeholder="Detail, blockers, acceptance">${escapeHtml(rec.notes || '')}</textarea></div>
     </form>`,
     `${st ? '<button type="button" class="btn btn-danger-soft me-auto" id="wkSubDel"><i class="bi bi-trash me-1"></i>Delete</button>' : ''}
      <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
-     <button type="button" class="btn btn-primary" id="wkSubSave"><i class="bi bi-check-lg me-1"></i>${st ? 'Save changes' : 'Add phase'}</button>`
+     <button type="button" class="btn btn-primary" id="wkSubSave"><i class="bi bi-check-lg me-1"></i>${st ? 'Save changes' : 'Add sub-task'}</button>`
   );
 
   const del = document.getElementById('wkSubDel');
@@ -5903,14 +6740,30 @@ function openWorkSubModal(wsId, subId) {
   document.getElementById('wkSubSave').onclick = () => {
     const f = document.getElementById('wkSubForm');
     const title = wkVal(f, 'title');
-    if (!title) { toast('Name the phase first.', 'err'); f.elements.namedItem('title').focus(); return; }
+    if (!title) { toast('Name the sub-task first.', 'err'); f.elements.namedItem('title').focus(); return; }
     const from = wkVal(f, 'from'), to = wkVal(f, 'to');
     if (from && to && to < from) { toast('"To" is before "From".', 'err'); return; }
-    const patch = { title, from, to, withWhom: wkVal(f, 'withWhom'), assignTo: wkVal(f, 'assignTo'), reportOn: wkVal(f, 'reportOn'), notes: wkVal(f, 'notes') };
-    if (st) Object.assign(st, patch);
-    else (ws.subtasks = ws.subtasks || []).push(Object.assign({ id: uid() }, patch));
+    const n = parseInt(wkVal(f, 'ticks'), 10);
+    const ticks = (!isNaN(n) && n > 1) ? Math.min(n, 60) : 0;
+    const patch = {
+      title, phase: wkVal(f, 'phase'), day: wkVal(f, 'day'), from, to,
+      withWhom: wkVal(f, 'withWhom'), assignTo: wkVal(f, 'assignTo'),
+      reportOn: wkVal(f, 'reportOn'), notes: wkVal(f, 'notes'), buf: wkVal(f, 'buf')
+    };
+    if (st) {
+      // Shrinking the repeat count would orphan the ticks of the dropped boxes.
+      if (st.ticks && ticks < st.ticks) {
+        wkForgetKeys(wkSubKeys(ws, st).slice(Math.max(ticks, 1)));
+      }
+      Object.assign(st, patch);
+      if (ticks) st.ticks = ticks; else delete st.ticks;
+    } else {
+      const fresh = Object.assign({ id: uid() }, patch);
+      if (ticks) fresh.ticks = ticks;
+      (ws.subtasks = ws.subtasks || []).push(fresh);
+    }
     WorkDB.saveNow(); modal.hide(); drawWork();
-    toast(st ? 'Phase updated.' : 'Phase added.', 'ok');
+    toast(st ? 'Sub-task updated.' : 'Sub-task added.', 'ok');
   };
 }
 
@@ -5937,12 +6790,12 @@ function workDeleteSub(wsId, subId) {
   const ws = wkFind(wsId);
   const st = wkFindSub(wsId, subId);
   if (!ws || !st) return;
-  if (!confirm(`Delete the phase "${st.title}"?`)) return;
-  wkForgetKeys([`${ws.id}.sub.${subId}`]);
+  if (!confirm(`Delete the sub-task "${st.title}"?`)) return;
+  wkForgetKeys(wkSubKeys(ws, st));   // covers every box of a repeat-count row
   ws.subtasks = (ws.subtasks || []).filter(s => s.id !== subId);
   WorkDB.saveNow();
   drawWork();
-  toast('Phase deleted.', 'ok');
+  toast('Sub-task deleted.', 'ok');
 }
 
 /* Import the sheet content from a JSON file. Existing ticks are preserved
@@ -5957,10 +6810,12 @@ function workImport(file) {
       if (!obj || !Array.isArray(obj.workstreams) || !obj.workstreams.length) {
         throw new Error('No workstreams in that file.');
       }
+      // Carry the current ticks in BEFORE hydrating, so the checklist→sub-task
+      // fold can remap them. Assigning them afterwards would leave old
+      // position-based keys pointing at rows that no longer exist.
       const keepChecks = WorkDB.data && WorkDB.data.checks;
-      const hasOwnChecks = obj.checks && Object.keys(obj.checks).length;
+      if (!(obj.checks && Object.keys(obj.checks).length) && keepChecks) obj.checks = keepChecks;
       WorkDB.data = WorkDB._hydrate(obj);
-      if (!hasOwnChecks && keepChecks) WorkDB.data.checks = keepChecks;
       delete WorkDB.data._comment;
       if (!_wkMonth) _wkMonth = WorkDB.data.month || wkDefaultMonth();
       WorkDB.saveNow();

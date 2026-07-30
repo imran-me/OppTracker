@@ -435,23 +435,63 @@ and called your savings your "biggest expense". Deposits fix that.
 - **Editable categories** for all three flows, **monthly budget** and **savings goal**
   (⚙ Categories & budget). The budget is compared against real spending, deposits excluded.
 
+### Month rollover — how history is kept and a new month starts
+
+**Nothing has to be done on the 1st.** Every record is filed under the month of its own date,
+permanently; July stays July when August begins. There is no "close the books" step that moves,
+freezes or archives anything, so no data can be lost at a month boundary.
+
+What *does* travel between months is the **leftover cash**, and it is **derived, never stored**:
+
+```
+opening(month) = starting balance + Σ (income − deposit − expense) of every earlier month
+closing(month) = opening(month) + this month's net      → becomes the next month's opening
+vault(month)   = Σ every deposit up to and including it → the pot; never resets
+```
+
+Because it is recomputed from the ledger each time, adding a forgotten July receipt **next
+week** still corrects August's opening balance automatically. Two settings control it
+(⚙ Categories & budget): **Carry the leftover into the next month** (on by default) and
+**Starting balance before your first record**, which anchors the chain.
+
+**Closing a month is optional and reversible.** On the turn of a month a banner offers the
+previous one for review; closing it writes a single entry under `closes['YYYY-MM']` — your note
+plus a snapshot of the figures as they stood — and nothing else. It does not lock the month:
+you can still add records to it, the live numbers keep recomputing, and *Reopen* deletes only
+that review entry. The close dialog can also **copy** any lines you tick that are marked
+*Monthly* into the next month as **brand-new** records; the originals are never touched.
+
 ### What it shows
-- **KPI cards** — income, **deposited** (shown as a minus, since it comes out of income),
-  expense, net saved, savings-rate %, and "could save" (the reclaimable slice), with the
-  running equation printed underneath whenever there are deposits.
-- **Insights** — plain-language, month-specific findings (savings verdict on what you *kept*,
-  deposit note, spending-quality leak, biggest sector, month-over-month movement, budget
-  status, untagged-spend nudge).
-- **Spending-quality meter** — how much went to each necessity band.
-- **Sector breakdowns** — where money came from / where it went, with deposits listed
-  separately under "not spending".
-- **6-month trend** — income vs expense (vs deposits, when any exist).
-- **By payment method** — split **per flow** (money in / money out / deposited). These are
-  never added together: one combined figure per method matched neither earnings nor spending.
-- **Transactions table** — full add / edit / delete, filter by type, quick month chips.
+
+The page is a **cockpit**: a sticky command bar, a KPI strip where every tile is a *lens*, the
+money river, then one tabbed workspace — instead of eight stacked cards.
+
+- **Command bar** (sticky) — privacy pill, month stepper, a **12-month scrub** sparkline you can
+  click to travel, search across the month, and Add.
+- **Hero balance** — what is in hand at month end, the *Opened → +in −deposited −spent* rail,
+  the savings-rate ring, the **spend-quality grade** and the lifetime **Vault** total.
+- **KPI lenses** — Income, Deposited, Spent and "Could save", each with a **month-over-month
+  delta**. Clicking one focuses the whole page on that flow (click again to release).
+- **Money river** — the month as a single bar: deposits, each necessity band, untagged spend and
+  what is left. Every segment is clickable and drills into the ledger.
+- **Ledger** — search, filter by category / necessity / method / day, **grouped by day with day
+  totals**, inline necessity retagging, and **bulk** retag / recategorise / delete.
+- **Calendar** — a heatmap of the month's daily rhythm; shade = how much was spent, dots mark
+  income and deposit days, and clicking a day opens it in the ledger.
+- **Breakdown** — the necessity bands, sector breakdowns (income / expense / deposits kept
+  separate) and payment methods split **per flow**. These are never added together: one combined
+  figure per method matched neither earnings nor spending.
+- **Trends** — 12 months of income vs expense vs deposits with the budget line; click to travel.
+- **Months** — the archive: every month you have ever recorded, with its opening and closing
+  balance, quality grade and saved review note.
+- **Insights** — the plain-language findings (savings verdict on what you *kept*, deposit note,
+  spending-quality leak, biggest sector, month-over-month movement, budget status, untagged
+  nudge), plus the **recurring radar** (lines that repeat across months, found in your own
+  ledger — no new data entry) and a **what-if slider** projecting a trim of the soft spend.
 
 > The **Repeats** field is a label for your own reference. It is *not* projected into future
-> months — a July record marked *Monthly* does not create an August one.
+> months automatically — a July record marked *Monthly* only becomes an August one if you tick
+> it in the month-close dialog.
 
 ---
 
@@ -466,32 +506,49 @@ weekly **cadence** grid (weeks 1–4), a **delivery register** of sign-offs, and
 close** list. Ticks are stored **per month**, so each month starts clean while previous months
 stay on file. There is a print view that drops the app chrome and prints the sheet alone.
 
+### Three levels
+
+```
+Department            Software & Development
+└─ Main task          WS-01 · Master Payroll        ← priority, timeline, roles, delivery
+   └─ Phase           Days 1–5 · the spine          ← a heading that groups sub-tasks
+      └─ Sub-task     D1 · 9 payroll tables …       ← dates, people, assignee, report point
+```
+
+A **phase** is just a label on a sub-task, so there is one editable list per main task rather
+than two parallel ones. The imported checklist folds into exactly this: every item became a
+sub-task, and its group name became the sub-task's phase.
+
 ### Building the sheet in the browser
 
-Nothing needs editing by hand — departments, main tasks and phases are all managed on the page:
+Nothing needs editing by hand — departments, main tasks and sub-tasks are all managed on the page:
 
 | Control | Where | What it does |
 |---------|-------|--------------|
 | **+** | on every department heading | new **main task** under that department |
 | **⋯** | on every department heading | rename the department, or remove it once it is empty |
 | **Add department** | below the board | a new department (empty ones still render, so they are reachable) |
-| **Add phase** | on the *Phases & sub-tasks* heading inside a card | new sub-task under that main task |
-| ✏️ / 🗑 | main-task head and each phase row | edit or delete, with a confirm on deletes |
+| **Add sub-task** | on the *Sub-tasks* heading inside a card | new sub-task, phase picked in the form |
+| **+** | on each phase heading | new sub-task straight into that phase |
+| ✏️ / 🗑 | main-task head and every sub-task row | edit or delete, with a confirm on deletes |
 
-**Main task** carries a title, description, department, **priority**, a from/to timeline, *my
-role*, *dev role*, who it is worked on with, and an optional delivery (deliverable + gate) that
-puts it in the delivery register.
+**Main task** — title, description, department, **priority**, from/to timeline, *my role*, *dev
+role*, who it is worked on with, and an optional delivery (deliverable + gate) that puts it in the
+delivery register.
 
-**Phase / sub-task** carries a title, its own **from → to** dates, who it is worked on **with**,
-who it is **assigned to**, the date it gets **reported up**, and notes.
+**Sub-task** — title, **phase** (type a new name to start one; existing names are offered),
+a short **day marker** (`D3`), its own **from → to** dates, who it is worked on **with**, who it
+is **assigned to**, the date it gets **reported up**, a **repeat count** for "do this N times"
+rows (renders N boxes with a running tally), a **buffer** flag for only-if-needed lines, and notes.
 
 **Priority colours the card's left rule** — **High red · Medium amber · Low green**. With no
 priority set, the rule falls back to the delegation mode (navy for self-build, gold for
 delegated).
 
-Deleting a main task or a phase also clears its ticks from **every** month, so nothing lingers in
-the counts. Phase ticks are keyed by the phase's own id, so they survive edits and reordering —
-the imported checklist is keyed by position, so reordering *that* would shift its ticks.
+Ticks are keyed by each sub-task's own id, so they survive editing, re-phrasing, moving between
+phases and reordering. Deleting a main task or a sub-task clears its ticks from **every** month —
+including all boxes of a repeat-count row — so nothing lingers in the counts. Shrinking a repeat
+count drops the ticks of the removed boxes.
 
 ### ⚠️ Why the sheet's content is NOT in this repository
 
@@ -543,6 +600,15 @@ one meaningless figure); corrected the spending-quality insight to state the tru
 Avoidable/Discretionary total alongside the reclaimable slice (it reported the estimate as if it
 were the band total); untagged spend is no longer silently assumed Discretionary._
 
+_2026-07-30 — Accounts redesigned as a **cockpit**: sticky command bar with search and a
+12-month scrub, a hero balance card, KPI tiles that act as **lenses** over the whole page, the
+**money river**, and one tabbed workspace (Ledger · Calendar · Breakdown · Trends · Months ·
+Insights) in place of eight stacked cards. Added **month rollover** — derived opening/closing
+balances, a lifetime deposit vault, an optional reversible month close with carry-forward of
+monthly items — plus a calendar heatmap, spend-quality grade, recurring radar, what-if slider,
+day-grouped ledger with search/filters and bulk retagging. All additive: no stored record is
+changed by any of it._
+
 _2026-07-30 — Tidied the Work Sheet masthead: the eyebrow now carries the group only, the long
 strapline is gone, and an **identity card** (name, role, company + photo) sits on the right. The
 card reads the live profile — set the photo on the **Profile** page and it appears here._
@@ -554,6 +620,15 @@ assigned to, report-up date, notes). Edit + delete on both, and department add /
 **Priority now drives the card's left rule — High red, Medium amber, Low green.** Empty
 departments render so they can be built into, and deleting anything clears its ticks from every
 month._
+
+_2026-07-30 — **Folded the imported checklist into the sub-task list.** Those checklist items were
+the sub-tasks, so having a separate "Phases & sub-tasks" block above them split the same work into
+two systems, with the read-only half holding all the content. Each item is now a real sub-task and
+its group name became the sub-task's **phase**, so every line is editable and gets dates, people,
+an assignee and a report point. Every tick was carried across to the new id-based keys, in every
+month. Sub-tasks also gained a day marker, a repeat count (for "10 videos" style rows, with a
+tally) and a buffer flag. `data/work-seed.json` was reshaped to the same layout, with priorities
+set so the colour rules show on import._
 
 ---
 
