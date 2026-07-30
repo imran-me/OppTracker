@@ -68,6 +68,9 @@ npx serve .
 │   ├── js/security.js          # Owner-only access control via Firebase Auth: login, guards, UI gating
 │   └── img/favicon.svg         # Brand mark; drop profile/achievement images here too
 │
+├── docs/
+│   └── work-sheet-context.md   # Work Sheet build context — data shape, style & approach
+│
 ├── data/
 │   └── backup-guide.md     # Export / import + Google Drive backup workflow
 │
@@ -500,6 +503,10 @@ money river, then one tabbed workspace — instead of eight stacked cards.
 ---
 
 ## Work Sheet — private professional to-do (owner-only)
+
+> **Before changing this section, read [`docs/work-sheet-context.md`](docs/work-sheet-context.md)** —
+> the data shape the renderer expects, the id-based tick keys, and the style and approach rules
+> (chief among them: no sheet content in this public repo).
 
 A monthly **control sheet** at **`work.html`**, opened from the **briefcase icon** in the top
 bar. The icon is `.owner-only` (invisible to visitors) and the page is redirect-protected via
