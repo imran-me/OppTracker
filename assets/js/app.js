@@ -4391,10 +4391,19 @@ const FIN_DEFAULTS = {
   expenseCategories: ['Food & Groceries', 'Dining Out', 'Transport', 'Rent / Housing',
     'Utilities (Gas/Water/Electric)', 'Internet & Mobile', 'Education / Tuition', 'Books & Courses',
     'Health & Medicine', 'Clothing', 'Entertainment', 'Subscriptions', 'Gadgets / Tech',
-    'Family Support', 'Charity / Zakat', 'Savings / Investment', 'Travel', 'Personal Care',
+    'Family Support', 'Charity / Zakat', 'Travel', 'Personal Care',
     'Bank Fees & Charges', 'Other Expense'],
+  /* DEPOSITS are money you KEEP, not money you spend — savings, DPS, FDR,
+     shares. They are taken out of spendable income instead of counting as
+     expense, so they never suppress the savings figures. */
+  depositCategories: ['Savings / Investment', 'DPS / Recurring Deposit', 'Fixed Deposit (FDR)',
+    'Investment / Shares', 'Emergency Fund', 'Other Deposit'],
   methods: ['Cash', 'bKash', 'Nagad', 'Rocket', 'Debit / Credit Card', 'Bank Transfer', 'Other']
 };
+
+/* The legacy expense categories that really were deposits. Used once, by the
+   v2 migration, to reclassify records saved before deposits existed. */
+const FIN_LEGACY_DEPOSITS = ['savings / investment', 'savings', 'investment', 'dps', 'fdr'];
 
 /* The four "was it worth it?" necessity bands — the heart of the
    spending-quality analysis. Order matters (best → worst). */
@@ -4422,8 +4431,34 @@ const FinanceDB = {
     const d = (raw && typeof raw === 'object') ? raw : {};
     if (!Array.isArray(d.tx)) d.tx = [];
     d.categories = Object.assign({}, FIN_DEFAULTS, d.categories || {});
+    if (!Array.isArray(d.categories.depositCategories)) d.categories.depositCategories = FIN_DEFAULTS.depositCategories.slice();
     if (typeof d.monthlyBudget !== 'number') d.monthlyBudget = 0;
     if (typeof d.savingsGoal !== 'number') d.savingsGoal = 0;
+
+    /* ---- v2 migration: split DEPOSITS out of expenses ----
+       Records saved before deposits existed put savings under an expense
+       category, which counted money you kept as money you spent. Reclassify
+       them once (schema-versioned, so a later deliberate re-tag is respected)
+       and drop the deposit names from the expense list. */
+    if (!(d._finV >= 2)) {
+      const names = new Set([
+        ...(d.categories.depositCategories || []).map(x => String(x).toLowerCase()),
+        ...FIN_LEGACY_DEPOSITS
+      ]);
+      let moved = 0;
+      d.tx.forEach(t => {
+        if (t.type === 'expense' && t.category && names.has(String(t.category).toLowerCase())) {
+          t.type = 'deposit'; t.necessity = ''; moved++;
+        }
+      });
+      const before = (d.categories.expenseCategories || []).length;
+      d.categories.expenseCategories = (d.categories.expenseCategories || [])
+        .filter(c => !names.has(String(c).toLowerCase()));
+      d._finV = 2;
+      // Tell the caller to persist, so the fix sticks instead of re-running.
+      this._didMigrate = moved > 0 || before !== d.categories.expenseCategories.length;
+      if (moved) console.info(`[Accounts] migrated ${moved} record(s) from expense → deposit.`);
+    }
     return d;
   },
   loadLocal() {
@@ -4528,10 +4563,20 @@ function finShiftMonth(key, delta) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 }
 
-/* Aggregate one month's transactions into everything the page needs. */
+/* Aggregate one month's transactions into everything the page needs.
+
+   THREE FLOWS, not two:
+     income   — money that came in
+     deposit  — money you KEPT (savings, DPS, FDR, shares). Comes out of
+                spendable income; it is NOT spending, so it never drags the
+                savings figures down.
+     expense  — money that is actually gone
+   net       = income − deposit − expense   (what is still in hand)
+   total kept = deposit + net               (what stayed with you) */
 function finSummary(monthKey) {
   const tx = FinanceDB.all().filter(t => finMonthKey(t.date) === monthKey);
   const income = tx.filter(t => t.type === 'income');
+  const deposit = tx.filter(t => t.type === 'deposit');
   const expense = tx.filter(t => t.type === 'expense');
   const sum = (a) => a.reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const bySector = (arr) => {
@@ -4539,21 +4584,46 @@ function finSummary(monthKey) {
     arr.forEach(t => { const k = t.category || 'Uncategorised'; m[k] = (m[k] || 0) + (Number(t.amount) || 0); });
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   };
+  /* Payment-method totals are kept PER FLOW. Summing income and expense into
+     one figure per method (as this once did) produces a number that is neither
+     what you earned nor what you spent. */
+  const byMethodOf = (arr) => {
+    const m = {};
+    arr.forEach(t => { const k = t.method || 'Other'; m[k] = (m[k] || 0) + (Number(t.amount) || 0); });
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  };
+  /* Necessity bands cover TAGGED spending only. Untagged spend is reported
+     separately rather than silently assumed Discretionary — guessing would
+     inflate the "could save" figure for records that were never classified. */
   const byNeed = {};
   FIN_NEED.forEach(n => byNeed[n.key] = 0);
-  expense.forEach(t => { const k = FIN_NEED_TONE[t.necessity] ? t.necessity : 'Discretionary'; byNeed[k] += (Number(t.amount) || 0); });
-  const byMethod = {};
-  tx.forEach(t => { const k = t.method || 'Other'; byMethod[k] = (byMethod[k] || 0) + (Number(t.amount) || 0); });
-  const totalIn = sum(income), totalOut = sum(expense);
+  let untagged = 0;
+  expense.forEach(t => {
+    const amt = Number(t.amount) || 0;
+    if (FIN_NEED_TONE[t.necessity]) byNeed[t.necessity] += amt; else untagged += amt;
+  });
+  const totalIn = sum(income), totalOut = sum(expense), totalDeposit = sum(deposit);
+  const net = totalIn - totalDeposit - totalOut;
+  const kept = totalDeposit + net;
   return {
-    tx, income, expense, totalIn, totalOut,
-    net: totalIn - totalOut,
-    savingsRate: totalIn > 0 ? (totalIn - totalOut) / totalIn * 100 : 0,
+    tx, income, expense, deposit,
+    totalIn, totalOut, totalDeposit,
+    net, kept,
+    // "savings rate" = how much of your income you actually kept, i.e. what you
+    // deposited plus what is still in hand.
+    savingsRate: totalIn > 0 ? kept / totalIn * 100 : 0,
     incomeSectors: bySector(income),
     expenseSectors: bySector(expense),
+    depositSectors: bySector(deposit),
     byNeed,
-    leak: byNeed.Avoidable + byNeed.Discretionary * 0.5,   // realistic "could save"
-    byMethod: Object.entries(byMethod).sort((a, b) => b[1] - a[1]),
+    untagged,
+    // the two Avoidable/Discretionary bands in full…
+    softSpend: byNeed.Avoidable + byNeed.Discretionary,
+    // …and the realistic slice of that you could actually have reclaimed.
+    leak: byNeed.Avoidable + byNeed.Discretionary * 0.5,
+    byMethodIn: byMethodOf(income),
+    byMethodOut: byMethodOf(expense),
+    byMethodDep: byMethodOf(deposit),
     count: tx.length
   };
 }
@@ -4562,19 +4632,32 @@ function finSummary(monthKey) {
 function finInsights(monthKey, s) {
   const out = [];
   const prev = finSummary(finShiftMonth(monthKey, -1));
-  if (s.totalIn === 0 && s.totalOut === 0)
+  if (s.totalIn === 0 && s.totalOut === 0 && s.totalDeposit === 0)
     return [{ tone: 'slate', ico: 'info-circle', text: 'No records for this month yet. Add your first income or expense to unlock insights.' }];
 
-  // Savings verdict
+  // Savings verdict — measured on what you KEPT (deposits + what's left).
   if (s.totalIn > 0) {
-    if (s.savingsRate >= 20) out.push({ tone: 'green', ico: 'piggy-bank', text: `Strong month — you kept <b>${s.savingsRate.toFixed(0)}%</b> of your income (${fmtBDT(s.net)}). Above the 20% healthy mark.` });
-    else if (s.net >= 0) out.push({ tone: 'amber', ico: 'piggy-bank', text: `You saved <b>${s.savingsRate.toFixed(0)}%</b> (${fmtBDT(s.net)}) this month. Nudging this past 20% builds real cushion.` });
-    else out.push({ tone: 'red', ico: 'graph-down-arrow', text: `You spent <b>${fmtBDT(-s.net)} more than you earned</b> this month. Worth trimming the avoidable spend below.` });
+    const split = s.totalDeposit > 0
+      ? ` — <b>${fmtBDT(s.totalDeposit)}</b> deposited plus <b>${fmtBDT(s.net)}</b> still in hand`
+      : '';
+    if (s.savingsRate >= 20) out.push({ tone: 'green', ico: 'piggy-bank', text: `Strong month — you kept <b>${s.savingsRate.toFixed(0)}%</b> of your income (${fmtBDT(s.kept)})${split}. Above the 20% healthy mark.` });
+    else if (s.kept >= 0) out.push({ tone: 'amber', ico: 'piggy-bank', text: `You kept <b>${s.savingsRate.toFixed(0)}%</b> (${fmtBDT(s.kept)})${split} this month. Nudging this past 20% builds real cushion.` });
+    else out.push({ tone: 'red', ico: 'graph-down-arrow', text: `You spent <b>${fmtBDT(-s.kept)} more than you earned</b> this month. Worth trimming the avoidable spend below.` });
   }
-  // Leak / quality of spend
-  if (s.leak > 0 && s.totalOut > 0) {
-    const pct = (s.leak / s.totalOut * 100).toFixed(0);
-    out.push({ tone: 'red', ico: 'scissors', text: `About <b>${fmtBDT(s.leak)}</b> (${pct}% of spending) sat in <b>Avoidable / Discretionary</b>. Reclaiming half would add <b>${fmtBDT(s.leak / 2)}</b> to savings.` });
+  // Deposit note — the money that is genuinely put away.
+  if (s.totalDeposit > 0) {
+    const dPct = s.totalIn > 0 ? ` (${(s.totalDeposit / s.totalIn * 100).toFixed(0)}% of income)` : '';
+    out.push({ tone: 'violet', ico: 'bank', text: `You moved <b>${fmtBDT(s.totalDeposit)}</b>${dPct} into savings &amp; investment. That is taken out of spendable income, not counted as spending.` });
+  }
+  // Leak / quality of spend. Two DIFFERENT numbers, stated as such: what sat in
+  // those bands, and the realistic slice of it that was reclaimable.
+  if (s.softSpend > 0 && s.totalOut > 0) {
+    const bandPct = (s.softSpend / s.totalOut * 100).toFixed(0);
+    out.push({ tone: 'red', ico: 'scissors', text: `<b>${fmtBDT(s.softSpend)}</b> (${bandPct}% of spending) sat in <b>Avoidable / Discretionary</b>. Realistically about <b>${fmtBDT(s.leak)}</b> of that was reclaimable — half of it would add <b>${fmtBDT(s.leak / 2)}</b> to savings.` });
+  }
+  // Untagged spend — a nudge, never a silent assumption.
+  if (s.untagged > 0) {
+    out.push({ tone: 'slate', ico: 'question-circle', text: `<b>${fmtBDT(s.untagged)}</b> of spending has no necessity tag yet, so it sits outside the quality bands. Tag it to sharpen the picture.` });
   }
   // Biggest sector
   if (s.expenseSectors.length) {
@@ -4618,6 +4701,13 @@ function initAccounts() {
 
   const boot = () => {
     if (!_finMonth) _finMonth = finMonthKey(new Date().toISOString());
+    // The v2 deposit migration rewrote records in memory — persist it once so it
+    // does not have to run again (and so other devices get the corrected data).
+    if (FinanceDB._didMigrate) {
+      FinanceDB._didMigrate = false;
+      FinanceDB.save();
+      toast('Savings moved out of expenses into Deposits.', 'ok');
+    }
     drawAccounts();
     FinanceDB.subscribe(() => { if (!document.querySelector('.modal.show')) drawAccounts(); });
   };
@@ -4641,10 +4731,11 @@ function drawAccounts() {
     ? `<span class="fin-priv" title="Private to this device — add the finance security rule to sync across devices"><i class="bi bi-hdd"></i> Private · this device</span>`
     : `<span class="fin-priv is-sync" title="Private &amp; synced to your account only"><i class="bi bi-shield-lock-fill"></i> Private · synced</span>`;
 
-  // ---- last-6-months trend ----
+  // ---- last-6-months trend (deposits ride alongside income vs expense) ----
   const trend = [];
-  for (let i = 5; i >= 0; i--) { const k = finShiftMonth(mk, -i); const t = finSummary(k); trend.push({ k, in: t.totalIn, out: t.totalOut }); }
-  const trendMax = Math.max(1, ...trend.flatMap(t => [t.in, t.out]));
+  for (let i = 5; i >= 0; i--) { const k = finShiftMonth(mk, -i); const t = finSummary(k); trend.push({ k, in: t.totalIn, out: t.totalOut, dep: t.totalDeposit }); }
+  const trendMax = Math.max(1, ...trend.flatMap(t => [t.in, t.out, t.dep]));
+  const anyDeposits = trend.some(t => t.dep > 0);
 
   host.innerHTML = `
   <!-- Private banner + month navigator -->
@@ -4664,20 +4755,31 @@ function drawAccounts() {
     </div>
   </div>
 
-  <!-- KPI cards -->
+  <!-- KPI cards. Deposited sits right after Income because it is subtracted
+       from it: income − deposited − expense = net saved. -->
   <div class="fin-kpis">
     <div class="fin-kpi t-green"><div class="fk-ico"><i class="bi bi-arrow-down-left"></i></div>
       <div class="fk-v num">${fmtBDT(s.totalIn)}</div><div class="fk-l">Income</div></div>
+    <div class="fin-kpi t-blue" title="Money you kept — savings, DPS, FDR, shares. Taken out of spendable income, never counted as spending.">
+      <div class="fk-ico"><i class="bi bi-bank"></i></div>
+      <div class="fk-v num">${s.totalDeposit > 0 ? '−' + fmtBDT(s.totalDeposit) : fmtBDT(0)}</div>
+      <div class="fk-l">Deposited</div></div>
     <div class="fin-kpi t-red"><div class="fk-ico"><i class="bi bi-arrow-up-right"></i></div>
       <div class="fk-v num">${fmtBDT(s.totalOut)}</div><div class="fk-l">Expense</div></div>
-    <div class="fin-kpi ${s.net >= 0 ? 't-primary' : 't-red'}"><div class="fk-ico"><i class="bi bi-piggy-bank"></i></div>
+    <div class="fin-kpi ${s.net >= 0 ? 't-primary' : 't-red'}" title="Income − deposited − expense: what is still in hand.">
+      <div class="fk-ico"><i class="bi bi-piggy-bank"></i></div>
       <div class="fk-v num">${fmtBDT(s.net)}</div><div class="fk-l">${s.net >= 0 ? 'Net saved' : 'Overspent'}</div></div>
-    <div class="fin-kpi t-violet"><div class="fk-ico"><i class="bi bi-graph-up-arrow"></i></div>
+    <div class="fin-kpi t-violet" title="Share of income you kept — deposits plus what is still in hand.">
+      <div class="fk-ico"><i class="bi bi-graph-up-arrow"></i></div>
       <div class="fk-v num">${s.savingsRate.toFixed(0)}<span style="font-size:16px">%</span></div><div class="fk-l">Savings rate</div>
       <div class="fk-ring"><span style="width:${Math.max(0, Math.min(100, s.savingsRate))}%"></span></div></div>
-    <div class="fin-kpi t-amber"><div class="fk-ico"><i class="bi bi-scissors"></i></div>
+    <div class="fin-kpi t-amber" title="Avoidable spending plus half of discretionary — the realistically reclaimable slice.">
+      <div class="fk-ico"><i class="bi bi-scissors"></i></div>
       <div class="fk-v num">${fmtBDT(s.leak)}</div><div class="fk-l">Could save</div></div>
   </div>
+  ${s.totalDeposit > 0 ? `<div class="fin-eq"><i class="bi bi-calculator me-1"></i>
+    <b>${fmtBDT(s.totalIn)}</b> income − <b>${fmtBDT(s.totalDeposit)}</b> deposited − <b>${fmtBDT(s.totalOut)}</b> spent =
+    <b>${fmtBDT(s.net)}</b> in hand · <b>${fmtBDT(s.kept)}</b> kept in total</div>` : ''}
 
   <!-- Insights -->
   <div class="card card-pad fin-card mb-4">
@@ -4706,6 +4808,9 @@ function drawAccounts() {
         </div>`;
       }).join('')}
     </div>
+    ${s.untagged > 0 ? `<div class="fin-untagged"><i class="bi bi-question-circle me-1"></i>
+      <b>${fmtBDT(s.untagged)}</b> (${(s.untagged / s.totalOut * 100).toFixed(0)}% of spend) has no necessity tag yet, so it is
+      counted in your spending but left out of these bands — it is never guessed for you.</div>` : ''}
   </div>
 
   <!-- Sector breakdowns -->
@@ -4719,27 +4824,38 @@ function drawAccounts() {
       <div class="section-title mb-3"><i class="bi bi-arrow-up-right-circle me-1"></i>Where money went</div>
       ${s.expenseSectors.length ? s.expenseSectors.map(([c, a]) => finBarRow(c, a, maxOut, 'red')).join('')
         : '<p class="text-faint" style="font-size:13px">No expenses logged this month.</p>'}
+      ${s.depositSectors.length ? `
+        <div class="fin-subhead"><i class="bi bi-bank me-1"></i>Deposited (not spending)</div>
+        ${s.depositSectors.map(([c, a]) => finBarRow(c, a, Math.max(1, ...s.depositSectors.map(x => x[1])), 'blue')).join('')}` : ''}
     </div>
   </div>
 
   <!-- 6-month trend + payment methods -->
   <div class="grid-2 mb-4 fin-grid-2" style="grid-template-columns:1.5fr 1fr">
     <div class="card card-pad fin-card">
-      <div class="section-title mb-3"><i class="bi bi-bar-chart-line me-1"></i>Last 6 months · income vs expense</div>
+      <div class="section-title mb-3"><i class="bi bi-bar-chart-line me-1"></i>Last 6 months · income vs expense${anyDeposits ? ' vs deposits' : ''}</div>
       <div class="fin-trend">
         ${trend.map(t => `<div class="fin-tcol ${t.k === mk ? 'is-cur' : ''}">
           <div class="fin-tbars">
             <span class="fin-tbar t-green" style="height:${t.in / trendMax * 100}%" title="Income ${fmtBDT(t.in)}"></span>
             <span class="fin-tbar t-red" style="height:${t.out / trendMax * 100}%" title="Expense ${fmtBDT(t.out)}"></span>
+            ${anyDeposits ? `<span class="fin-tbar t-blue" style="height:${t.dep / trendMax * 100}%" title="Deposited ${fmtBDT(t.dep)}"></span>` : ''}
           </div>
           <div class="fin-tlabel">${finMonthLabel(t.k).slice(0, 3)}</div>
         </div>`).join('')}
       </div>
-      <div class="fin-legend"><span><i class="dot t-green"></i>Income</span><span><i class="dot t-red"></i>Expense</span></div>
+      <div class="fin-legend"><span><i class="dot t-green"></i>Income</span><span><i class="dot t-red"></i>Expense</span>${anyDeposits ? '<span><i class="dot t-blue"></i>Deposited</span>' : ''}</div>
     </div>
+    <!-- Payment methods, kept PER FLOW so a figure is never income+expense added together -->
     <div class="card card-pad fin-card">
       <div class="section-title mb-3"><i class="bi bi-wallet2 me-1"></i>By payment method</div>
-      ${s.byMethod.length ? s.byMethod.map(([m, a]) => finBarRow(m, a, Math.max(1, ...s.byMethod.map(x => x[1])), 'violet')).join('')
+      ${(s.byMethodIn.length || s.byMethodOut.length || s.byMethodDep.length) ? [
+        ['Money in', s.byMethodIn, 'green', 'arrow-down-left'],
+        ['Money out', s.byMethodOut, 'red', 'arrow-up-right'],
+        ['Deposited', s.byMethodDep, 'blue', 'bank']
+      ].filter(([, rows]) => rows.length).map(([label, rows, tone, ico]) => `
+        <div class="fin-subhead"><i class="bi bi-${ico} me-1"></i>${label}</div>
+        ${rows.map(([m, a]) => finBarRow(m, a, Math.max(1, ...rows.map(x => x[1])), tone)).join('')}`).join('')
         : '<p class="text-faint" style="font-size:13px">Nothing logged this month.</p>'}
     </div>
   </div>
@@ -4749,7 +4865,7 @@ function drawAccounts() {
     <div class="card-head"><h3>Transactions · ${finMonthLabel(mk)}</h3>
       <div class="ms-auto d-flex gap-2 align-items-center">
         <select class="filter-select btn-sm" id="finFilterType" style="height:34px">
-          <option value="">All types</option><option value="income">Income</option><option value="expense">Expense</option>
+          <option value="">All types</option><option value="income">Income</option><option value="expense">Expense</option><option value="deposit">Deposit</option>
         </select>
         <button class="btn btn-soft btn-sm" id="finAdd2"><i class="bi bi-plus-lg me-1"></i>Add</button>
       </div>
@@ -4772,14 +4888,20 @@ function drawAccounts() {
       <th>Date</th><th>Detail</th><th>Category</th><th>Necessity</th><th>Method</th><th style="text-align:right">Amount</th><th></th>
     </tr></thead><tbody>${rows.map(t => {
       const inc = t.type === 'income';
-      return `<tr>
+      const dep = t.type === 'deposit';
+      const fallback = inc ? 'Income' : dep ? 'Deposit' : 'Expense';
+      // Deposits leave your hand like an expense (shown negative) but are
+      // money kept, so they get their own tone and no necessity band.
+      const amtCls = inc ? 'fin-pos' : dep ? 'fin-dep' : 'fin-neg';
+      return `<tr${dep ? ' class="is-deposit"' : ''}>
         <td class="date-cell">${fmtDate(t.date)}</td>
-        <td class="name-cell"><b>${escapeHtml(t.note || (inc ? 'Income' : 'Expense'))}</b>
-          ${t.recurring && t.recurring !== 'One-time' ? `<small><i class="bi bi-arrow-repeat"></i> ${escapeHtml(t.recurring)}</small>` : ''}</td>
+        <td class="name-cell"><b>${escapeHtml(t.note || fallback)}</b>
+          ${dep ? '<small><i class="bi bi-bank"></i> deposited — kept, not spent</small>' : ''}
+          ${t.recurring && t.recurring !== 'One-time' ? `<small title="Marked as recurring for your reference — it is not added to future months automatically"><i class="bi bi-arrow-repeat"></i> ${escapeHtml(t.recurring)}</small>` : ''}</td>
         <td>${escapeHtml(t.category || '—')}</td>
-        <td>${inc ? '<span class="text-faint">—</span>' : `<span class="chip t-${FIN_NEED_TONE[t.necessity] || 'slate'}"><span class="dot"></span>${escapeHtml(t.necessity || '—')}</span>`}</td>
+        <td>${(inc || dep) ? '<span class="text-faint">—</span>' : `<span class="chip t-${FIN_NEED_TONE[t.necessity] || 'slate'}"><span class="dot"></span>${escapeHtml(t.necessity || 'Untagged')}</span>`}</td>
         <td class="text-soft">${escapeHtml(t.method || '—')}</td>
-        <td style="text-align:right" class="num ${inc ? 'fin-pos' : 'fin-neg'}">${inc ? fmtBDT(t.amount, true) : '−' + fmtBDT(t.amount)}</td>
+        <td style="text-align:right" class="num ${amtCls}">${inc ? fmtBDT(t.amount, true) : '−' + fmtBDT(t.amount)}</td>
         <td><div class="row-actions"><button title="Edit" data-fe="${t.id}"><i class="bi bi-pencil"></i></button>
           <button class="del" title="Delete" data-fd="${t.id}"><i class="bi bi-trash"></i></button></div></td>
       </tr>`;
@@ -4811,7 +4933,9 @@ function openFinanceModal(id) {
   const isEdit = !!id;
   document.getElementById('finModal')?.remove();
 
-  const catOpts = (type) => (type === 'income' ? FIN_CATS('incomeCategories') : FIN_CATS('expenseCategories'));
+  const catOpts = (type) => type === 'income' ? FIN_CATS('incomeCategories')
+    : type === 'deposit' ? FIN_CATS('depositCategories')
+      : FIN_CATS('expenseCategories');
   const optionList = (arr, sel) => arr.map(o => `<option ${o === sel ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
 
   const wrap = document.createElement('div');
@@ -4827,10 +4951,12 @@ function openFinanceModal(id) {
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <div class="fin-typetoggle" id="finType">
-            <button type="button" data-t="expense" class="${rec.type !== 'income' ? 'on' : ''}"><i class="bi bi-arrow-up-right"></i> Expense</button>
+          <div class="fin-typetoggle is-3" id="finType">
+            <button type="button" data-t="expense" class="${(rec.type || 'expense') === 'expense' ? 'on' : ''}"><i class="bi bi-arrow-up-right"></i> Expense</button>
             <button type="button" data-t="income" class="${rec.type === 'income' ? 'on' : ''}"><i class="bi bi-arrow-down-left"></i> Income</button>
+            <button type="button" data-t="deposit" class="${rec.type === 'deposit' ? 'on' : ''}"><i class="bi bi-bank"></i> Deposit</button>
           </div>
+          <p class="fin-typehint" id="finTypeHint"></p>
           <form id="finForm" class="form-grid" style="margin-top:16px">
             <div class="field col-span"><label>Amount (৳) <span class="req">*</span></label>
               <input type="number" name="amount" min="0" step="0.01" inputmode="decimal" value="${rec.amount != null ? rec.amount : ''}" placeholder="0"></div>
@@ -4860,14 +4986,21 @@ function openFinanceModal(id) {
   modal.show();
   modalEl.addEventListener('hidden.bs.modal', () => wrap.remove());
 
+  const TYPE_HINT = {
+    expense: 'Money that is gone. Tag how necessary it was to build your spending-quality picture.',
+    income: 'Money that came in.',
+    deposit: 'Money you kept — savings, DPS, FDR, shares. Subtracted from spendable income and never counted as spending.'
+  };
   let curType = rec.type || 'expense';
   const syncType = () => {
     modalEl.querySelectorAll('#finType button').forEach(b => b.classList.toggle('on', b.dataset.t === curType));
-    // refresh category options + show/hide necessity (income has none)
+    // refresh category options + show/hide necessity (only expenses have one)
     const catSel = document.getElementById('finCat');
     const cur = catSel.value;
     catSel.innerHTML = `<option value="">— Select —</option>` + optionList(catOpts(curType), cur);
-    document.getElementById('finNeedField').style.display = curType === 'income' ? 'none' : '';
+    document.getElementById('finNeedField').style.display = curType === 'expense' ? '' : 'none';
+    const hint = document.getElementById('finTypeHint');
+    if (hint) hint.textContent = TYPE_HINT[curType] || '';
   };
   syncType();
   modalEl.querySelectorAll('#finType button').forEach(b => b.onclick = () => { curType = b.dataset.t; syncType(); });
@@ -4888,7 +5021,8 @@ function openFinanceModal(id) {
       amount,
       date,
       category: f.elements.namedItem('category').value,
-      necessity: curType === 'income' ? '' : f.elements.namedItem('necessity').value,
+      // only an expense carries a necessity band
+      necessity: curType === 'expense' ? f.elements.namedItem('necessity').value : '',
       method: f.elements.namedItem('method').value,
       recurring: f.elements.namedItem('recurring').value,
       note: f.elements.namedItem('note').value.trim()
@@ -4909,6 +5043,7 @@ function openFinanceSettings() {
   const groups = [
     { key: 'incomeCategories', label: 'Income categories', ico: 'arrow-down-left' },
     { key: 'expenseCategories', label: 'Expense categories', ico: 'arrow-up-right' },
+    { key: 'depositCategories', label: 'Deposit categories (money you keep)', ico: 'bank' },
     { key: 'methods', label: 'Payment methods', ico: 'wallet2' }
   ];
   const chips = (key) => FIN_CATS(key).map((v, i) => `<span class="chip chip-outline" style="padding-right:4px">${escapeHtml(v)}
@@ -5097,6 +5232,35 @@ function wkText(s) {
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
 }
 
+/* Masthead brand line: the group only. Imported sheets often carry a
+   longer "Group · Office of the …" string — the office/holder is now shown
+   by the identity card on the right, so the eyebrow keeps just the group. */
+function wkBrand(org) { return String(org || '').split('·')[0].trim(); }
+
+/* Identity card on the right of the masthead: whose desk this sheet is on.
+   Reads the live profile (name + photo) and its current role, so it stays
+   right when the profile changes; the sheet may override any field. */
+function wkIdentityHtml(d) {
+  const p = (typeof DB !== 'undefined' && DB.data && DB.data.profile) || {};
+  const job = (p.experience || []).find(e => e.current) || (p.experience || [])[0] || {};
+  const name = d.ownerName || p.name || '';
+  const role = d.ownerRole || job.role || '';
+  const org  = d.ownerOrg  || job.company || '';
+  if (!name && !role && !org) return '';
+  const photo = d.ownerPhoto || p.photo || '';
+  return `
+    <div class="wk-ident">
+      <div class="wk-ident-txt">
+        ${name ? `<b>${escapeHtml(name)}</b>` : ''}
+        ${role ? `<span>${escapeHtml(role)}</span>` : ''}
+        ${org ? `<span class="wk-ident-org">${escapeHtml(org)}</span>` : ''}
+      </div>
+      <div class="wk-ident-photo">${photo
+        ? `<img src="${escapeHtml(imgSrc(photo))}" alt="${escapeHtml(name)}">`
+        : `<span>${escapeHtml(initials(name))}</span>`}</div>
+    </div>`;
+}
+
 /* Month label ("July 2026") → storage slug ("july-2026"). */
 function wkSlug(label) { return String(label || 'current').trim().toLowerCase().replace(/\s+/g, '-'); }
 function wkDefaultMonth() {
@@ -5236,9 +5400,11 @@ function drawWork() {
   host.innerHTML = head + `
     <div class="wk">
       <header class="wk-mast">
-        ${d.org ? `<div class="wk-brand">${wkText(d.org)}</div>` : ''}
-        <h1>${wkText(d.title || 'Work Sheet')}</h1>
-        ${d.subtitle ? `<div class="wk-mast-sub">${wkText(d.subtitle)}</div>` : ''}
+        <div class="wk-mast-main">
+          ${wkBrand(d.org) ? `<div class="wk-brand">${wkText(wkBrand(d.org))}</div>` : ''}
+          <h1>${wkText(d.title || 'Work Sheet')}</h1>
+        </div>
+        ${wkIdentityHtml(d)}
       </header>
 
       <div class="wk-control">

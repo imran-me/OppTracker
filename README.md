@@ -401,21 +401,57 @@ wildcard) so nothing else is ever public.
 Until that rule exists the page shows a subtle **"Private · this device"** pill and stays local
 (never leaking, never breaking). With the rule it flips to **"Private · synced."**
 
+### Three flows, not two
+
+A transaction is **income**, **expense** or **deposit**:
+
+| Flow | Meaning | Effect |
+|------|---------|--------|
+| **Income** | money that came in | adds to income |
+| **Deposit** | money you **kept** — savings, DPS, FDR, shares | **subtracted from spendable income**, never counted as spending, no necessity band |
+| **Expense** | money that is actually gone | counted as spending, carries a necessity band |
+
+```
+income − deposited − expense = net saved (what is still in hand)
+deposited + net saved        = total kept
+savings rate                = total kept ÷ income
+```
+
+This matters: with savings filed as an *expense* (as it was before), moving ৳7,000 into
+savings made the page report a 22% savings rate when 36% of income had actually been kept —
+and called your savings your "biggest expense". Deposits fix that.
+
+> **Automatic migration.** Records saved before deposits existed (an expense categorised
+> *Savings / Investment*, *DPS*, *FDR* …) are reclassified to `deposit` once, on first load,
+> and the store is stamped `_finV: 2` so it never re-runs. A later deliberate re-tag is
+> respected. `Savings / Investment` also moves from the expense list to the deposit list.
+
 ### What it tracks (BDT ৳)
-- **Transactions** — income & expense, amount, date, category/sector, payment method
+- **Transactions** — income, expense or deposit; amount, date, category/sector, payment method
   (Cash, bKash, Nagad, Rocket, Card, Bank), repeat cadence, and a free-text note.
 - **Necessity band per expense** — *Essential · Important · Discretionary · Avoidable* — the
-  heart of the "was it worth it?" spending-quality analysis.
-- **Editable categories, monthly budget and savings goal** (⚙ Categories & budget).
+  heart of the "was it worth it?" spending-quality analysis. Untagged spend is reported
+  separately rather than silently assumed *Discretionary*, so it can't inflate "could save".
+- **Editable categories** for all three flows, **monthly budget** and **savings goal**
+  (⚙ Categories & budget). The budget is compared against real spending, deposits excluded.
 
 ### What it shows
-- **KPI cards** — income, expense, net saved, savings-rate %, and "could save" (the reclaimable leak).
-- **Insights** — plain-language, month-specific findings (savings verdict, biggest sector,
-  avoidable-spend leak, month-over-month movement, budget status).
+- **KPI cards** — income, **deposited** (shown as a minus, since it comes out of income),
+  expense, net saved, savings-rate %, and "could save" (the reclaimable slice), with the
+  running equation printed underneath whenever there are deposits.
+- **Insights** — plain-language, month-specific findings (savings verdict on what you *kept*,
+  deposit note, spending-quality leak, biggest sector, month-over-month movement, budget
+  status, untagged-spend nudge).
 - **Spending-quality meter** — how much went to each necessity band.
-- **Sector breakdowns** — where money came from / where it went.
-- **6-month trend** — income vs expense twin bars, plus a by-payment-method view.
+- **Sector breakdowns** — where money came from / where it went, with deposits listed
+  separately under "not spending".
+- **6-month trend** — income vs expense (vs deposits, when any exist).
+- **By payment method** — split **per flow** (money in / money out / deposited). These are
+  never added together: one combined figure per method matched neither earnings nor spending.
 - **Transactions table** — full add / edit / delete, filter by type, quick month chips.
+
+> The **Repeats** field is a label for your own reference. It is *not* projected into future
+> months — a July record marked *Monthly* does not create an August one.
 
 ---
 
@@ -473,6 +509,17 @@ the public portfolio and dashboard._
 _2026-07-30 — Removed the global "Add new" dropdown from the top bar (every section already has
 its own Add button). Added the owner-only **Work Sheet** (briefcase icon → `work.html`) with its
 content held outside the public repo — see the section above._
+
+_2026-07-30 — Accounts money-math audit & fixes: added the **deposit** flow with a **Deposited**
+KPI (savings are money kept, subtracted from income, no longer counted as spending — the savings
+rate was understated); split **by payment method** per flow (it was adding income and expense into
+one meaningless figure); corrected the spending-quality insight to state the true
+Avoidable/Discretionary total alongside the reclaimable slice (it reported the estimate as if it
+were the band total); untagged spend is no longer silently assumed Discretionary._
+
+_2026-07-30 — Tidied the Work Sheet masthead: the eyebrow now carries the group only, the long
+strapline is gone, and an **identity card** (name, role, company + photo) sits on the right. The
+card reads the live profile — set the photo on the **Profile** page and it appears here._
 
 ---
 

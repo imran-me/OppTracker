@@ -1393,6 +1393,38 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 /* transaction amount colours */
 .fin-pos { color: var(--green); font-weight: 700; }
 .fin-neg { color: #16203a; font-weight: 700; }
+/* a deposit leaves your hand like an expense but is money KEPT — its own tone
+   so it never reads as spending */
+.fin-dep { color: var(--blue); font-weight: 700; }
+.dt tr.is-deposit { background: linear-gradient(90deg, var(--blue-soft), transparent 60%); }
+.dt tr.is-deposit .name-cell small { color: var(--blue); }
+
+/* the running equation under the KPI row: in − deposited − spent = in hand */
+.fin-eq {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  font-size: 12.5px; color: var(--text-soft); font-family: var(--font-mono);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 9px 13px; margin: -8px 0 22px;
+}
+.fin-eq b { color: #16203a; }
+
+/* sub-heading inside a breakdown card (per-flow method groups, deposits) */
+.fin-subhead {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-faint); margin: 16px 0 9px; padding-top: 11px; border-top: 1px dashed var(--line);
+}
+.fin-subhead:first-of-type { margin-top: 2px; padding-top: 0; border-top: 0; }
+
+/* untagged-spend nudge under the necessity bands */
+.fin-untagged {
+  margin-top: 14px; font-size: 12.5px; color: var(--text-soft);
+  background: var(--slate-soft); border: 1px dashed var(--line);
+  border-radius: 10px; padding: 9px 12px;
+}
+.fin-untagged b { color: #16203a; }
+
+/* type hint under the expense / income / deposit toggle */
+.fin-typehint { font-size: 11.5px; color: var(--text-faint); margin: 8px 2px 0; min-height: 30px; }
 
 /* month quick-chips */
 .fin-months { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; }
@@ -1649,12 +1681,29 @@ body.reveal-on .pf-section.in-view { opacity: 1; transform: none; }
 .wk-empty p { font-size: 13.5px; color: var(--text-soft); margin-bottom: 10px; }
 .wk-empty code { font-family: var(--font-mono); font-size: 12px; background: var(--slate-soft); padding: 1px 5px; border-radius: 5px; }
 
-/* Masthead */
-.wk-mast { background: var(--wk-ink); color: #fff; padding: 22px 26px 20px; border-bottom: 3px solid var(--wk-gold); border-radius: var(--r) var(--r) 0 0; }
+/* Masthead — title on the left, identity card on the right */
+.wk-mast {
+  background: var(--wk-ink); color: #fff; padding: 22px 26px 20px;
+  border-bottom: 3px solid var(--wk-gold); border-radius: var(--r) var(--r) 0 0;
+  display: flex; align-items: center; justify-content: space-between; gap: 26px; flex-wrap: wrap;
+}
+.wk-mast-main { min-width: 0; }
 .wk-brand { font-family: var(--wk-mono); font-size: 10.5px; letter-spacing: .32em; text-transform: uppercase; color: var(--wk-gold-lt); }
-.wk-mast h1 { font-family: var(--wk-serif); font-weight: 400; font-size: 32px; line-height: 1.05; margin: 10px 0 2px; letter-spacing: -.01em; color: #fff; }
+.wk-mast h1 { font-family: var(--wk-serif); font-weight: 400; font-size: 32px; line-height: 1.05; margin: 10px 0 0; letter-spacing: -.01em; color: #fff; }
 .wk-mast h1 em { font-style: italic; color: var(--wk-gold-lt); }
-.wk-mast-sub { font-size: 12.5px; color: #9FB2CB; max-width: 52ch; }
+
+.wk-ident { display: flex; align-items: center; gap: 14px; }
+.wk-ident-txt { text-align: right; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wk-ident-txt b { font-family: var(--wk-serif); font-weight: 500; font-size: 16px; letter-spacing: .01em; }
+.wk-ident-txt span { font-size: 12px; color: #9FB2CB; }
+.wk-ident-txt .wk-ident-org { font-family: var(--wk-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--wk-gold-lt); }
+.wk-ident-photo {
+  width: 58px; height: 58px; flex: none; border-radius: 12px; overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .07);
+  display: grid; place-items: center;
+}
+.wk-ident-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wk-ident-photo span { font-family: var(--wk-serif); font-size: 19px; color: var(--wk-gold-lt); }
 
 /* Control strip */
 .wk-control { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--wk-line); border-bottom: 1px solid var(--wk-line); margin-bottom: 26px; }
@@ -1761,8 +1810,10 @@ label.wk-item.buf .wk-day { color: var(--wk-mute); }
 /* Responsive */
 @media (max-width: 900px) { .wk-control { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 620px) {
-  .wk-mast { padding: 18px 16px 16px; }
+  .wk-mast { padding: 18px 16px 16px; gap: 14px; }
   .wk-mast h1 { font-size: 25px; }
+  .wk-ident { flex-direction: row-reverse; }
+  .wk-ident-txt { text-align: left; }
   .wk-ws-row { flex-wrap: wrap; }
   .wk-ws-num { text-align: left; min-width: 0; }
   .wk-topbar .fin-actions { margin-left: 0; }
@@ -1780,8 +1831,10 @@ label.wk-item.buf .wk-day { color: var(--wk-mute); }
   body[data-page="work"] .page-wrap { padding: 0 !important; max-width: none !important; }
   .wk-mast { background: #fff; color: #000; border-bottom: 2px solid var(--wk-gold); border-radius: 0; }
   .wk-mast h1, .wk-mast h1 em { color: #000; }
-  .wk-brand { color: #8A6C15; }
-  .wk-mast-sub { color: #444; }
+  .wk-brand, .wk-ident-txt .wk-ident-org { color: #8A6C15; }
+  .wk-ident-txt b { color: #000; }
+  .wk-ident-txt span { color: #444; }
+  .wk-ident-photo { border-color: #bbb; background: #fff; }
   details.wk-ws { break-inside: avoid; border-color: #999; }
   details.wk-ws > summary { cursor: default; }
   label.wk-item:hover { background: none; }
