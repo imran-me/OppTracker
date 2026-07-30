@@ -945,21 +945,9 @@ function renderChrome(activePage, title, sub) {
             <li><a class="dropdown-item text-danger" href="#" id="resetBtn"><i class="bi bi-arrow-counterclockwise me-2"></i>Reset to sample data</a></li>
           </ul>
         </div>
-        <!-- "Add new" is a management action → owner-only -->
-        <div class="dropdown owner-only">
-          <button class="btn btn-primary" data-bs-toggle="dropdown"><i class="bi bi-plus-lg me-1"></i>Add new</button>
-          <ul class="dropdown-menu dropdown-menu-end shadow">
-            <li><a class="dropdown-item" href="#" data-add="opportunities"><i class="bi bi-compass me-2"></i>Opportunity</a></li>
-            <li><a class="dropdown-item" href="#" data-add="tasks"><i class="bi bi-check2-square me-2"></i>Task</a></li>
-            <li><a class="dropdown-item" href="#" data-add="documents"><i class="bi bi-folder me-2"></i>Document</a></li>
-            <li><a class="dropdown-item" href="#" data-add="achievements"><i class="bi bi-trophy me-2"></i>Achievement</a></li>
-            <li><a class="dropdown-item" href="#" data-add="training"><i class="bi bi-mortarboard me-2"></i>Training / certification</a></li>
-            <li><a class="dropdown-item" href="#" data-add="volunteering"><i class="bi bi-heart me-2"></i>Social activity</a></li>
-            <li><a class="dropdown-item" href="#" data-add="contacts"><i class="bi bi-person-plus me-2"></i>Contact</a></li>
-            <li><a class="dropdown-item" href="#" data-add="research"><i class="bi bi-lightbulb me-2"></i>Research idea</a></li>
-            <li><a class="dropdown-item" href="#" data-add="projects"><i class="bi bi-diagram-3 me-2"></i>Project</a></li>
-          </ul>
-        </div>
+        <!-- No global "Add new" here on purpose: every module page carries its
+             own Add button (and the dashboard has Quick actions), so a shared
+             one in the top bar was just duplicate chrome on every screen. -->
       </div>
       <input type="file" id="importFile" accept="application/json" hidden>`;
     wireChrome();
@@ -989,10 +977,10 @@ function wireChrome() {
     }
   };
 
-  // quick "Add new" dropdown
-  document.querySelectorAll('[data-add]').forEach(a => {
-    a.onclick = (e) => { e.preventDefault(); openEntityModal(a.dataset.add); };
-  });
+  /* No [data-add] wiring here — the top bar no longer carries an "Add new"
+     dropdown. The pages that DO use data-add (dashboard Quick actions, Owner
+     Dashboard quick-add) wire their own buttons in their initializer, with the
+     right after-save callback. */
 
   // global search → jump to the right list page with a query
   const gs = document.getElementById('globalSearch');
