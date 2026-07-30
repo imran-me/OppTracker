@@ -4709,6 +4709,7 @@ let _finLens = '';                    // '', income, deposit, expense, leak, net
 let _finTab = 'ledger';               // workspace tab
 let _finQ = '';                       // ledger search
 let _finDay = '';                     // YYYY-MM-DD, set by clicking a calendar day
+let _finScope = 'month';              // ledger source: 'month' | 'all' (every month on file)
 let _finFilt = { category: '', necessity: '', method: '' };
 let _finSel = new Set();              // bulk-selected transaction ids
 
@@ -4876,7 +4877,9 @@ function drawAccounts() {
     ${finScrubHtml(mk)}
     <div class="fin-search">
       <i class="bi bi-search"></i>
-      <input id="finSearch" value="${escapeHtml(_finQ)}" placeholder="Search ${escapeHtml(finMonthLabel(mk))}…" aria-label="Search this month">
+      <input id="finSearch" value="${escapeHtml(_finQ)}"
+             placeholder="Search ${_finScope === 'all' ? 'every month' : escapeHtml(finMonthLabel(mk))}…"
+             aria-label="Search ${_finScope === 'all' ? 'all records' : 'this month'}">
       ${_finQ ? '<button id="finSearchX" title="Clear"><i class="bi bi-x-lg"></i></button>' : ''}
     </div>
     <div class="fin-actions">
@@ -5116,7 +5119,9 @@ function finDrawPanel() {
 /* The ledger rows after lens + filters + search. One place, so every
    tab and the counters can agree on what "showing" means. */
 function finRows(s) {
-  let rows = s.tx.slice();
+  // 'all' widens the ledger to every month on file — the cockpit above stays
+  // month-scoped, because those figures are about the month you are viewing.
+  let rows = _finScope === 'all' ? FinanceDB.all().slice() : s.tx.slice();
   if (_finLens === 'income' || _finLens === 'expense' || _finLens === 'deposit') rows = rows.filter(t => t.type === _finLens);
   if (_finLens === 'leak') rows = rows.filter(t => t.type === 'expense' && (t.necessity === 'Avoidable' || t.necessity === 'Discretionary'));
   if (_finDay) rows = rows.filter(t => t.date === _finDay);
@@ -5130,28 +5135,37 @@ function finRows(s) {
 
 /* ---- Ledger: searchable, filterable, grouped by day, bulk-taggable -- */
 function finLedgerHtml(s, rows) {
-  const cats = [...new Set(s.tx.map(t => t.category).filter(Boolean))].sort();
-  const methods = [...new Set(s.tx.map(t => t.method).filter(Boolean))].sort();
+  const source = _finScope === 'all' ? FinanceDB.all() : s.tx;
+  const cats = [...new Set(source.map(t => t.category).filter(Boolean))].sort();
+  const methods = [...new Set(source.map(t => t.method).filter(Boolean))].sort();
   const opt = (v, sel) => `<option value="${escapeHtml(v)}" ${v === sel ? 'selected' : ''}>${escapeHtml(v)}</option>`;
   const activeFilters = (_finDay ? 1 : 0) + (_finFilt.category ? 1 : 0) + (_finFilt.necessity ? 1 : 0) + (_finFilt.method ? 1 : 0) + (_finQ ? 1 : 0);
 
   const bar = `
     <div class="fin-filters">
+      <div class="fin-scope" role="group" aria-label="Ledger range">
+        <button class="${_finScope === 'month' ? 'on' : ''}" data-scope="month">This month</button>
+        <button class="${_finScope === 'all' ? 'on' : ''}" data-scope="all" title="Every record you have ever logged, newest first">All months</button>
+      </div>
       <select class="filter-select" id="fltCat"><option value="">All categories</option>${cats.map(c => opt(c, _finFilt.category)).join('')}</select>
       <select class="filter-select" id="fltNeed"><option value="">All necessity</option>${[...FIN_NEED.map(n => n.key), 'Untagged'].map(c => opt(c, _finFilt.necessity)).join('')}</select>
       <select class="filter-select" id="fltMethod"><option value="">All methods</option>${methods.map(c => opt(c, _finFilt.method)).join('')}</select>
       ${_finDay ? `<span class="fin-daychip"><i class="bi bi-calendar3 me-1"></i>${fmtDate(_finDay)}<button id="fltDayX" title="Clear day"><i class="bi bi-x"></i></button></span>` : ''}
       ${activeFilters ? `<button class="btn btn-ghost btn-sm" id="fltClear"><i class="bi bi-x-circle me-1"></i>Clear ${activeFilters} filter${activeFilters === 1 ? '' : 's'}</button>` : ''}
       <span class="ms-auto text-faint" style="font-size:12px">
-        ${rows.length} of ${s.tx.length} record${s.tx.length === 1 ? '' : 's'}${rows.length !== s.tx.length ? ` · ${fmtBDT(rows.reduce((n, t) => n + (Number(t.amount) || 0), 0))} shown` : ''}
+        ${rows.length} of ${source.length} record${source.length === 1 ? '' : 's'}${_finScope === 'all' ? ' across every month' : ''}${rows.length !== source.length ? ` · ${fmtBDT(rows.reduce((n, t) => n + (Number(t.amount) || 0), 0))} shown` : ''}
       </span>
       <button class="btn btn-soft btn-sm" id="finAdd2"><i class="bi bi-plus-lg me-1"></i>Add</button>
     </div>`;
 
   if (!rows.length) {
+    // An empty month is worth saying out loud when there IS history elsewhere.
+    const elsewhere = _finScope === 'month' && !s.tx.length && FinanceDB.all().length;
     return bar + `<div class="empty" style="padding:40px 20px"><div class="e-ico"><i class="bi bi-receipt"></i></div>
-      <b>${s.tx.length ? 'Nothing matches those filters' : 'No transactions yet'}</b>
-      <p>${s.tx.length ? 'Loosen a filter or clear the search to see the rest of the month.' : 'Add your income, deposits and expenses to see the full picture.'}</p></div>`;
+      <b>${source.length ? 'Nothing matches those filters' : elsewhere ? 'Nothing recorded this month' : 'No transactions yet'}</b>
+      <p>${source.length ? 'Loosen a filter or clear the search to see the rest.'
+        : elsewhere ? 'Your earlier months are all still on file — switch to <b>All months</b> above, or open the <b>Months</b> tab.'
+        : 'Add your income, deposits and expenses to see the full picture.'}</p></div>`;
   }
 
   // group by day, newest first, with a per-day net
@@ -5352,23 +5366,56 @@ function finMonthsHtml() {
   const months = finAllMonths().reverse();
   if (!months.length) return `<div class="empty" style="padding:40px"><div class="e-ico"><i class="bi bi-archive"></i></div><b>No history yet</b><p>Once you record a month it is kept here for good.</p></div>`;
   const closes = finCloses();
+
+  // Every month costed once, then rolled up for the all-time strip and the
+  // per-year subtotals — the whole history in one place.
+  const rows = months.map(k => ({ k, t: finSummary(k), c: finCarry(k) }));
+  const life = rows.reduce((a, r) => ({
+    in: a.in + r.t.totalIn, dep: a.dep + r.t.totalDeposit, out: a.out + r.t.totalOut, n: a.n + r.t.count
+  }), { in: 0, dep: 0, out: 0, n: 0 });
+  const latest = rows[0];                                  // months came in newest-first
+  const vault = latest ? latest.c.vault : 0;
+  const balance = latest ? latest.c.opening + latest.t.net : 0;
+  const spendMonths = rows.filter(r => r.t.totalOut > 0);
+  const avgOut = spendMonths.length ? life.out / spendMonths.length : 0;
+  const lifeRate = life.in > 0 ? (life.in - life.out) / life.in * 100 : 0;
+
   return `
   <div class="fin-calhead">
     <span class="section-title mb-0"><i class="bi bi-archive me-1"></i>Month archive</span>
     <span class="text-faint" style="font-size:12px">Every month keeps its own records for good — the leftover of one opens the next.</span>
   </div>
+
+  <div class="fin-lifetime">
+    <div><span>Months tracked</span><b class="num">${rows.length}</b><small>${life.n} record${life.n === 1 ? '' : 's'}</small></div>
+    <div><span>Earned all time</span><b class="num fin-pos">${fmtBDT(life.in)}</b><small>across every month</small></div>
+    <div><span>Deposited all time</span><b class="num fin-dep">${fmtBDT(life.dep)}</b><small>vault now ${fmtBDTk(vault)}</small></div>
+    <div><span>Spent all time</span><b class="num">${fmtBDT(life.out)}</b><small>${fmtBDT(avgOut)}/month average</small></div>
+    <div><span>Kept all time</span><b class="num">${fmtBDT(life.in - life.out)}</b><small>${lifeRate.toFixed(0)}% of everything earned</small></div>
+    <div><span>In hand now</span><b class="num">${fmtBDT(balance)}</b><small>after ${escapeHtml(finMonthLabel(latest ? latest.k : _finMonth))}</small></div>
+  </div>
+
   <div class="fin-tablewrap">
   <table class="dt fin-dt"><thead><tr>
     <th>Month</th><th style="text-align:right">Opened</th><th style="text-align:right">In</th>
     <th style="text-align:right">Deposited</th><th style="text-align:right">Spent</th>
     <th style="text-align:right">Closed with</th><th style="width:78px">Quality</th><th style="width:150px"></th>
   </tr></thead><tbody>
-  ${months.map(k => {
-    const t = finSummary(k);
-    const c = finCarry(k);
+  ${rows.map(({ k, t, c }, i) => {
     const q = finQuality(t);
     const rec = closes[k];
-    return `<tr class="${k === _finMonth ? 'is-cur' : ''}">
+    // a year header + subtotal whenever the year changes going down the list
+    const year = k.slice(0, 4);
+    const isNewYear = i === 0 || rows[i - 1].k.slice(0, 4) !== year;
+    const yr = isNewYear ? rows.filter(r => r.k.slice(0, 4) === year) : null;
+    const yearRow = yr ? `<tr class="fin-yearrow">
+      <td><b>${year}</b><span class="text-faint">${yr.length} month${yr.length === 1 ? '' : 's'}</span></td>
+      <td></td>
+      <td style="text-align:right" class="num fin-pos">${fmtBDTk(yr.reduce((n, r) => n + r.t.totalIn, 0))}</td>
+      <td style="text-align:right" class="num fin-dep">${fmtBDTk(yr.reduce((n, r) => n + r.t.totalDeposit, 0))}</td>
+      <td style="text-align:right" class="num">${fmtBDTk(yr.reduce((n, r) => n + r.t.totalOut, 0))}</td>
+      <td colspan="3"></td></tr>` : '';
+    return yearRow + `<tr class="${k === _finMonth ? 'is-cur' : ''}">
       <td class="name-cell"><b>${escapeHtml(finMonthLabel(k))}</b>
         <small>${t.count} record${t.count === 1 ? '' : 's'}${rec ? ` · closed ${fmtDate(String(rec.closedAt || '').slice(0, 10))}` : ''}</small>
         ${rec && rec.note ? `<small class="fin-notepeek"><i class="bi bi-sticky me-1"></i>${escapeHtml(rec.note)}</small>` : ''}</td>
@@ -5442,6 +5489,14 @@ function finWirePanel(s) {
   // ledger: filters
   const set = (id, key) => { const el = document.getElementById(id); if (el) el.onchange = () => { _finFilt[key] = el.value; redraw(); }; };
   set('fltCat', 'category'); set('fltNeed', 'necessity'); set('fltMethod', 'method');
+  // ledger: this month ⇄ every month (redraws the page so the search box,
+  // which lives in the command bar, relabels itself too)
+  work.querySelectorAll('[data-scope]').forEach(b => b.onclick = () => {
+    if (_finScope === b.dataset.scope) return;
+    _finScope = b.dataset.scope; _finDay = ''; _finSel.clear();
+    _finTab = 'ledger';
+    drawAccounts();
+  });
   document.getElementById('fltDayX')?.addEventListener('click', () => { _finDay = ''; redraw(); });
   document.getElementById('fltClear')?.addEventListener('click', () => {
     _finFilt = { category: '', necessity: '', method: '' }; _finDay = ''; _finQ = '';

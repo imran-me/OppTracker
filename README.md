@@ -482,8 +482,12 @@ money river, then one tabbed workspace — instead of eight stacked cards.
   separate) and payment methods split **per flow**. These are never added together: one combined
   figure per method matched neither earnings nor spending.
 - **Trends** — 12 months of income vs expense vs deposits with the budget line; click to travel.
-- **Months** — the archive: every month you have ever recorded, with its opening and closing
-  balance, quality grade and saved review note.
+- **Months** — the archive of everything: an **all-time strip** (months tracked, earned,
+  deposited, spent, kept, in hand now) over a per-month table grouped into **years with
+  subtotals**, each row showing its opening and closing balance, quality grade and saved review
+  note, with a jump button. Nothing ages out.
+- **All months in the ledger** — the ledger's *This month · All months* switch widens it to every
+  record you have ever logged, still day-grouped and still fully searchable and filterable.
 - **Insights** — the plain-language findings (savings verdict on what you *kept*, deposit note,
   spending-quality leak, biggest sector, month-over-month movement, budget status, untagged
   nudge), plus the **recurring radar** (lines that repeat across months, found in your own

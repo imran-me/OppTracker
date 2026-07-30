@@ -1567,6 +1567,14 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 /* --- Ledger --- */
 .fin-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .fin-filters .filter-select { height: 34px; font-size: 12.5px; }
+/* this month ⇄ every month */
+.fin-scope { display: inline-flex; background: var(--slate-soft); border-radius: 999px; padding: 3px; }
+.fin-scope button {
+  border: 0; background: none; cursor: pointer; color: var(--text-soft);
+  font-size: 12px; font-weight: 700; padding: 5px 13px; border-radius: 999px; transition: all .15s;
+}
+.fin-scope button:hover { color: var(--primary-700); }
+.fin-scope button.on { background: var(--surface); color: var(--primary-700); box-shadow: var(--shadow-sm); }
 .fin-daychip {
   display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600;
   padding: 6px 8px 6px 11px; border-radius: 999px; background: var(--primary-soft); color: var(--primary-700);
@@ -1592,6 +1600,24 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 .fin-needsel { height: 30px; font-size: 12px; max-width: 140px; }
 .fin-dt tbody tr.is-cur { box-shadow: inset 3px 0 0 var(--primary); }
 .fin-notepeek { display: block; color: var(--text-soft); font-style: italic; }
+/* all-time strip above the month archive */
+.fin-lifetime {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; margin-bottom: 18px;
+}
+.fin-lifetime > div { background: var(--surface); padding: 13px 15px; }
+.fin-lifetime span { display: block; font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-faint); }
+.fin-lifetime b { display: block; font-size: 18px; color: #16203a; margin-top: 5px; line-height: 1.15; }
+.fin-lifetime small { display: block; font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+
+/* year band inside the archive */
+.fin-yearrow td { background: var(--ink-900); padding: 7px 16px !important; border-bottom: 0 !important; }
+.fin-yearrow b { font-family: var(--font-display); font-size: 12.5px; color: #fff; letter-spacing: .06em; }
+.fin-yearrow .text-faint { font-size: 11px; margin-left: 8px; color: #8b98ae !important; }
+.fin-yearrow .num { font-size: 11.5px; color: #cbd5e6; }
+.fin-yearrow .fin-pos { color: #7ee2ac; } .fin-yearrow .fin-dep { color: #93b8ff; }
+.fin-dt tbody tr.fin-yearrow:hover { background: var(--ink-900); }
+
 .fin-gradepill {
   display: inline-block; font-family: var(--font-display); font-weight: 800; font-size: 12px;
   padding: 3px 10px; border-radius: 999px; background: var(--slate-soft); color: var(--text-soft);
