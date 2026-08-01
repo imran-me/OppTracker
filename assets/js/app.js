@@ -7087,7 +7087,21 @@ const WKD = {
      reads as three documents; the reference sets everything in Calibri and
      lets size, weight and colour do the work instead. */
   font: 'Calibri, Carlito, sans-serif',
-  BODY: '9pt', HEAD: '12pt', MICRO: '7.5pt', SMALL: '8pt', TITLE: '13pt'
+  BODY: '9pt', HEAD: '12pt', MICRO: '7.5pt', SMALL: '8pt', TITLE: '18pt', BIG: '14pt'
+};
+
+/* ---- House rules for the tables -----------------------------------
+   The whole difference between a document and a spreadsheet: rule the
+   ROWS, never box the CELLS, and let padding do the separating. A grid
+   of borders round every cell is what made the first version read as
+   data entry rather than as a report. */
+const WKT = {
+  /* column heading: tiny grey caps over a hairline */
+  th: () => `text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};`
+    + `font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal`,
+  /* body cell: a hairline under, air around, nothing at the sides */
+  td: () => `padding:7px 10px 7px 0;border-bottom:1px solid ${WKD.line};`
+    + `font-size:${WKD.BODY};color:${WKD.ink};vertical-align:top`
 };
 
 /* A label/value pair on one line — the meta strip under a workstream title. */
@@ -7123,17 +7137,13 @@ function wkDocBar(pct, w = 300) {
    from restraint, so only the things that must stop you (critical, today) get
    any colour at all. */
 function wkDocChip(text, kind) {
-  const t = {
-    plain:  { c: WKD.mute,  b: WKD.line, bg: WKD.fill },
-    seal:   { c: WKD.gold,  b: WKD.line, bg: WKD.fill },
-    gold:   { c: WKD.gold,  b: WKD.line, bg: WKD.fill },
-    assign: { c: WKD.mute,  b: WKD.line, bg: WKD.fill },
-    High:   { c: WKD.red,   b: WKD.line, bg: WKD.fill },
-    Medium: { c: WKD.gold,  b: WKD.line, bg: WKD.fill },
-    Low:    { c: WKD.green, b: WKD.line, bg: WKD.fill }
-  }[kind || 'plain'] || { c: WKD.mute, b: WKD.line, bg: WKD.fill };
-  return `<span style="font-size:${WKD.MICRO};color:${t.c};`
-    + `background-color:${t.bg};border:1px solid ${t.b};padding:1px 5px">${wkText(text)}</span>`;
+  const c = {
+    plain: WKD.mute, seal: WKD.gold, gold: WKD.gold, assign: WKD.mute,
+    High: WKD.red, Medium: WKD.gold, Low: WKD.green
+  }[kind || 'plain'] || WKD.mute;
+  /* No box, no fill — small letterspaced caps in colour. A bordered pill is a
+     screen idiom; on the page it reads as clutter beside ruled tables. */
+  return `<span style="font-size:${WKD.MICRO};color:${c};letter-spacing:.08em">${wkText(String(text).toUpperCase())}</span>`;
 }
 
 /* A bookmark target. Docs turns a named anchor into a real bookmark and keeps
@@ -7149,41 +7159,43 @@ function wkDocBreak() { return `<p style="page-break-before:always;margin:0;font
    it is, how much is closed, and how far along. Each row is a link into that
    task's own section further down the document. */
 function wkDocIndex(depts, tail) {
-  const th = `text-align:left;padding:5px 8px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.08em`;
-  const td = `padding:5px 8px;border:1px solid ${WKD.line};font-size:${WKD.BODY};color:${WKD.ink}`;
+  const th = WKT.th(), td = WKT.td();
+  /* The one place a fill earns its keep: a department band has to separate
+     two runs of rows, and a rule alone would read as just another row. */
+  const band = `padding:9px 10px 7px 0;background-color:${WKD.fill};border-bottom:1px solid ${WKD.line}`;
   const rows = depts.map(dep => {
     const s = wkDeptStats(dep.key);
-    const head = `<tr><td colspan="4" style="padding:6px 8px;background-color:${WKD.fill};border:1px solid ${WKD.line}">
-      <span style="font-size:${WKD.SMALL};color:${WKD.panel};font-weight:bold;letter-spacing:.08em">${wkText((dep.label || 'Workstreams').toUpperCase())}</span>
+    const head = `<tr><td colspan="4" style="${band};padding-left:8px">
+      <span style="font-size:${WKD.SMALL};color:${WKD.panel};font-weight:bold;letter-spacing:.1em">${wkText((dep.label || 'Workstreams').toUpperCase())}</span>
       <span style="font-size:${WKD.MICRO};color:${WKD.mute}">&nbsp;&nbsp;&nbsp;&nbsp;${s.list.length} workstream${s.list.length === 1 ? '' : 's'} · ${s.done} / ${s.total} items closed</span>
       </td></tr>`;
     const body = s.list.map(ws => {
       const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
       return `<tr>
-        <td style="${td};width:56px;color:${WKD.gold}">${wkText(ws.id)}</td>
-        <td style="${td}"><a href="#${escapeHtml(wkDocAnchorId(ws))}" style="color:${WKD.ink}">${wkText(ws.title)}</a></td>
+        <td style="${td};width:56px;color:${WKD.gold};padding-left:8px">${wkText(ws.id)}</td>
+        <td style="${td}"><a href="#${escapeHtml(wkDocAnchorId(ws))}" style="color:${WKD.panel}">${wkText(ws.title)}</a></td>
         <td style="${td};width:70px;color:${WKD.mute}">${wkText(ws.priority || '—')}</td>
-        <td style="${td};width:70px;text-align:right">${done} / ${keys.length}</td></tr>`;
+        <td style="${td};width:70px;text-align:right;padding-right:0">${done} / ${keys.length}</td></tr>`;
     }).join('');
     return head + body;
   }).join('');
   /* The sections after the departments get index rows too, so the contents
      page is the whole document and not only the half of it made of tasks. */
   const tailRows = (tail || []).map(t => `<tr>
-    <td colspan="2" style="${td};background-color:${WKD.fill}">
-      <a href="#${escapeHtml(t.id)}" style="color:${WKD.panel};font-weight:bold;letter-spacing:.08em">${wkText(t.label.toUpperCase())}</a></td>
-    <td colspan="2" style="${td};background-color:${WKD.fill};text-align:right;color:${WKD.mute};font-size:${WKD.MICRO}">${wkText(t.meta)}</td>
+    <td colspan="2" style="${band};padding-left:8px">
+      <a href="#${escapeHtml(t.id)}" style="color:${WKD.panel};font-weight:bold;letter-spacing:.1em;font-size:${WKD.SMALL}">${wkText(t.label.toUpperCase())}</a></td>
+    <td colspan="2" style="${band};text-align:right;color:${WKD.mute};font-size:${WKD.MICRO}">${wkText(t.meta)}</td>
   </tr>`).join('');
 
   return `
-    <h1 style="margin:16px 0 0;font-size:${WKD.SMALL};color:${WKD.panel};letter-spacing:.1em">CONTENTS</h1>
-    <p style="margin:2px 0 5px;font-size:${WKD.MICRO};color:${WKD.faint}">Click any line to jump to it</p>
+    ${wkDocSectionLabel('Contents')}
+    <p style="margin:-3px 0 7px;font-size:${WKD.MICRO};color:${WKD.faint}">Click any line to jump to it</p>
     <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
       <tr>
-        <th style="${th};width:56px">REF</th>
+        <th style="${th};width:56px;padding-left:8px">REF</th>
         <th style="${th}">WORKSTREAM</th>
         <th style="${th};width:70px">PRIORITY</th>
-        <th style="${th};width:70px">CLOSED</th>
+        <th style="${th};width:70px;text-align:right;padding-right:0">CLOSED</th>
       </tr>
       ${rows}${tailRows}
     </table>`;
@@ -7193,7 +7205,7 @@ function wkDocIndex(depts, tail) {
    it reaches the Docs navigation pane along with the departments. */
 function wkDocSectionHead(label, meta, id) {
   return `${id ? wkDocAnchor(id) : ''}
-    <h1 style="margin:16px 0 3px;font-size:${WKD.SMALL};color:${WKD.panel};letter-spacing:.1em;border-bottom:2px solid ${WKD.panel};padding-bottom:4px">
+    <h1 style="margin:24px 0 9px;padding-bottom:5px;border-bottom:1px solid ${WKD.panel};font-size:${WKD.SMALL};color:${WKD.panel};letter-spacing:.14em;font-weight:bold">
     ${wkText(String(label || '').toUpperCase())}
     <span style="font-size:${WKD.MICRO};color:${WKD.faint};font-weight:normal;letter-spacing:0">&nbsp;&nbsp;&nbsp;&nbsp;${wkText(meta || '')}</span></h1>`;
 }
@@ -7214,60 +7226,71 @@ function wkDocMast() {
     name ? 'Owner: ' + wkPlain(name) + (role ? ', ' + wkPlain(role) : '') : '',
     wkPlain(org)
   ].filter(Boolean).join('&nbsp; · &nbsp;');
+  /* Eyebrow, title, one line of provenance — then the pair of rules, navy
+     over gold, that the reference uses to close the letterhead. */
   return `
-    ${brand ? `<p style="margin:0 0 2px;font-size:${WKD.MICRO};color:${WKD.gold};letter-spacing:.12em">${wkText(brand.toUpperCase())}</p>` : ''}
-    <p style="margin:0;font-size:${WKD.TITLE};color:${WKD.panel};font-weight:bold">${wkText(wkPlain(d.title) || 'Work Sheet')}</p>
-    <p style="margin:3px 0 0;padding-bottom:8px;border-bottom:2px solid ${WKD.panel};font-size:${WKD.MICRO};color:${WKD.mute}">${sub}</p>`;
+    ${brand ? `<p style="margin:0 0 6px;font-size:${WKD.MICRO};color:${WKD.gold};letter-spacing:.16em;font-weight:bold">${wkText(brand.toUpperCase())}</p>` : ''}
+    <p style="margin:0;font-size:${WKD.TITLE};color:${WKD.panel};font-weight:bold;line-height:1.15">${wkText(wkPlain(d.title) || 'Work Sheet')}</p>
+    <p style="margin:8px 0 0;font-size:${WKD.SMALL};color:${WKD.mute}">${sub}</p>
+    <p style="margin:14px 0 0;border-top:1px solid ${WKD.panel};font-size:1pt;line-height:1pt">&nbsp;</p>
+    <p style="margin:3px 0 0;border-top:1px solid ${WKD.gold};font-size:1pt;line-height:1pt">&nbsp;</p>`;
 }
 
 /* The control strip. Value ABOVE its label, filled panels, no bars — the
    numbers are the point and a row of half-empty bars only dilutes them. */
 function wkDocKpiStrip(cells) {
-  return `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:10px">
+  return `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:22px">
     <tr>${cells.map(c => `
-      <td style="width:${Math.floor(100 / cells.length)}%;padding:9px 10px;background-color:${WKD.fill};border:1px solid ${WKD.line};vertical-align:top">
-        <p style="margin:0;font-size:${WKD.TITLE};color:${WKD.panel};font-weight:bold">${wkText(c.v)}</p>
-        <p style="margin:2px 0 0;font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.08em">${wkText(String(c.k).toUpperCase())}</p>
+      <td style="width:${Math.floor(100 / cells.length)}%;padding:0 14px 0 0;vertical-align:top">
+        <p style="margin:0;font-size:${WKD.BIG};color:${WKD.panel};font-weight:bold;line-height:1.1">${wkText(c.v)}</p>
+        <p style="margin:5px 0 0;font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em">${wkText(String(c.k).toUpperCase())}</p>
       </td>`).join('')}</tr></table>`;
 }
 
 /* Department summary — the same four columns the reference leads with. */
 function wkDocDeptSummary(depts) {
-  const th = `text-align:left;padding:5px 8px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.08em`;
-  const td = `padding:5px 8px;border:1px solid ${WKD.line};font-size:${WKD.BODY};color:${WKD.ink}`;
+  const th = WKT.th(), td = WKT.td();
   return `
-    <h1 style="margin:16px 0 0;font-size:${WKD.SMALL};color:${WKD.panel};letter-spacing:.1em">DEPARTMENT SUMMARY</h1>
-    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:5px">
+    ${wkDocSectionLabel('Department summary')}
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
       <tr>
         <th style="${th}">DEPARTMENT</th>
-        <th style="${th};width:90px">WORKSTREAMS</th>
-        <th style="${th};width:80px">CLOSED</th>
-        <th style="${th};width:170px">PROGRESS</th>
+        <th style="${th};width:100px;text-align:right">WORKSTREAMS</th>
+        <th style="${th};width:80px;text-align:right">CLOSED</th>
+        <th style="${th};width:180px;text-align:right;padding-right:0">PROGRESS</th>
       </tr>
       ${depts.map(dep => {
         const s = wkDeptStats(dep.key);
         return `<tr>
-          <td style="${td}">${wkText(dep.label || 'Workstreams')}</td>
+          <td style="${td};font-weight:bold;color:${WKD.panel}">${wkText(dep.label || 'Workstreams')}</td>
           <td style="${td};text-align:right">${s.list.length}</td>
           <td style="${td};text-align:right">${s.done} / ${s.total}</td>
-          <td style="${td}">${wkDocBar(s.pct, 120)}<span style="font-size:${WKD.MICRO};color:${WKD.mute}">${Math.round(s.pct)}%</span></td>
+          <td style="${td};text-align:right;padding-right:0">
+            ${wkDocBar(s.pct, 130)}&nbsp;<span style="font-size:${WKD.MICRO};color:${WKD.mute}">${Math.round(s.pct)}%</span></td>
         </tr>`;
       }).join('')}
     </table>`;
+}
+
+/* A quiet section label — bold navy small caps over air, no rule. The heavy
+   ruled bar this replaced was fighting the tables underneath it. */
+function wkDocSectionLabel(text) {
+  return `<h1 style="margin:26px 0 7px;font-size:${WKD.MICRO};color:${WKD.panel};letter-spacing:.14em;font-weight:bold">${wkText(String(text).toUpperCase())}</h1>`;
 }
 
 /* How to read the file. It exists because the document leaves the app: the
    person holding it has to know the ticks are a print-marking convenience and
    that the record of truth is still OppTrack. */
 function wkDocHowTo() {
-  const td = `padding:5px 8px;border:1px solid ${WKD.line};font-size:${WKD.BODY};color:${WKD.ink}`;
-  const lb = `padding:5px 8px;border:1px solid ${WKD.line};background-color:${WKD.fill};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.08em;width:110px;vertical-align:top`;
+  const lb = `padding:0 16px 12px 0;width:120px;vertical-align:top;font-size:${WKD.SMALL};color:${WKD.panel};font-weight:bold`;
+  const td = `padding:0 0 12px;font-size:${WKD.BODY};color:${WKD.mute};vertical-align:top`;
+  const row = (k, v) => `<tr><td style="${lb}">${k}</td><td style="${td}">${v}</td></tr>`;
   return `
-    <h1 style="margin:16px 0 0;font-size:${WKD.SMALL};color:${WKD.panel};letter-spacing:.1em">HOW TO USE THIS SHEET</h1>
-    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:5px">
-      <tr><td style="${lb}">TICK IN THE APP</td><td style="${td}">This document is regenerated on every sync. Boxes here are live for review and print-marking only — the record of truth stays in OppTrack.</td></tr>
-      <tr><td style="${lb}">NAVIGATE</td><td style="${td}">Use the contents list below, or the navigation pane, to jump between departments and workstreams.</td></tr>
-      <tr><td style="${lb}">GATES</td><td style="${td}">Nothing is called delivered until it is signed off at a Thursday gate or at month-end close, in the Delivery Register.</td></tr>
+    ${wkDocSectionLabel('How to use this sheet')}
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
+      ${row('Tick in the app', 'This document is regenerated on every sync. Boxes here are live for review and print-marking only — the record of truth stays in OppTrack.')}
+      ${row('Navigate', 'Use the contents list below, or your reader’s navigation pane, to jump between departments and workstreams.')}
+      ${row('Gates', 'Nothing is called delivered until it is signed off at a Thursday gate or at month-end close, in the Delivery Register.')}
     </table>`;
 }
 
@@ -7275,7 +7298,7 @@ function wkDocHowTo() {
 function wkDocSubRow(ws, st) {
   const sk = wkSubKeys(ws, st), sd = sk.filter(wkOn).length;
   const all = sd === sk.length;
-  const cell = `padding:4px 8px;border:1px solid ${WKD.line};vertical-align:top`;
+  const cell = `padding:5px 10px 5px 0;border-bottom:1px solid ${WKD.line};vertical-align:top`;
   const title = all
     ? `<span style="color:${WKD.mute};text-decoration:line-through">${wkText(st.title)}</span>`
     : wkText(st.title);
@@ -7424,18 +7447,18 @@ function wkMotherDocBody() {
     ${wkDocSectionHead('Operating rhythm', `${d.cadence.length} gate${d.cadence.length === 1 ? '' : 's'} · weeks 1–${weeks}`, 'sec-rhythm')}
     <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:6px">
       <tr>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">DAY</th>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};width:150px">GATE</th>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute}">WHAT HAPPENS</th>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">WEEK 1–${weeks}</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal;width:110px">DAY</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal;width:150px">GATE</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal">WHAT HAPPENS</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal;width:110px">WEEK 1–${weeks}</th>
       </tr>
       ${d.cadence.map(row => {
         const keys = wkGateKeys(row, weeks), n = keys.filter(wkOn).length;
         return `<tr>
-          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${wkText(row.day || '—')}${row.time ? `<br><span style="font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(row.time)}</span>` : ''}</td>
-          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top"><b>${wkText(row.gate)}</b>${row.owner ? `<br><span style="font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(row.owner)}</span>` : ''}</td>
-          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${wkText(row.what || '')}</td>
-          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${keys.map(k => wkOn(k) ? '☑' : '☐').join(' ')}<br><span style="font-size:${WKD.MICRO};color:${WKD.mute}">${n}/${weeks}</span></td>
+          <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${wkText(row.day || '—')}${row.time ? `<br><span style="font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(row.time)}</span>` : ''}</td>
+          <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top"><b>${wkText(row.gate)}</b>${row.owner ? `<br><span style="font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(row.owner)}</span>` : ''}</td>
+          <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${wkText(row.what || '')}</td>
+          <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${keys.map(k => wkOn(k) ? '☑' : '☐').join(' ')}<br><span style="font-size:${WKD.MICRO};color:${WKD.mute}">${n}/${weeks}</span></td>
         </tr>`;
       }).join('')}
     </table>` : '';
@@ -7472,8 +7495,8 @@ function wkMotherDocBody() {
       ${s.notes ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">${wkText(s.notes)}</p>` : ''}
       <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:7px">
         <tr>
-          <td style="width:50%;padding:7px 9px;border:1px solid ${WKD.line};vertical-align:top">${line('TOPICS TO GET', s.topics || [], 'topic')}</td>
-          <td style="width:50%;padding:7px 9px;border:1px solid ${WKD.line};vertical-align:top">${line('ARRANGEMENTS', s.prep || [], 'prep')}</td>
+          <td style="width:50%;padding:0 18px 0 0;vertical-align:top">${line('TOPICS TO GET', s.topics || [], 'topic')}</td>
+          <td style="width:50%;padding:0 18px 0 0;vertical-align:top">${line('ARRANGEMENTS', s.prep || [], 'prep')}</td>
         </tr></table>
       <p style="margin:5px 0 0;font-size:${WKD.MICRO};color:${WKD.mute}">
         ${wkOn(`shoot.${s.id}.done`) ? '☑' : '☐'} in the can &nbsp;·&nbsp; ${kdone}/${keys.length} ready</p>`;
@@ -7484,18 +7507,18 @@ function wkMotherDocBody() {
     ${wkDocSectionHead('Delivery register', 'what leaves my desk', 'sec-register')}
     <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:6px">
       <tr>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};width:56px">WS</th>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute}">DELIVERABLE</th>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">DUE</th>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">BUILT BY</th>
-        <th style="text-align:left;padding:5px 6px;background-color:${WKD.fill};border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute};width:70px">SIGNED</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal;width:56px">WS</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal">DELIVERABLE</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal;width:110px">DUE</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal;width:110px">BUILT BY</th>
+        <th style="text-align:left;padding:0 10px 5px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint};letter-spacing:.1em;font-weight:normal;width:70px">SIGNED</th>
       </tr>
       ${boss.map(w => `<tr>
-        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(w.id)}</td>
-        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossItem || '')}</td>
-        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossDue || 'Thursday gate')}</td>
-        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossBy || (w.mode === 'self' ? 'Self' : 'Delegated → me'))}</td>
-        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkOn('boss.' + w.id) ? '☑' : '☐'}</td>
+        <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(w.id)}</td>
+        <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossItem || '')}</td>
+        <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossDue || 'Thursday gate')}</td>
+        <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossBy || (w.mode === 'self' ? 'Self' : 'Delegated → me'))}</td>
+        <td style="padding:6px 10px 6px 0;border-bottom:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkOn('boss.' + w.id) ? '☑' : '☐'}</td>
       </tr>`).join('')}
     </table>` : '';
 
