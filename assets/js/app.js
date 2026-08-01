@@ -5959,6 +5959,7 @@ const WorkDB = {
     if (!Array.isArray(d.depts)) d.depts = [];
     if (!Array.isArray(d.cadence)) d.cadence = [];
     if (!Array.isArray(d.close)) d.close = [];
+    if (!Array.isArray(d.shoots)) d.shoots = [];   // shoot scheduling plan
     if (!d.checks || typeof d.checks !== 'object') d.checks = {};
     /* Drive mirror bookkeeping: the target folder and the ids of the docs the
        mirror owns. IDs ONLY — never sheet content, and deliberately not in the
@@ -6049,6 +6050,12 @@ const WorkDB = {
     // belt-and-braces: never render a row without an id
     d.cadence.forEach(r => { if (r && !r.id) r.id = uid(); });
     d.close.forEach(r => { if (r && !r.id) r.id = uid(); });
+    d.shoots.forEach(r => {
+      if (!r) return;
+      if (!r.id) r.id = uid();
+      if (!Array.isArray(r.topics)) r.topics = [];
+      if (!Array.isArray(r.prep)) r.prep = [];
+    });
 
     d._wkV = 4;
     return d;
@@ -6277,6 +6284,61 @@ function wkGateDueToday(dayLabel) {
 /* Areas the month-end close groups under. */
 const WK_CLOSE_CATS = ['Finance', 'People', 'Operations', 'Marketing', 'Digital', 'Other'];
 
+/* ---- Shoot scheduling plan ----------------------------------------
+   A shoot is a booked day, not a task: someone has to be in a room at a
+   time, with a script, a kit and a set. So a row here carries the call —
+   who it is for, when, where, which module it feeds — and then the two
+   lists that decide whether the day works at all: the topics to get in the
+   can, and the arrangements that have to be true before anyone turns up.
+   Both are ticked, so a shoot's readiness is a number rather than a hope. */
+const WK_SHOOT_STATUS = [
+  { key: 'Planned',   tone: 'slate',  ico: 'calendar3' },
+  { key: 'Confirmed', tone: 'blue',   ico: 'calendar-check-fill' },
+  { key: 'Shot',      tone: 'gold',   ico: 'camera-reels-fill' },
+  { key: 'Edited',    tone: 'violet', ico: 'scissors' },
+  { key: 'Published', tone: 'green',  ico: 'send-check-fill' }
+];
+function wkShootStatus(k) { return WK_SHOOT_STATUS.find(x => x.key === k) || WK_SHOOT_STATUS[0]; }
+
+/* What a shoot day needs arranged. Offered on a new shoot so the list is
+   useful from the first one, and editable per shoot after that. */
+const WK_SHOOT_PREP = [
+  'Script / questions locked', 'Location booked', 'Crew confirmed',
+  'Camera + audio kit', 'Lighting set', 'Wardrobe briefed',
+  'Teleprompter loaded', 'Permission / access cleared', 'Travel & call time sent', 'B-roll shot list'
+];
+
+/* Every tickable key on a shoot: each topic, each arrangement, and the
+   day itself being in the can. */
+function wkShootKeys(s) {
+  return [
+    ...(s.topics || []).map((_, i) => `shoot.${s.id}.topic.${i}`),
+    ...(s.prep || []).map((_, i) => `shoot.${s.id}.prep.${i}`),
+    `shoot.${s.id}.done`
+  ];
+}
+/* How near is it? A schedule is only useful if it says "today" out loud. */
+function wkShootWhen(s) {
+  if (!s.date) return { txt: 'Undated', tone: 'mute' };
+  const t = Date.parse(s.date + 'T00:00:00');
+  if (isNaN(t)) return { txt: 'Undated', tone: 'mute' };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((t - today.getTime()) / 86400000);
+  if (days === 0) return { txt: 'Today', tone: 'due' };
+  if (days === 1) return { txt: 'Tomorrow', tone: 'soon' };
+  if (days < 0) return { txt: `${Math.abs(days)}d ago`, tone: 'past' };
+  if (days <= 7) return { txt: `In ${days} days`, tone: 'soon' };
+  return { txt: `In ${days} days`, tone: 'mute' };
+}
+/* Undated shoots sit at the end; everything else runs in date order, so the
+   section reads as a schedule rather than as an unordered list. */
+function wkShootsSorted() {
+  return (WorkDB.data.shoots || []).slice().sort((a, b) => {
+    const x = a.date || '9999-12-31', y = b.date || '9999-12-31';
+    return x === y ? String(a.time || '').localeCompare(String(b.time || '')) : x.localeCompare(y);
+  });
+}
+
 /* Priority drives the card's left rule: High red · Medium amber · Low green.
    Without a priority the card falls back to its delegation mode (navy/gold). */
 const WK_PRIORITIES = [
@@ -6483,6 +6545,81 @@ function drawWork() {
         <span><b>No gates yet</b>Add the rhythm you run the month on — stand-ups, audits, delivery points</span>
       </button>`}`;
 
+  /* ---- Shoot scheduling plan ----
+     The call sheet for the month: who is on camera, when, where, what gets
+     recorded, and what has to be arranged before the day can go ahead. */
+  const shootRows = wkShootsSorted();
+  const shootDone = shootRows.filter(s => wkOn(`shoot.${s.id}.done`)).length;
+  const nextShoot = shootRows.find(s => s.date && !wkOn(`shoot.${s.id}.done`));
+  const shoots = `
+    <div class="wk-dept">
+      <h2>Shoot scheduling plan</h2>
+      <button type="button" class="wk-add" data-wkact="shoot-add" title="Schedule a shoot"><i class="bi bi-plus-lg"></i></button>
+      <div class="wk-rule"></div>
+      <span class="wk-cnt">${shootRows.length} shoot${shootRows.length === 1 ? '' : 's'} · ${shootDone} in the can${
+        nextShoot ? ` · next ${escapeHtml(fmtDate(nextShoot.date))}` : ''}</span>
+    </div>
+    ${shootRows.length ? `<div class="wk-shoots">${shootRows.map(s => {
+      const when = wkShootWhen(s);
+      const st = wkShootStatus(s.status);
+      const keys = wkShootKeys(s), kdone = keys.filter(wkOn).length;
+      const inCan = wkOn(`shoot.${s.id}.done`);
+      const topicsDone = (s.topics || []).filter((_, i) => wkOn(`shoot.${s.id}.topic.${i}`)).length;
+      const prepDone = (s.prep || []).filter((_, i) => wkOn(`shoot.${s.id}.prep.${i}`)).length;
+      return `
+      <div class="wk-shoot ${inCan ? 'is-done' : ''} t-${when.tone}" data-wkshoot="${escapeHtml(s.id)}">
+        <div class="wk-shoot-day">
+          <b>${s.date ? escapeHtml(fmtDate(s.date)) : '—'}</b>
+          ${s.time ? `<span>${wkText(s.time)}${s.wrap ? '–' + wkText(s.wrap) : ''}</span>` : ''}
+          <em class="t-${when.tone}">${escapeHtml(when.txt)}</em>
+        </div>
+        <div class="wk-shoot-body">
+          <div class="wk-shoot-head">
+            <span class="wk-shoot-for">${wkText(s.subject || 'Someone')}</span>
+            <span class="wk-kind t-${st.tone}"><i class="bi bi-${st.ico}"></i>${st.key}</span>
+            ${s.module ? `<span class="wk-stamp">${wkText(s.module)}</span>` : ''}
+            ${s.location ? `<span class="wk-stamp"><i class="bi bi-geo-alt-fill me-1"></i>${wkText(s.location)}</span>` : ''}
+            ${s.crew ? `<span class="wk-stamp"><i class="bi bi-people-fill me-1"></i>${wkText(s.crew)}</span>` : ''}
+          </div>
+          ${s.notes ? `<p class="wk-sb-note">${wkText(s.notes)}</p>` : ''}
+          <div class="wk-shoot-cols">
+            <div>
+              <div class="wk-shoot-lbl">Topics to get <span>${topicsDone}/${(s.topics || []).length}</span></div>
+              ${(s.topics || []).length ? (s.topics || []).map((t, i) => {
+                const k = `shoot.${s.id}.topic.${i}`;
+                return `<label class="wk-shoot-item ${wkOn(k) ? 'is-done' : ''}">
+                  <input type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''}>
+                  <span>${wkText(t)}</span></label>`;
+              }).join('') : '<p class="wk-shoot-none">No topics listed yet.</p>'}
+            </div>
+            <div>
+              <div class="wk-shoot-lbl">Arrangements <span>${prepDone}/${(s.prep || []).length}</span></div>
+              ${(s.prep || []).length ? (s.prep || []).map((p, i) => {
+                const k = `shoot.${s.id}.prep.${i}`;
+                return `<label class="wk-shoot-item ${wkOn(k) ? 'is-done' : ''}">
+                  <input type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''}>
+                  <span>${wkText(p)}</span></label>`;
+              }).join('') : '<p class="wk-shoot-none">Nothing to arrange listed.</p>'}
+            </div>
+          </div>
+          <div class="wk-shoot-foot">
+            <label class="wk-shoot-can ${inCan ? 'on' : ''}">
+              <input type="checkbox" data-k="shoot.${escapeHtml(s.id)}.done" ${inCan ? 'checked' : ''}>
+              <span>In the can</span></label>
+            <span class="wk-cnt">${kdone}/${keys.length} ready</span>
+            <div class="wk-bar" style="flex:1"><i style="width:${keys.length ? kdone / keys.length * 100 : 0}%" data-wkbar="shoot.${escapeHtml(s.id)}"></i></div>
+          </div>
+        </div>
+        <div class="wk-row-tools">
+          <button type="button" data-wkact="shoot-edit" data-id="${escapeHtml(s.id)}" title="Edit shoot"><i class="bi bi-pencil"></i></button>
+          <button type="button" class="del" data-wkact="shoot-del" data-id="${escapeHtml(s.id)}" title="Delete shoot"><i class="bi bi-trash3"></i></button>
+        </div>
+      </div>`;
+    }).join('')}</div>` : `<button type="button" class="wk-dept-empty" data-wkact="shoot-add">
+        <i class="bi bi-camera-reels"></i>
+        <span><b>No shoots scheduled</b>Book the day, list the topics, and tick off what has to be arranged before it</span>
+      </button>`}`;
+
   const bossRows = d.workstreams.filter(w => w.boss);
   const register = bossRows.length ? `
     <div class="wk-dept"><h2>Delivery register</h2><div class="wk-rule"></div><span class="wk-cnt">what leaves my desk</span></div>
@@ -6582,6 +6719,7 @@ function drawWork() {
 
       ${board}
       ${cadence}
+      ${shoots}
       ${register}
       ${close}
 
@@ -6751,6 +6889,28 @@ function wkPaint() {
       + (cLeft ? ` · ${cLeft} critical left` : (crit.length ? ' · criticals clear' : ''));
   }
 
+  /* Shoots: the row's own bar, its two column counts and the strike-through
+     on a ticked line — the same in-place update the sub-tasks get. */
+  (d.shoots || []).forEach(s => {
+    const keys = wkShootKeys(s), kdone = keys.filter(wkOn).length;
+    const b = document.querySelector(`[data-wkbar="${CSS.escape('shoot.' + s.id)}"]`);
+    if (b) b.style.width = (keys.length ? kdone / keys.length * 100 : 0) + '%';
+    const row = document.querySelector(`[data-wkshoot="${CSS.escape(s.id)}"]`);
+    if (!row) return;
+    row.classList.toggle('is-done', wkOn(`shoot.${s.id}.done`));
+    row.querySelectorAll('.wk-shoot-item').forEach(el => {
+      const cb = el.querySelector('input[data-k]');
+      if (cb) el.classList.toggle('is-done', wkOn(cb.dataset.k));
+    });
+    const can = row.querySelector('.wk-shoot-can');
+    if (can) can.classList.toggle('on', wkOn(`shoot.${s.id}.done`));
+    const lbls = row.querySelectorAll('.wk-shoot-lbl span');
+    if (lbls[0]) lbls[0].textContent = `${(s.topics || []).filter((_, i) => wkOn(`shoot.${s.id}.topic.${i}`)).length}/${(s.topics || []).length}`;
+    if (lbls[1]) lbls[1].textContent = `${(s.prep || []).filter((_, i) => wkOn(`shoot.${s.id}.prep.${i}`)).length}/${(s.prep || []).length}`;
+    const cnt = row.querySelector('.wk-shoot-foot .wk-cnt');
+    if (cnt) cnt.textContent = `${kdone}/${keys.length} ready`;
+  });
+
   const pc = (a) => (a && a[1] ? Math.round(a[0] / a[1] * 100) : 0);
   const set = (key, text, width) => {
     const t = document.querySelector(`[data-wkpc="${CSS.escape(key)}"]`);
@@ -6810,6 +6970,9 @@ function wireWork() {
     else if (wkact === 'cad-add') openWorkGateModal(null);
     else if (wkact === 'cad-edit') openWorkGateModal(btn.dataset.id);
     else if (wkact === 'cad-del') workDeleteRow('cadence', btn.dataset.id);
+    else if (wkact === 'shoot-add') openWorkShootModal(null);
+    else if (wkact === 'shoot-edit') openWorkShootModal(btn.dataset.id);
+    else if (wkact === 'shoot-del') workDeleteShoot(btn.dataset.id);
     else if (wkact === 'close-add') openWorkCloseModal(null);
     else if (wkact === 'close-edit') openWorkCloseModal(btn.dataset.id);
     else if (wkact === 'close-del') workDeleteRow('close', btn.dataset.id);
@@ -7248,6 +7411,45 @@ function wkMotherDocBody() {
       }).join('')}
     </table>` : '';
 
+  /* Shoot scheduling plan — a call sheet per shoot: the booking on the left,
+     the topics and the arrangements side by side, so the page can be read on
+     the day rather than only planned from. */
+  const shootRows = wkShootsSorted();
+  const shoots = shootRows.length ? `
+    ${wkDocSectionHead('Shoot scheduling plan',
+      `${shootRows.length} shoot${shootRows.length === 1 ? '' : 's'} · ${shootRows.filter(s => wkOn(`shoot.${s.id}.done`)).length} in the can`)}
+    ${shootRows.map(s => {
+      const when = wkShootWhen(s);
+      const keys = wkShootKeys(s), kdone = keys.filter(wkOn).length;
+      const line = (label, arr, kind) => `
+        <p style="margin:0 0 3px;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.panel};font-weight:bold">${label}
+          <span style="color:${WKD.mute};font-weight:normal">${arr.filter((_, i) => wkOn(`shoot.${s.id}.${kind}.${i}`)).length}/${arr.length}</span></p>
+        ${arr.length ? arr.map((t, i) => {
+          const on = wkOn(`shoot.${s.id}.${kind}.${i}`);
+          return `<p style="margin:0 0 2px;font-size:${WKD.BODY}">${on ? '☑' : '☐'} ${on
+            ? `<span style="color:${WKD.mute};text-decoration:line-through">${wkText(t)}</span>` : wkText(t)}</p>`;
+        }).join('') : `<p style="margin:0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">—</p>`}`;
+      return `
+      <h2 style="margin:14px 0 0;padding:0 0 5px;font-family:${WKD.serif};font-size:${WKD.HEAD};color:${WKD.ink};border-bottom:2px solid ${wkOn(`shoot.${s.id}.done`) ? WKD.green : WKD.gold}">
+        ${wkText(s.subject || 'Shoot')}
+        <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}"> &nbsp;${s.date ? escapeHtml(fmtDate(s.date)) : 'undated'}${s.time ? ' · ' + wkText(s.time) : ''}</span></h2>
+      <p style="margin:5px 0 0">
+        ${wkDocChip(when.txt, when.tone === 'due' ? 'High' : 'plain')}
+        ${wkDocChip(wkShootStatus(s.status).key, wkOn(`shoot.${s.id}.done`) ? 'seal' : 'plain')}
+        ${s.module ? ' ' + wkDocChip(s.module) : ''}
+        ${s.location ? ' ' + wkDocChip(s.location) : ''}
+        ${s.crew ? ' ' + wkDocChip('Crew: ' + s.crew, 'assign') : ''}
+        ${s.wrap ? ' ' + wkDocChip('Wrap ' + s.wrap) : ''}</p>
+      ${s.notes ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.lineSoft};font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">${wkText(s.notes)}</p>` : ''}
+      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:7px">
+        <tr>
+          <td style="width:50%;padding:7px 9px;border:1px solid ${WKD.line};vertical-align:top">${line('TOPICS TO GET', s.topics || [], 'topic')}</td>
+          <td style="width:50%;padding:7px 9px;border:1px solid ${WKD.line};vertical-align:top">${line('ARRANGEMENTS', s.prep || [], 'prep')}</td>
+        </tr></table>
+      <p style="margin:5px 0 0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">
+        ${wkOn(`shoot.${s.id}.done`) ? '☑' : '☐'} in the can &nbsp;·&nbsp; ${kdone}/${keys.length} ready</p>`;
+    }).join('')}` : '';
+
   /* Delivery register — what leaves the desk, and whether it was signed off. */
   const register = boss.length ? `
     ${wkDocSectionHead('Delivery register', 'what leaves my desk')}
@@ -7309,8 +7511,8 @@ function wkMotherDocBody() {
     ${kpis}
     ${wkDocIndex(depts)}
     ${depts.map(dep => wkDocBreak() + wkDeptBodyHtml(dep)).join('')}
-    ${(rhythm || register || close) ? wkDocBreak() : ''}
-    ${rhythm}${register}${close}`;
+    ${(rhythm || shoots || register || close) ? wkDocBreak() : ''}
+    ${rhythm}${shoots}${register}${close}`;
 }
 /* The sheet's title carries the *…* and `…` markers wkText turns into italics
    and code on screen. A Drive file name is plain text, so those markers were
@@ -7598,6 +7800,127 @@ function wkDriveShareWarning(share) {
     modal.hide();
     WorkDrive.sync({ silent: false, force: true });
   };
+}
+
+/* ---- Shoot: schedule / edit / remove ----
+   Topics and arrangements are typed one per line. That is deliberate: a call
+   sheet is written in a hurry, and a textarea you can paste a list into beats
+   a row-builder you have to click ten times. Ticks are keyed by position, so
+   the editor carries the existing ticks across when a list is reordered or
+   something is inserted in the middle — otherwise editing a shoot the day
+   after it happened would silently un-tick what was already shot. */
+function openWorkShootModal(id) {
+  if (!Security.guard(id ? 'edit this shoot' : 'schedule a shoot')) return;
+  const rows = WorkDB.data.shoots;
+  const row = id ? rows.find(r => r.id === id) : null;
+  if (id && !row) return;
+  const rec = row || {
+    subject: '', date: '', time: '', wrap: '', location: '', module: '',
+    status: 'Planned', crew: '', notes: '',
+    topics: [], prep: WK_SHOOT_PREP.slice(0, 6)
+  };
+  /* Everyone already named on the sheet — the people shoots get booked for. */
+  const people = [...new Set((WorkDB.data.workstreams || [])
+    .flatMap(w => [w.withWhom, w.owner, ...(w.subtasks || []).map(s => s.withWhom)])
+    .filter(Boolean).flatMap(x => String(x).split(/[·,]/).map(y => y.trim())).filter(Boolean))];
+  const modules = [...new Set((WorkDB.data.shoots || []).map(s => s.module).filter(Boolean))];
+
+  const { modal } = wkModal(
+    row ? 'Edit shoot' : 'Schedule a shoot', 'camera-reels',
+    `<form id="wkShootForm" class="form-grid">
+      <div class="field col-span"><label>Who it is for <span class="req">*</span></label>
+        <input name="subject" list="wkShootWho" value="${escapeHtml(rec.subject || '')}" placeholder="e.g. Rony Bhai">
+        <datalist id="wkShootWho">${people.map(p => `<option value="${escapeHtml(p)}"></option>`).join('')}</datalist></div>
+      <div class="field"><label>Date</label><input type="date" name="date" value="${escapeHtml(rec.date || '')}"></div>
+      <div class="field"><label>Call time</label><input name="time" value="${escapeHtml(rec.time || '')}" placeholder="e.g. 10:00"></div>
+      <div class="field"><label>Wrap by</label><input name="wrap" value="${escapeHtml(rec.wrap || '')}" placeholder="e.g. 14:00"></div>
+      <div class="field"><label>Status</label><select name="status">
+        ${WK_SHOOT_STATUS.map(s => `<option ${((rec.status || 'Planned') === s.key) ? 'selected' : ''}>${s.key}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Module / series</label>
+        <input name="module" list="wkShootMod" value="${escapeHtml(rec.module || '')}" placeholder="e.g. Profile series">
+        <datalist id="wkShootMod">${modules.map(m => `<option value="${escapeHtml(m)}"></option>`).join('')}</datalist></div>
+      <div class="field"><label>Location</label><input name="location" value="${escapeHtml(rec.location || '')}" placeholder="e.g. Head office studio"></div>
+      <div class="field col-span"><label>Crew on the day</label>
+        <input name="crew" value="${escapeHtml(rec.crew || '')}" placeholder="Camera, sound, whoever is running it"></div>
+      <div class="field col-span"><label>Topics to get, one per line</label>
+        <textarea name="topics" rows="5" placeholder="One topic or script per line — each becomes its own tick">${escapeHtml((rec.topics || []).join('\n'))}</textarea></div>
+      <div class="field col-span"><label>Arrangements, one per line</label>
+        <textarea name="prep" rows="5" placeholder="What must be true before the day">${escapeHtml((rec.prep || []).join('\n'))}</textarea>
+        <small class="text-faint" style="font-size:11px">Leave blank to use the standard list: ${escapeHtml(WK_SHOOT_PREP.slice(0, 6).join(' · '))}</small></div>
+      <div class="field col-span"><label>Notes</label>
+        <textarea name="notes" rows="2" placeholder="Anything the day depends on">${escapeHtml(rec.notes || '')}</textarea></div>
+    </form>`,
+    `${row ? '<button type="button" class="btn btn-danger-soft me-auto" id="wkShootDel"><i class="bi bi-trash me-1"></i>Delete</button>' : ''}
+     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+     <button type="button" class="btn btn-primary" id="wkShootSave"><i class="bi bi-check-lg me-1"></i>${row ? 'Save changes' : 'Schedule it'}</button>`
+  );
+
+  const del = document.getElementById('wkShootDel');
+  if (del) del.onclick = () => { modal.hide(); workDeleteShoot(id); };
+
+  document.getElementById('wkShootSave').onclick = () => {
+    const f = document.getElementById('wkShootForm');
+    const subject = wkVal(f, 'subject');
+    if (!subject) { toast('Say who the shoot is for.', 'err'); f.elements.namedItem('subject').focus(); return; }
+    const lines = (name) => String(f.elements.namedItem(name).value || '')
+      .split('\n').map(x => x.trim()).filter(Boolean);
+    const topics = lines('topics');
+    const prep = lines('prep').length ? lines('prep') : WK_SHOOT_PREP.slice(0, 6);
+    const patch = {
+      subject, date: wkVal(f, 'date'), time: wkVal(f, 'time'), wrap: wkVal(f, 'wrap'),
+      status: wkVal(f, 'status'), module: wkVal(f, 'module'), location: wkVal(f, 'location'),
+      crew: wkVal(f, 'crew'), notes: wkVal(f, 'notes'), topics, prep
+    };
+    if (row) {
+      /* Carry the ticks with the TEXT, not the position, so a list that grows
+         or gets reordered keeps what was already shot or arranged. */
+      wkShootRemapTicks(row, 'topic', row.topics || [], topics);
+      wkShootRemapTicks(row, 'prep', row.prep || [], prep);
+      Object.assign(row, patch);
+    } else {
+      rows.push(Object.assign({ id: uid() }, patch));
+    }
+    WorkDB.saveNow(); modal.hide(); drawWork();
+    toast(row ? 'Shoot updated.' : 'Shoot scheduled.', 'ok');
+  };
+}
+
+/* Move position-keyed ticks from the old list to wherever those exact lines
+   ended up in the new one. Anything renamed loses its tick, which is right —
+   a changed line is a different thing. */
+function wkShootRemapTicks(row, kind, oldList, newList) {
+  const all = WorkDB.data.checks || {};
+  const moves = new Map();                       // old index -> new index
+  oldList.forEach((text, i) => {
+    const j = newList.indexOf(text);
+    if (j !== -1) moves.set(i, j);
+  });
+  Object.values(all).forEach(month => {
+    const was = {};
+    oldList.forEach((_, i) => {
+      const k = `shoot.${row.id}.${kind}.${i}`;
+      if (month[k]) was[i] = 1;
+      delete month[k];
+    });
+    Object.keys(was).forEach(i => {
+      const j = moves.get(Number(i));
+      if (j !== undefined) month[`shoot.${row.id}.${kind}.${j}`] = 1;
+    });
+  });
+}
+
+function workDeleteShoot(id) {
+  if (!Security.guard('delete this shoot')) return;
+  const rows = WorkDB.data.shoots;
+  const i = rows.findIndex(r => r.id === id);
+  if (i < 0) return;
+  if (!confirm(`Delete the shoot for "${rows[i].subject || 'this'}"? Its ticks go with it.`)) return;
+  rows.splice(i, 1);
+  Object.values(WorkDB.data.checks || {}).forEach(month =>
+    Object.keys(month).forEach(k => { if (k.startsWith(`shoot.${id}.`)) delete month[k]; }));
+  WorkDB.saveNow(); drawWork();
+  toast('Shoot removed.', 'ok');
 }
 
 function openWorkDriveModal() {

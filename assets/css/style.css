@@ -2071,6 +2071,60 @@ details.wk-ws[data-priority="Low"]    { border-left-color: #1C6B50; }
 /* the rule reads as a solid bar, so widen it a touch when a priority is set */
 details.wk-ws[data-priority] { border-left-width: 4px; }
 
+/* ---- Shoot scheduling plan ----------------------------------------
+   A booked day, not a task: the call block sits in its own column on the
+   left so the section can be scanned by date, and the two lists that decide
+   whether the day works — topics and arrangements — sit side by side. */
+.wk-shoots { display: grid; gap: 10px; }
+.wk-shoot {
+  display: flex; gap: 14px; align-items: flex-start;
+  background: var(--wk-card); border: 1px solid var(--wk-line);
+  border-left: 4px solid var(--wk-panel); padding: 12px 14px;
+}
+.wk-shoot.t-due  { border-left-color: #C0392B; background: #FFFBF7; }
+.wk-shoot.t-soon { border-left-color: var(--wk-gold); }
+.wk-shoot.t-past { border-left-color: var(--wk-line); }
+.wk-shoot.is-done { border-left-color: #1C6B50; background: #FAFCFB; }
+.wk-shoot-day { flex: 0 0 108px; text-align: left; }
+.wk-shoot-day b { display: block; font-family: var(--wk-serif); font-size: 15px; color: var(--wk-ink); line-height: 1.15; }
+.wk-shoot-day span { display: block; font-family: var(--wk-mono); font-size: 10.5px; color: var(--wk-mute); margin-top: 2px; }
+.wk-shoot-day em {
+  display: inline-block; margin-top: 6px; font-style: normal;
+  font-family: var(--wk-mono); font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase;
+  padding: 2px 6px; border: 1px solid var(--wk-line); color: var(--wk-mute); background: #F7F9FC;
+}
+.wk-shoot-day em.t-due  { color: #fff; background: #C0392B; border-color: #C0392B; }
+.wk-shoot-day em.t-soon { color: #8A6C15; background: #FBF5E4; border-color: #E4CE94; }
+.wk-shoot-body { flex: 1; min-width: 0; }
+.wk-shoot-head { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.wk-shoot-for { font-family: var(--wk-serif); font-size: 16px; color: var(--wk-ink); }
+.wk-shoot-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; margin-top: 10px; }
+.wk-shoot-lbl {
+  font-family: var(--wk-mono); font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--wk-panel); font-weight: 700; border-bottom: 1px solid var(--wk-line-soft);
+  padding-bottom: 3px; margin-bottom: 5px; display: flex; justify-content: space-between; gap: 8px;
+}
+.wk-shoot-lbl span { letter-spacing: .06em; color: var(--wk-mute); font-weight: 400; }
+.wk-shoot-item { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; padding: 2px 0; cursor: pointer; }
+.wk-shoot-item input { margin: 2px 0 0; flex: none; }
+.wk-shoot-item.is-done span { color: var(--wk-mute); text-decoration: line-through; }
+.wk-shoot-none { font-size: 12px; color: var(--wk-mute); font-style: italic; margin: 0; }
+.wk-shoot-foot { display: flex; align-items: center; gap: 12px; margin-top: 11px; }
+.wk-shoot-can {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; flex: none;
+  font-family: var(--wk-mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+  font-weight: 700; color: var(--wk-mute); border: 1px solid var(--wk-line);
+  padding: 4px 9px; background: #fff;
+}
+.wk-shoot-can.on { color: #fff; background: #1C6B50; border-color: #1C6B50; }
+.wk-shoot .wk-row-tools { flex: none; }
+@media (max-width: 760px) {
+  .wk-shoot { flex-direction: column; gap: 8px; }
+  .wk-shoot-day { flex: none; display: flex; align-items: center; gap: 8px; }
+  .wk-shoot-day span, .wk-shoot-day em { margin: 0; }
+  .wk-shoot-cols { grid-template-columns: 1fr; }
+}
+
 /* Priority pill in the card head */
 .wk-prio {
   display: inline-flex; align-items: center; gap: 5px;
