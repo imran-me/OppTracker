@@ -48,6 +48,14 @@ const Drive = {
      detect when Firestore has newer data than Drive — e.g. edits made on a
      phone where Drive wasn't connected — and catch the Drive copy up. */
   LAST_HASH_KEY: 'pomls_drive_last_hash',
+  /* Which Google account granted access on this device.
+     The access token only lives in this page's memory, so every reload has to
+     ask Google for a fresh one. That is meant to be invisible — but with more
+     than one Google account signed in, Google cannot tell which one the app
+     means and falls back to the "Choose an account" screen. Passing the
+     account back as a hint answers that question before it is asked, and the
+     renewal goes through silently again. */
+  ACCOUNT_KEY: 'pomls_drive_account',
 
   _token: null,
   _tokenExp: 0,
@@ -119,6 +127,7 @@ const Drive = {
                than only in connect(): a live token is the honest proof that
                this device is connected. */
             this._markEnabled();
+            this._rememberAccount();   // so the next renewal needs no chooser
             finish(resolve, this._token);
           } else {
             finish(reject, new Error(resp && resp.error ? resp.error : 'No access token'));
@@ -127,7 +136,13 @@ const Drive = {
         this._tokenClient.error_callback = (err) =>
           finish(reject, new Error((err && (err.type || err.message)) || 'Google token request failed'));
         try {
-          this._tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+          const hint = this.account();
+          /* Once an account is known, even the interactive path asks for
+             nothing: consent has already been given, so re-prompting for it on
+             every reconnect is a dialog with no question in it. */
+          const req = { prompt: interactive && !hint ? 'consent' : '' };
+          if (hint) req.hint = hint;
+          this._tokenClient.requestAccessToken(req);
         } catch (e) { finish(reject, e); }
       }).catch(e => finish(reject, e));
     });
@@ -191,6 +206,24 @@ const Drive = {
 
   _markEnabled() { try { localStorage.setItem(this.DEVICE_FLAG, '1'); } catch (e) {} },
 
+  /* Which account is this device connected as. */
+  account() { try { return localStorage.getItem(this.ACCOUNT_KEY) || ''; } catch (e) { return ''; } },
+
+  /* Ask Drive whose account the token belongs to and keep it. Deliberately
+     fire-and-forget and never awaited: the answer is only needed by the NEXT
+     renewal, so nothing should wait on it, and a failure just means one more
+     account chooser rather than a broken mirror. Costs one request, once. */
+  _rememberAccount() {
+    if (this.account() || !this._token) return;
+    fetch(`${this.API}/about?fields=user(emailAddress)`, { headers: { Authorization: 'Bearer ' + this._token } })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => {
+        const email = j && j.user && j.user.emailAddress;
+        if (email) { try { localStorage.setItem(this.ACCOUNT_KEY, email); } catch (e) {} }
+      })
+      .catch(() => {});
+  },
+
   /* Quick content fingerprint (djb2) — cheap way to tell if the data has
      changed since the last Drive write, without re-reading the file. */
   _hash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h >>> 0); },
@@ -213,6 +246,8 @@ const Drive = {
   disconnect() {
     this._token = null; this._tokenExp = 0;
     try { localStorage.removeItem(this.DEVICE_FLAG); } catch (e) {}
+    // Forget the account too, or reconnecting would silently pick the old one.
+    try { localStorage.removeItem(this.ACCOUNT_KEY); } catch (e) {}
   },
 
   async _validToken() {
