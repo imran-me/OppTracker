@@ -22,7 +22,19 @@ const Drive = {
   /* OAuth Web client ID (from Google Cloud → Credentials).
      Safe to be public; it only identifies the app. */
   CLIENT_ID: '55088480752-ecpsttf4t5i0j6fb3goanhtpeq6nbk3p.apps.googleusercontent.com',
+  /* Still the least-privilege per-file scope, and it stays that way.
+     The Work Sheet mirror writes its Docs into a sub-folder of the backup
+     folder BELOW — which this app created itself, so `drive.file` covers it.
+     Pointing the mirror at a folder the owner made by hand would have forced
+     the full `drive` scope: a RESTRICTED scope needing a Cloud Console change
+     and, to publish past test users, a Google security assessment — for
+     read/write over the owner's entire Drive. Not worth it to save a folder. */
   SCOPE: 'https://www.googleapis.com/auth/drive.file',
+  API: 'https://www.googleapis.com/drive/v3',
+  UPLOAD: 'https://www.googleapis.com/upload/drive/v3',
+  /* The mirror's own sub-folder inside FOLDER_NAME, so generated Docs never
+     sit loose beside the backup JSON. */
+  WORK_FOLDER_NAME: 'Work Sheet',
   FILE_NAME: 'opptrack-backup.json',
   FILE_ID_KEY: 'pomls_drive_backup_id',
   FOLDER_NAME: 'OppTracker Backups',
@@ -270,6 +282,115 @@ const Drive = {
     }
     this._rememberHash(jsonString);   // Drive now matches this data
     return true;
+  },
+
+  /* ============================================================
+     Generic file helpers — used by the Work Sheet Drive mirror
+     ------------------------------------------------------------
+     Everything above deals with one app-created JSON file. These
+     work on folders and Docs the OWNER already has in Drive, which
+     is why the scope above had to widen. They are deliberately
+     content-agnostic: nothing here knows what a workstream is.
+     ============================================================ */
+
+  /* Who can open this folder? Counted from the folder's own permissions.
+     The mirror calls this BEFORE its first write, because the sheet names
+     people and internal systems — copying it into a link-shared folder
+     would publish all of it to anyone holding the URL. */
+  async folderSharing(folderId) {
+    const token = await this._validToken();
+    const r = await fetch(`${this.API}/files/${folderId}?fields=id,name,permissions(type,role)&supportsAllDrives=true`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!r.ok) throw new Error('Could not read that folder (' + r.status + ') — check the ID and that it is your folder.');
+    const j = await r.json();
+    const perms = j.permissions || [];
+    return {
+      name: j.name || '',
+      anyone: perms.some(p => p.type === 'anyone'),   // "Anyone with the link"
+      domain: perms.some(p => p.type === 'domain'),   // whole workspace domain
+      people: perms.filter(p => p.type === 'user' || p.type === 'group').length
+    };
+  },
+
+  /* A direct child of `parentId` with this exact name, or null. */
+  async childByName(parentId, name, mimeType) {
+    const token = await this._validToken();
+    const safe = String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    let q = `'${parentId}' in parents and name='${safe}' and trashed=false`;
+    if (mimeType) q += ` and mimeType='${mimeType}'`;
+    const r = await fetch(`${this.API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=10`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j.files && j.files[0]) ? j.files[0].id : null;
+  },
+
+  /* Find or create a sub-folder. Existing folders are ADOPTED by name, so
+     department folders already sitting in Drive are reused rather than
+     duplicated alongside a second set. */
+  async folder(parentId, name) {
+    const found = await this.childByName(parentId, name, 'application/vnd.google-apps.folder');
+    if (found) return found;
+    const token = await this._validToken();
+    const r = await fetch(`${this.API}/files?fields=id`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] })
+    });
+    if (!r.ok) throw new Error('Drive folder create failed: ' + r.status);
+    return (await r.json()).id;
+  },
+
+  /* Write a Google Doc from HTML. Drive converts on the way in, so headings,
+     tables and the tick marks arrive as real Doc formatting without the Docs
+     API being involved at all.
+
+     The whole doc is REPLACED every sync. That is the point: there is no
+     partial state to drift out of step with the app, and a doc someone edited
+     by hand is restored to the truth on the next tick rather than silently
+     half-merged. */
+  async putDoc(parentId, name, html, docId) {
+    const token = await this._validToken();
+    const DOC = 'application/vnd.google-apps.document';
+    const id = docId || await this.childByName(parentId, name, DOC);
+    if (id) {
+      const r = await fetch(`${this.UPLOAD}/files/${id}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'text/html; charset=UTF-8' },
+        body: html
+      });
+      // Deleted in Drive since we last cached the id — forget it and recreate.
+      if (r.status === 404) return this.putDoc(parentId, name, html, null);
+      if (!r.ok) throw new Error('Drive doc update failed: ' + r.status);
+      return id;
+    }
+    const boundary = 'opptrackdocboundary';
+    const meta = { name, mimeType: DOC, parents: [parentId] };
+    const body =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify(meta) +
+      `\r\n--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n` + html +
+      `\r\n--${boundary}--`;
+    const r = await fetch(`${this.UPLOAD}/files?uploadType=multipart&fields=id`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body
+    });
+    if (!r.ok) throw new Error('Drive doc create failed: ' + r.status);
+    return (await r.json()).id;
+  },
+
+  docLink(id) { return id ? `https://docs.google.com/document/d/${id}/edit` : ''; },
+  folderLink(id) { return id ? `https://drive.google.com/drive/folders/${id}` : ''; },
+
+  /* "My Drive / OppTracker Backups / Work Sheet" — created on first use.
+     Both levels are app-created, which is exactly why `drive.file` is enough
+     and no folder ever has to be named or pasted in by hand. */
+  async workRoot() {
+    const token = await this._validToken();
+    const backups = await this._findOrCreateFolder(token);
+    return this.folder(backups, this.WORK_FOLDER_NAME);
   },
 
   /* A Drive link to open/download the current backup file. */

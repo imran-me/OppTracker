@@ -5960,6 +5960,13 @@ const WorkDB = {
     if (!Array.isArray(d.cadence)) d.cadence = [];
     if (!Array.isArray(d.close)) d.close = [];
     if (!d.checks || typeof d.checks !== 'object') d.checks = {};
+    /* Drive mirror bookkeeping: the target folder and the ids of the docs the
+       mirror owns. IDs ONLY — never sheet content, and deliberately not in the
+       repo either: a folder id in public source is a live pointer into your
+       Drive. Additive with safe defaults, so an older stored sheet simply
+       gains an empty map and no stored record is rewritten. */
+    if (!d.drive || typeof d.drive !== 'object') d.drive = {};
+    if (!d.drive.depts || typeof d.drive.depts !== 'object') d.drive.depts = {};
 
     /* ---- Fold the imported checklist into sub-tasks ----
        The imported shape was groups → items, rendered as a separate read-only
@@ -6313,6 +6320,7 @@ function drawWork() {
         <input class="wk-month-input" id="wkMonth" value="${escapeHtml(_wkMonth || '')}" placeholder="Month" aria-label="Month">
         <button class="btn btn-ghost btn-sm" id="wkImport"><i class="bi bi-upload me-1"></i>Import sheet</button>
         <button class="btn btn-ghost btn-sm" id="wkExport"><i class="bi bi-download me-1"></i>Export</button>
+        <button class="btn btn-ghost btn-sm" id="wkDriveBtn"><i class="bi bi-cloud-arrow-up me-1"></i>Drive</button>
         <button class="btn btn-ghost btn-sm" id="wkPrint"><i class="bi bi-printer me-1"></i>Print</button>
         <button class="btn btn-ghost btn-sm text-danger" id="wkReset"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset month</button>
       </div>
@@ -6676,6 +6684,7 @@ function wireWork() {
     if (cb.checked) checks[cb.dataset.k] = 1; else delete checks[cb.dataset.k];
     wkPaint();
     WorkDB.save();
+    WorkDrive.schedule();   // debounced; silently does nothing unless set up
     const stamp = document.getElementById('wkStamp');
     if (stamp) stamp.textContent = 'Saved ' + new Date().toLocaleString('en-GB');
   };
@@ -6737,6 +6746,9 @@ function wireWork() {
     window.print();
   };
 
+  const dv = document.getElementById('wkDriveBtn');
+  if (dv) dv.onclick = () => openWorkDriveModal();
+
   const rs = document.getElementById('wkReset');
   if (rs) rs.onclick = () => {
     if (!Security.guard('reset the work sheet')) return;
@@ -6745,6 +6757,283 @@ function wireWork() {
     WorkDB.saveNow();
     drawWork();
     toast('Month cleared.', 'ok');
+  };
+}
+
+/* ==========================================================
+   6.9  WORK SHEET → GOOGLE DRIVE MIRROR
+   ----------------------------------------------------------
+   Writes the sheet out as Google Docs: one per department, inside that
+   department's own folder, plus a combined doc at the top level. Ticking
+   a box in the app rewrites them.
+
+   ONE-WAY, and whole-document. The app is the truth; each doc is replaced
+   entire on every sync, so there is no partial state to drift and a doc
+   someone edited by hand is corrected rather than half-merged. That is
+   also why the marks render as ☐ / ☑ text instead of Google's own
+   tickable checklist: a real checkbox in the doc would invite a tick that
+   the app never sees and the next sync silently wipes.
+
+   WHERE IT WRITES. "My Drive / OppTracker Backups / Work Sheet" — a
+   sub-folder of the backup folder the app already made for itself. That
+   choice is what keeps the Google permission at the least-privilege
+   `drive.file`: the app can reach folders it created and nothing else.
+   Targeting a folder the owner made by hand would have meant the full
+   `drive` scope — read/write over their entire Drive — to save a folder.
+
+   PRIVACY. The sheet names people, internal systems and delegation rules
+   — the reason its content lives only in the private Firestore document
+   and never in this public repository. The mirror's folder is app-created
+   and therefore private, but it reads the folder's permissions anyway and
+   holds off if it ever finds it shared, until the owner overrides.
+
+   Nothing here is content. Folder and doc IDs live in the private store.
+   ========================================================== */
+
+/* Docs has no progress element, so the completion bar is drawn out of
+   block characters — it survives conversion, copy-paste and print. */
+function wkBarText(pct, width = 24) {
+  const p = Math.max(0, Math.min(100, Math.round(pct || 0)));
+  const on = Math.round(p / 100 * width);
+  return '█'.repeat(on) + '░'.repeat(width - on) + '  ' + p + '%';
+}
+
+/* Done / total across one department, from the same tick keys the page
+   counts — derived, never stored, so the doc can never disagree with the
+   screen. */
+function wkDeptStats(deptKey) {
+  const list = WorkDB.data.workstreams.filter(w => (w.dept || '') === (deptKey || ''));
+  let done = 0, total = 0;
+  list.forEach(ws => { const k = wkItemKeys(ws); done += k.filter(wkOn).length; total += k.length; });
+  return { list, done, total, pct: total ? done / total * 100 : 0 };
+}
+
+/* The body of one department: every main task, its phases and sub-tasks.
+   Shared by that department's own doc and by the combined one. */
+function wkDeptBodyHtml(dep) {
+  const s = wkDeptStats(dep.key);
+  const tasks = s.list.map(ws => {
+    const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
+    const pr = wkPriority(ws.priority);
+    const tags = [
+      pr ? pr.key : '', ws.boss ? 'Delivery' : '', wkRange(ws.start, ws.end),
+      ws.myRole ? 'Me: ' + ws.myRole : '', ws.devRole ? 'Dev: ' + ws.devRole : '',
+      ws.withWhom ? 'With: ' + ws.withWhom : ''
+    ].filter(Boolean).join(' · ');
+    const phases = wkPhases(ws).map(([phase, items]) => `
+      <h3>${phase ? wkText(phase) : 'Ungrouped'}</h3>
+      ${items.map(st => {
+        const sk = wkSubKeys(ws, st), sd = sk.filter(wkOn).length;
+        const all = sd === sk.length;
+        const box = st.ticks ? `${all ? '☑' : '☐'} <b>${sd}/${st.ticks}</b>` : (all ? '☑' : '☐');
+        const meta = [
+          wkRange(st.from, st.to), st.withWhom,
+          st.assignTo ? '→ ' + st.assignTo : '',
+          st.reportOn ? 'report ' + fmtDate(st.reportOn) : ''
+        ].filter(Boolean).join(' · ');
+        return `<p>${box} ${st.day ? `<b>${wkText(st.day)}</b> ` : ''}${wkText(st.title)}`
+          + `${meta ? ` <i>(${wkText(meta)})</i>` : ''}`
+          + `${st.notes ? `<br><i>${wkText(st.notes)}</i>` : ''}</p>`;
+      }).join('')}`).join('');
+    return `
+      <h2>${wkText(ws.id)} · ${wkText(ws.title)}</h2>
+      ${tags ? `<p><b>${wkText(tags)}</b></p>` : ''}
+      ${ws.description ? `<p>${wkText(ws.description)}</p>` : ''}
+      ${ws.note ? `<p><i>${wkText(ws.note)}</i></p>` : ''}
+      ${ws.boss && ws.bossItem ? `<p><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ' · ' + wkText(ws.bossDue) : ''}</p>` : ''}
+      <p><b>${wkBarText(keys.length ? done / keys.length * 100 : 0)}</b> — ${done}/${keys.length} items closed</p>
+      ${phases}`;
+  }).join('<hr>');
+  return `
+    <p>${escapeHtml(_wkMonth || '')} · ${s.list.length} main task${s.list.length === 1 ? '' : 's'}</p>
+    <p><b>${wkBarText(s.pct)}</b> — ${s.done}/${s.total} items closed</p>
+    <hr>
+    ${tasks || '<p><i>No main tasks in this department yet.</i></p>'}`;
+}
+
+/* Wrap a body in the letterhead + the generated-file notice. */
+function wkDocShell(title, body) {
+  const d = WorkDB.data;
+  const brand = wkBrand(d.org);
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body>
+    <h1>${escapeHtml(title)}</h1>
+    ${brand ? `<p><i>${escapeHtml(brand)}</i></p>` : ''}
+    ${body}
+    <hr>
+    <p><i>Generated by OppTrack on ${escapeHtml(new Date().toLocaleString('en-GB'))} — this document is rewritten on every sync, so edits made here are replaced. Tick in the app.</i></p>
+  </body></html>`;
+}
+
+function wkDeptDocHtml(dep) { return wkDocShell(dep.label || 'Workstreams', wkDeptBodyHtml(dep)); }
+
+/* The mother doc: the roll-up, then every department in full, then the
+   rhythm and the close list — the whole sheet in one file. */
+function wkMotherDocHtml() {
+  const d = WorkDB.data;
+  const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams' }];
+  let done = 0, total = 0;
+  depts.forEach(dep => { const s = wkDeptStats(dep.key); done += s.done; total += s.total; });
+  const closeDone = d.close.filter(c => wkOn('close.' + c.id)).length;
+  const critLeft = d.close.filter(c => c.critical && !wkOn('close.' + c.id)).length;
+  const weeks = wkWeeksInMonth();
+
+  const summary = depts.map(dep => {
+    const s = wkDeptStats(dep.key);
+    return `<p><b>${escapeHtml(dep.label)}</b><br>${wkBarText(s.pct)} — ${s.done}/${s.total}</p>`;
+  }).join('');
+
+  const rhythm = d.cadence.length ? `
+    <hr><h1>Operating rhythm</h1>
+    ${d.cadence.map(row => {
+      const keys = wkGateKeys(row, weeks), n = keys.filter(wkOn).length;
+      return `<p><b>${wkText(row.day || '—')}${row.time ? ' ' + wkText(row.time) : ''} · ${wkText(row.gate)}</b>`
+        + `${row.owner ? ` <i>(${wkText(row.owner)})</i>` : ''}<br>`
+        + `${keys.map(k => wkOn(k) ? '☑' : '☐').join(' ')}  ${n}/${weeks}`
+        + `${row.what ? `<br>${wkText(row.what)}` : ''}</p>`;
+    }).join('')}` : '';
+
+  const close = d.close.length ? `
+    <hr><h1>Month-end close</h1>
+    <p><b>${wkBarText(d.close.length ? closeDone / d.close.length * 100 : 0)}</b> — ${closeDone}/${d.close.length} signed off`
+    + `${critLeft ? ` · <b>${critLeft} critical still open — the month cannot be called closed</b>` : (d.close.some(c => c.critical) ? ' · criticals clear' : '')}</p>
+    ${d.close.map(c => `<p>${wkOn('close.' + c.id) ? '☑' : '☐'} ${wkText(c.title)}`
+      + `${c.critical ? ' <b>[critical]</b>' : ''}`
+      + `${c.category || c.owner || c.due ? ` <i>(${wkText([c.category, c.owner, c.due].filter(Boolean).join(' · '))})</i>` : ''}</p>`).join('')}` : '';
+
+  return wkDocShell(`${d.title || 'Work Sheet'} — all departments`, `
+    <p>${escapeHtml(_wkMonth || '')}</p>
+    <p><b>${wkBarText(total ? done / total * 100 : 0)}</b> — ${done}/${total} items closed across ${depts.length} department${depts.length === 1 ? '' : 's'}</p>
+    <hr>${summary}
+    ${depts.map(dep => `<hr><h1>${escapeHtml(dep.label || 'Workstreams')}</h1>${wkDeptBodyHtml(dep)}`).join('')}
+    ${rhythm}${close}`);
+}
+
+const WorkDrive = {
+  _timer: null,
+  _busy: false,
+
+  cfg() { return (WorkDB.data && WorkDB.data.drive) || {}; },
+
+  /* Debounced from the tick handler. Never opens a popup and never runs on a
+     device where Drive was not connected — the sheet is already saved by
+     then, so a skipped mirror costs nothing but a stale doc. */
+  schedule() {
+    if (!this.cfg().on) return;
+    if (typeof Drive === 'undefined' || !Drive.isConnected()) return;
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => this.sync({ silent: true }), 2500);
+  },
+
+  async sync({ silent = false } = {}) {
+    if (this._busy) return false;
+    if (!Security.guard('mirror the work sheet to Drive')) return false;
+    const d = WorkDB.data;
+    const cfg = this.cfg();
+    this._busy = true;
+    try {
+      if (!Drive.isConnected()) {
+        if (silent) return false;      // never a popup off the back of a tick
+        await Drive.connect();
+      }
+      /* My Drive / OppTracker Backups / Work Sheet — the app's own folder,
+         created on first use. Nothing to configure, and `drive.file` reaches
+         it precisely because the app made it. */
+      const root = await Drive.workRoot();
+      d.drive.rootId = root;
+      /* That folder is app-created and private, so this is a safety net rather
+         than a gate: it catches the case where it gets shared later. A metadata
+         read that simply fails is NOT treated as "shared" — blocking the mirror
+         over an unrelated API hiccup would be worse than the risk it covers. */
+      if (!cfg.allowShared) {
+        let share = null;
+        try { share = await Drive.folderSharing(root); }
+        catch (e) { console.warn('[Work Sheet] could not read folder sharing:', e.message); }
+        if (share && (share.anyone || share.domain)) {
+          if (!silent) wkDriveShareWarning(share);
+          else console.warn('[Work Sheet] Drive mirror held: folder is shared.');
+          return false;
+        }
+      }
+      setSync('drive-saving');
+      const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams' }];
+      for (const dep of depts) {
+        const k = dep.key || '';
+        const slot = d.drive.depts[k] || (d.drive.depts[k] = {});
+        slot.folderId = await Drive.folder(root, dep.label || 'Workstreams');
+        slot.docId = await Drive.putDoc(slot.folderId, `${dep.label || 'Workstreams'} — to-do`, wkDeptDocHtml(dep), slot.docId);
+      }
+      d.drive.motherDocId = await Drive.putDoc(
+        root, `${d.title || 'Work Sheet'} — all departments`, wkMotherDocHtml(), d.drive.motherDocId);
+      d.drive.lastSync = Date.now();
+      WorkDB.saveNow();
+      setSync('drive-done');
+      if (!silent) toast('Mirrored to Drive.', 'ok');
+      return true;
+    } catch (e) {
+      setSync('drive-error');
+      console.warn('[Work Sheet] Drive mirror failed:', e);
+      if (!silent) toast('Drive mirror failed: ' + e.message, 'err');
+      return false;
+    } finally { this._busy = false; }
+  }
+};
+
+/* Stops before writing anything and says exactly why. */
+function wkDriveShareWarning(share) {
+  const who = share.anyone ? 'anyone with the link' : 'everyone in your organisation';
+  const { modalEl, modal } = wkModal('That folder is not private', 'shield-exclamation', `
+    <p><b>${escapeHtml(share.name || 'That folder')}</b> is open to <b>${escapeHtml(who)}</b>.</p>
+    <p>The work sheet names people, internal systems and how work is delegated. That content is deliberately kept out of this site's code and out of the public portfolio document — mirroring it into a folder anyone can open would undo all of that in one step.</p>
+    <p class="text-faint" style="font-size:12.5px">Set the folder to <b>Restricted</b> in Drive → Share, then mirror again. <b>Nothing has been written.</b></p>`, `
+    <a class="btn btn-ghost" href="${escapeHtml(Drive.folderLink(WorkDB.data.drive.rootId))}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Open the folder</a>
+    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+    <button type="button" class="btn btn-danger" id="wkDriveAnyway">Mirror anyway</button>`);
+  modalEl.querySelector('#wkDriveAnyway').onclick = () => {
+    WorkDB.data.drive.allowShared = true;
+    WorkDB.saveNow();
+    modal.hide();
+    WorkDrive.sync({ silent: false });
+  };
+}
+
+function openWorkDriveModal() {
+  if (!Security.guard('set up the Drive mirror')) return;
+  const d = WorkDB.data;
+  const cfg = d.drive || {};
+  const connected = (typeof Drive !== 'undefined') && Drive.isConnected();
+  const last = cfg.lastSync ? new Date(cfg.lastSync).toLocaleString('en-GB') : '';
+  const { modalEl, modal } = wkModal('Mirror to Google Drive', 'cloud-arrow-up', `
+    <p>The sheet is written out as Google Docs — one per department, plus a combined one — into the backup folder this app already keeps:</p>
+    <p><code>My&nbsp;Drive / ${escapeHtml(Drive.FOLDER_NAME)} / ${escapeHtml(Drive.WORK_FOLDER_NAME)}</code></p>
+    <p class="text-faint" style="font-size:12.5px">The same folder your JSON backup uses. The app created it, so this needs no extra Google permission and nothing else in your Drive is ever reachable. Ticking a box here rewrites the docs it affects — they are generated, so anything typed into them is replaced on the next sync.</p>
+    <form id="wkDriveForm" class="form-grid">
+      <div class="field col-span"><label class="switch-row">
+        <input type="checkbox" name="on" ${cfg.on ? 'checked' : ''}>
+        <span>Keep the docs up to date as I tick</span>
+      </label></div>
+      <div class="field col-span">
+        <label class="switch-row">
+          <input type="checkbox" name="allowShared" ${cfg.allowShared ? 'checked' : ''}>
+          <span>Mirror even if that folder is shared beyond me</span>
+        </label>
+        <div class="hint">Off by default. The sheet names people and internal systems, so if that folder ever gets shared to “anyone with the link”, the mirror stops until you say otherwise.</div>
+      </div>
+      <div class="field col-span">
+        <div class="hint">${connected ? 'Drive is connected on this device.' : 'Not connected on this device yet — mirroring opens one Google window.'}${last ? ` Last mirrored ${escapeHtml(last)}.` : ''}</div>
+      </div>
+    </form>`, `
+    ${cfg.motherDocId ? `<a class="btn btn-ghost" href="${escapeHtml(Drive.docLink(cfg.motherDocId))}" target="_blank" rel="noopener"><i class="bi bi-file-earmark-text me-1"></i>Open combined doc</a>` : ''}
+    ${cfg.rootId ? `<a class="btn btn-ghost" href="${escapeHtml(Drive.folderLink(cfg.rootId))}" target="_blank" rel="noopener"><i class="bi bi-folder2-open me-1"></i>Open folder</a>` : ''}
+    <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Close</button>
+    <button type="button" class="btn btn-primary" id="wkDriveGo"><i class="bi bi-cloud-arrow-up me-1"></i>Mirror now</button>`);
+
+  modalEl.querySelector('#wkDriveGo').onclick = async () => {
+    const f = modalEl.querySelector('#wkDriveForm');
+    d.drive.on = !!f.on.checked;
+    d.drive.allowShared = !!f.allowShared.checked;
+    WorkDB.saveNow();
+    modal.hide();
+    await WorkDrive.sync({ silent: false });
   };
 }
 
