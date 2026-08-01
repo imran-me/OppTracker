@@ -7141,9 +7141,12 @@ function wkDocChip(text, kind) {
     plain: WKD.mute, seal: WKD.gold, gold: WKD.gold, assign: WKD.mute,
     High: WKD.red, Medium: WKD.gold, Low: WKD.green
   }[kind || 'plain'] || WKD.mute;
-  /* No box, no fill — small letterspaced caps in colour. A bordered pill is a
-     screen idiom; on the page it reads as clutter beside ruled tables. */
-  return `<span style="font-size:${WKD.MICRO};color:${c};letter-spacing:.08em">${wkText(String(text).toUpperCase())}</span>`;
+  /* No box, no fill — small text in colour. A bordered pill is a screen idiom;
+     on the page it reads as clutter beside ruled tables.
+     The text is NOT case-folded: a status word wants caps, but a location and
+     a crew list are prose, and shouting them made "Head office studio" read as
+     HEAD OFFICE STUDIO. Callers that want caps pass them. */
+  return `<span style="font-size:${WKD.MICRO};color:${c};letter-spacing:.06em">${wkText(text)}</span>`;
 }
 
 /* A bookmark target. Docs turns a named anchor into a real bookmark and keeps
@@ -7486,8 +7489,8 @@ function wkMotherDocBody() {
         ${wkText(s.subject || 'Shoot')}
         <span style="font-size:${WKD.MICRO};color:${WKD.mute}"> &nbsp;${s.date ? escapeHtml(fmtDate(s.date)) : 'undated'}${s.time ? ' · ' + wkText(s.time) : ''}</span></h2>
       <p style="margin:5px 0 0">
-        ${wkDocChip(when.txt, when.tone === 'due' ? 'High' : 'plain')}
-        ${wkDocChip(wkShootStatus(s.status).key, wkOn(`shoot.${s.id}.done`) ? 'seal' : 'plain')}
+        ${wkDocChip(when.txt.toUpperCase(), when.tone === 'due' ? 'High' : 'plain')}
+        ${wkDocChip(wkShootStatus(s.status).key.toUpperCase(), wkOn(`shoot.${s.id}.done`) ? 'seal' : 'plain')}
         ${s.module ? ' ' + wkDocChip(s.module) : ''}
         ${s.location ? ' ' + wkDocChip(s.location) : ''}
         ${s.crew ? ' ' + wkDocChip('Crew: ' + s.crew, 'assign') : ''}
@@ -7549,7 +7552,7 @@ function wkMotherDocBody() {
             <td style="padding:4px 0 4px 6px;border-bottom:1px solid ${WKD.line}">
               <p style="margin:0;font-size:${WKD.BODY}">${on
                 ? `<span style="color:${WKD.mute};text-decoration:line-through">${wkText(c.title)}</span>`
-                : wkText(c.title)}${c.critical ? ' ' + wkDocChip('critical', 'High') : ''}</p>
+                : wkText(c.title)}${c.critical ? ' ' + wkDocChip('CRITICAL', 'High') : ''}</p>
               ${meta ? `<p style="margin:2px 0 0;font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(meta)}</p>` : ''}
             </td></tr>`;
         }).join('')}
