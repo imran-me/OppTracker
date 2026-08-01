@@ -6899,12 +6899,137 @@ function wireWork() {
    Nothing here is content. Folder and doc IDs live in the private store.
    ========================================================== */
 
-/* Docs has no progress element, so the completion bar is drawn out of
-   block characters — it survives conversion, copy-paste and print. */
-function wkBarText(pct, width = 24) {
+/* ---------------------------------------------------------------
+   THE DOC LAYER — the sheet's own design, rebuilt for Google Docs
+   ---------------------------------------------------------------
+   Docs' HTML import understands almost none of the page's layout: no
+   flex, no grid, no stylesheet worth relying on. What it DOES keep
+   faithfully is tables with inline styles — background colour,
+   borders, widths — so every band, card, chip and bar below is a
+   table or a styled span, built from the same tokens the screen uses
+   (`.wk` in style.css) so the two cannot drift apart.
+
+   Type is set for reading on paper: body 9pt, headings 12pt.
+   --------------------------------------------------------------- */
+const WKD = {
+  ink: '#0B1B33', panel: '#12294A',
+  gold: '#C39A2E', goldLt: '#E8CE86', goldSoft: '#FBF5E4', goldInk: '#8A6C15',
+  line: '#C8D0DC', lineSoft: '#E2E7EE', mute: '#5B6A7F',
+  red: '#C0392B', amber: '#D9A11B', green: '#1C6B50',
+  serif: "Georgia, 'Palatino Linotype', Palatino, serif",
+  mono: "Consolas, 'Courier New', monospace",
+  BODY: '9pt', HEAD: '12pt', MICRO: '7pt', SMALL: '8pt'
+};
+
+/* Priority owns the card's left rule, exactly as it does on screen. */
+function wkDocRule(ws) {
+  const p = ws.priority || '';
+  if (p === 'High') return WKD.red;
+  if (p === 'Medium') return WKD.amber;
+  if (p === 'Low') return WKD.green;
+  return ws.mode === 'deleg' ? WKD.gold : WKD.panel;
+}
+
+/* A real progress bar: two cells, gold fill against a soft track. Docs keeps
+   cell widths and backgrounds, so this arrives as a bar rather than as the row
+   of block characters the doc used to carry. */
+function wkDocBar(pct, w = 300) {
   const p = Math.max(0, Math.min(100, Math.round(pct || 0)));
-  const on = Math.round(p / 100 * width);
-  return '█'.repeat(on) + '░'.repeat(width - on) + '  ' + p + '%';
+  const on = Math.round(w * p / 100);
+  return `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:${w}px;height:5px"><tr>`
+    + (on ? `<td style="width:${on}px;background-color:${WKD.gold};line-height:5px;font-size:1pt">&nbsp;</td>` : '')
+    + (on < w ? `<td style="width:${w - on}px;background-color:${WKD.lineSoft};line-height:5px;font-size:1pt">&nbsp;</td>` : '')
+    + `</tr></table>`;
+}
+
+/* The small bordered chips the cards carry — Delivery, Me:, With:, dates. */
+function wkDocChip(text, kind) {
+  const t = {
+    plain:  { c: WKD.panel,   b: WKD.line,  bg: '#F7F9FC' },
+    seal:   { c: '#ffffff',   b: WKD.gold,  bg: WKD.gold },
+    gold:   { c: WKD.goldInk, b: '#E4CE94', bg: WKD.goldSoft },
+    assign: { c: '#2A4A85',   b: '#B9CBEC', bg: '#EEF3FF' },
+    High:   { c: '#ffffff',   b: WKD.red,   bg: WKD.red },
+    Medium: { c: '#6b4d05',   b: WKD.amber, bg: '#F5D77E' },
+    Low:    { c: '#ffffff',   b: WKD.green, bg: WKD.green }
+  }[kind || 'plain'] || { c: WKD.panel, b: WKD.line, bg: '#F7F9FC' };
+  return `<span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${t.c};`
+    + `background-color:${t.bg};border:1px solid ${t.b};padding:1px 5px">${wkText(text)}</span>`;
+}
+
+/* A section rule with a label and a count — the department strip. */
+function wkDocSectionHead(label, meta) {
+  return `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
+    <tr>
+      <td style="border-bottom:2px solid ${WKD.panel};padding:10px 0 4px">
+        <span style="font-family:${WKD.mono};font-size:${WKD.SMALL};color:${WKD.panel};font-weight:bold">${wkText(String(label || '').toUpperCase())}</span></td>
+      <td style="border-bottom:2px solid ${WKD.panel};padding:10px 0 4px;text-align:right">
+        <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(meta || '')}</span></td>
+    </tr></table>`;
+}
+
+/* The navy masthead — eyebrow, serif title with its gold half, identity. */
+function wkDocMast() {
+  const d = WorkDB.data;
+  const p = (typeof DB !== 'undefined' && DB.data && DB.data.profile) || {};
+  const job = (p.experience || []).find(e => e.current) || (p.experience || [])[0] || {};
+  const name = d.ownerName || p.name || '';
+  const role = d.ownerRole || job.role || '';
+  const org = d.ownerOrg || job.company || '';
+  const brand = wkBrand(d.org);
+  // The title splits on *…* the same way the screen italicises it in gold.
+  const raw = String(d.title || 'Work Sheet');
+  const m = raw.match(/^(.*?)\*(.+?)\*(.*)$/);
+  const title = m
+    ? `${wkText(m[1])}<span style="color:${WKD.goldLt};font-style:italic">${wkText(m[2])}</span>${wkText(m[3])}`
+    : wkText(raw);
+  return `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;border-bottom:3px solid ${WKD.gold}">
+    <tr>
+      <td style="padding:16px 18px;background-color:${WKD.panel}">
+        ${brand ? `<p style="margin:0 0 6px;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.goldLt}">${wkText(brand.toUpperCase())}</p>` : ''}
+        <p style="margin:0;font-family:${WKD.serif};font-size:20pt;color:#ffffff;line-height:1.1">${title}</p>
+      </td>
+      <td style="padding:16px 18px;background-color:${WKD.panel};text-align:right;vertical-align:top">
+        ${name ? `<p style="margin:0;font-size:${WKD.BODY};color:#ffffff;font-weight:bold">${wkText(name)}</p>` : ''}
+        ${role ? `<p style="margin:0;font-size:${WKD.MICRO};color:${WKD.goldLt}">${wkText(role)}</p>` : ''}
+        ${org ? `<p style="margin:0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.goldLt}">${wkText(org.toUpperCase())}</p>` : ''}
+      </td>
+    </tr></table>`;
+}
+
+/* The control strip: one cell per number, as the page reads it. */
+function wkDocKpiStrip(cells) {
+  return `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;border-bottom:1px solid ${WKD.line}">
+    <tr>${cells.map(c => `
+      <td style="width:${Math.floor(100 / cells.length)}%;padding:9px 12px;border-right:1px solid ${WKD.line};vertical-align:top">
+        <p style="margin:0 0 3px;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(String(c.k).toUpperCase())}</p>
+        <p style="margin:0 0 5px;font-family:${WKD.serif};font-size:15pt;color:${WKD.ink}">${wkText(c.v)}</p>
+        ${wkDocBar(c.pct, 140)}
+      </td>`).join('')}</tr></table>`;
+}
+
+/* One sub-task row: tick, day marker, title, then its people and dates. */
+function wkDocSubRow(ws, st) {
+  const sk = wkSubKeys(ws, st), sd = sk.filter(wkOn).length;
+  const all = sd === sk.length;
+  const title = all
+    ? `<span style="color:${WKD.mute};text-decoration:line-through">${wkText(st.title)}</span>`
+    : wkText(st.title);
+  const bits = [
+    wkRange(st.from, st.to) ? wkDocChip(wkRange(st.from, st.to)) : '',
+    st.withWhom ? wkDocChip(st.withWhom) : '',
+    st.assignTo ? wkDocChip('→ ' + st.assignTo, 'assign') : '',
+    st.reportOn ? wkDocChip('Report ' + fmtDate(st.reportOn), 'gold') : ''
+  ].filter(Boolean).join(' ');
+  return `<tr>
+    <td style="width:16px;padding:4px 0 4px 2px;vertical-align:top;font-size:${WKD.BODY};border-bottom:1px solid ${WKD.lineSoft}">${all ? '☑' : '☐'}</td>
+    <td style="padding:4px 0 4px 6px;border-bottom:1px solid ${WKD.lineSoft}">
+      <p style="margin:0;font-size:${WKD.BODY};color:${WKD.ink}">${st.day
+        ? `<span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(st.day)}</span> ` : ''}${title}${st.ticks
+        ? ` <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${sd}/${st.ticks}</span>` : ''}</p>
+      ${bits ? `<p style="margin:2px 0 0">${bits}</p>` : ''}
+      ${st.notes ? `<p style="margin:2px 0 0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">${wkText(st.notes)}</p>` : ''}
+    </td></tr>`;
 }
 
 /* Done / total across one department, from the same tick keys the page
@@ -6923,65 +7048,107 @@ function wkDeptStats(deptKey) {
    workstream, so the three can never drift apart. */
 function wkWsBodyHtml(ws, heading) {
   const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
-  const pr = wkPriority(ws.priority);
-  const tags = [
-    pr ? pr.key : '', ws.boss ? 'Delivery' : '', wkRange(ws.start, ws.end),
-    ws.myRole ? 'Me: ' + ws.myRole : '', ws.devRole ? 'Dev: ' + ws.devRole : '',
-    ws.withWhom ? 'With: ' + ws.withWhom : ''
-  ].filter(Boolean).join(' · ');
-  const phases = wkPhases(ws).map(([phase, items]) => `
-    <h3>${phase ? wkText(phase) : 'Ungrouped'}</h3>
-    ${items.map(st => {
-      const sk = wkSubKeys(ws, st), sd = sk.filter(wkOn).length;
-      const all = sd === sk.length;
-      const box = st.ticks ? `${all ? '☑' : '☐'} <b>${sd}/${st.ticks}</b>` : (all ? '☑' : '☐');
-      const meta = [
-        wkRange(st.from, st.to), st.withWhom,
-        st.assignTo ? '→ ' + st.assignTo : '',
-        st.reportOn ? 'report ' + fmtDate(st.reportOn) : ''
-      ].filter(Boolean).join(' · ');
-      return `<p>${box} ${st.day ? `<b>${wkText(st.day)}</b> ` : ''}${wkText(st.title)}`
-        + `${meta ? ` <i>(${wkText(meta)})</i>` : ''}`
-        + `${st.notes ? `<br><i>${wkText(st.notes)}</i>` : ''}</p>`;
-    }).join('')}`).join('');
+  const pct = keys.length ? done / keys.length * 100 : 0;
+  const chips = [
+    ws.priority ? wkDocChip(ws.priority, ws.priority) : '',
+    ws.boss ? wkDocChip('Delivery', 'seal') : '',
+    ws.modeLabel ? wkDocChip(ws.modeLabel, ws.mode === 'deleg' ? 'gold' : 'plain') : '',
+    wkRange(ws.start, ws.end) ? wkDocChip(wkRange(ws.start, ws.end)) : '',
+    ws.myRole ? wkDocChip('Me: ' + ws.myRole) : '',
+    ws.devRole ? wkDocChip('Dev: ' + ws.devRole) : '',
+    ws.withWhom ? wkDocChip('With: ' + ws.withWhom) : '',
+    ws.owner ? wkDocChip(ws.owner) : ''
+  ].filter(Boolean).join(' ');
+
+  /* Phase groups, each with its own header and its rows in one table — the
+     same grouping the card shows, so a phase reads as a block on paper too. */
+  const phases = wkPhases(ws).map(([phase, items]) => {
+    const pdone = items.reduce((a, st) => a + wkSubKeys(ws, st).filter(wkOn).length, 0);
+    const ptot = items.reduce((a, st) => a + wkSubKeys(ws, st).length, 0);
+    return `
+      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
+        <tr>
+          <td style="padding:10px 0 3px;border-bottom:1px solid ${WKD.line}">
+            <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.panel};font-weight:bold">${wkText((phase || 'Ungrouped').toUpperCase())}</span></td>
+          <td style="padding:10px 0 3px;border-bottom:1px solid ${WKD.line};text-align:right">
+            <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${pdone}/${ptot}</span></td>
+        </tr>
+      </table>
+      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
+        ${items.map(st => wkDocSubRow(ws, st)).join('')}
+      </table>`;
+  }).join('');
+
+  /* The card: a left rule in the priority colour, then the head, then the
+     body — one bordered block, the way it sits on the page. */
   return `
-    ${heading === false ? '' : `<h2>${wkText(ws.id)} · ${wkText(ws.title)}</h2>`}
-    ${tags ? `<p><b>${wkText(tags)}</b></p>` : ''}
-    ${ws.description ? `<p>${wkText(ws.description)}</p>` : ''}
-    ${ws.note ? `<p><i>${wkText(ws.note)}</i></p>` : ''}
-    ${ws.boss && ws.bossItem ? `<p><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ' · ' + wkText(ws.bossDue) : ''}</p>` : ''}
-    <p><b>${wkBarText(keys.length ? done / keys.length * 100 : 0)}</b> — ${done}/${keys.length} items closed</p>
-    ${phases}`;
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:10px;border:1px solid ${WKD.line}">
+      <tr>
+        <td style="width:4px;background-color:${wkDocRule(ws)};font-size:1pt">&nbsp;</td>
+        <td style="padding:10px 12px">
+          <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
+            <tr>
+              <td style="vertical-align:top;padding-right:10px">
+                <p style="margin:0 0 2px;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(ws.id)}</p>
+                ${heading === false
+                  ? ''
+                  : `<p style="margin:0;font-family:${WKD.serif};font-size:${WKD.HEAD};color:${WKD.ink}">${wkText(ws.title)}</p>`}
+                ${chips ? `<p style="margin:5px 0 0">${chips}</p>` : ''}
+              </td>
+              <td style="width:110px;text-align:right;vertical-align:top">
+                <p style="margin:0;font-family:${WKD.serif};font-size:${WKD.HEAD};color:${WKD.ink}">${done}/${keys.length}</p>
+                <p style="margin:0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">items closed</p>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:7px 0 0">${wkDocBar(pct, 460)}</p>
+          ${ws.description ? `<p style="margin:8px 0 0;font-size:${WKD.BODY};color:${WKD.ink}">${wkText(ws.description)}</p>` : ''}
+          ${ws.note ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.lineSoft};font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">${wkText(ws.note)}</p>` : ''}
+          ${ws.boss && ws.bossItem ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.gold};font-size:${WKD.MICRO};color:${WKD.panel}"><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ` · <i>${wkText(ws.bossDue)}</i>` : ''}</p>` : ''}
+          ${phases || `<p style="margin:8px 0 0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">No sub-tasks yet.</p>`}
+        </td>
+      </tr>
+    </table>`;
 }
 
 /* The file name a workstream gets in Drive — "WS-01 · Master Payroll".
    Slashes would make Drive read it as a path, so they are folded out. */
 function wkWsDocName(ws) {
-  return `${ws.id} · ${String(ws.title || 'Untitled').replace(/[\\/]+/g, '-')}`.slice(0, 120);
+  return `${ws.id} · ${wkPlain(ws.title).replace(/[\\/]+/g, '-') || 'Untitled'}`.slice(0, 120);
 }
 
 /* The body of one department: every main task, its phases and sub-tasks.
    Shared by that department's own doc and by the combined one. */
 function wkDeptBodyHtml(dep) {
   const s = wkDeptStats(dep.key);
-  const tasks = s.list.map(ws => wkWsBodyHtml(ws)).join('<hr>');
   return `
-    <p>${escapeHtml(_wkMonth || '')} · ${s.list.length} main task${s.list.length === 1 ? '' : 's'}</p>
-    <p><b>${wkBarText(s.pct)}</b> — ${s.done}/${s.total} items closed</p>
-    <hr>
-    ${tasks || '<p><i>No main tasks in this department yet.</i></p>'}`;
+    ${wkDocSectionHead(dep.label || 'Workstreams',
+      `${escapeHtml(_wkMonth || '')} · ${s.list.length} workstream${s.list.length === 1 ? '' : 's'} · ${s.done}/${s.total} closed`)}
+    <p style="margin:7px 0 0">${wkDocBar(s.pct, 620)}</p>
+    ${s.list.map(ws => wkWsBodyHtml(ws)).join('')
+      || `<p style="margin:10px 0 0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">No main tasks in this department yet.</p>`}`;
 }
 
-/* Wrap a body in the letterhead + the generated-file notice. */
-function wkDocShell(title, body) {
+/* Wrap a body in the letterhead + the generated-file notice.
+   `mast` swaps the plain title line for the full navy masthead — the combined
+   sheet opens on the letterhead the screen does, the smaller files carry a
+   compact version of the same band so they still read as one set. */
+function wkDocShell(title, body, mast) {
   const d = WorkDB.data;
   const brand = wkBrand(d.org);
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body>
-    <h1>${escapeHtml(title)}</h1>
-    ${brand ? `<p><i>${escapeHtml(brand)}</i></p>` : ''}
+  const head = mast ? wkDocMast() : `
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;border-bottom:2px solid ${WKD.gold}">
+      <tr><td style="padding:11px 14px;background-color:${WKD.panel}">
+        ${brand ? `<p style="margin:0 0 4px;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.goldLt}">${escapeHtml(brand.toUpperCase())}</p>` : ''}
+        <p style="margin:0;font-family:${WKD.serif};font-size:14pt;color:#ffffff">${escapeHtml(title)}</p>
+        <p style="margin:3px 0 0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.goldLt}">${escapeHtml(_wkMonth || '')}</p>
+      </td></tr></table>`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>
+  <body style="font-family:Arial,Helvetica,sans-serif;font-size:${WKD.BODY};color:${WKD.ink};line-height:1.4">
+    ${head}
     ${body}
-    <hr>
-    <p><i>Generated by OppTrack on ${escapeHtml(new Date().toLocaleString('en-GB'))} — this document is rewritten on every sync, so edits made here are replaced. Tick in the app.</i></p>
+    <p style="margin:16px 0 0;padding-top:6px;border-top:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">
+      Generated by OppTrack on ${escapeHtml(new Date().toLocaleString('en-GB'))} — this document is rewritten on every sync, so edits made here are replaced. Tick in the app.</p>
   </body></html>`;
 }
 
@@ -7000,37 +7167,103 @@ function wkMotherDocBody() {
   const critLeft = d.close.filter(c => c.critical && !wkOn('close.' + c.id)).length;
   const weeks = wkWeeksInMonth();
 
-  const summary = depts.map(dep => {
-    const s = wkDeptStats(dep.key);
-    return `<p><b>${escapeHtml(dep.label)}</b><br>${wkBarText(s.pct)} — ${s.done}/${s.total}</p>`;
-  }).join('');
+  const boss = d.workstreams.filter(w => w.boss);
+  const bossDone = boss.filter(w => wkOn('boss.' + w.id)).length;
 
+  /* The control strip the page opens on — month, each department, deliveries. */
+  const kpis = wkDocKpiStrip([
+    { k: 'Month closed', v: (total ? Math.round(done / total * 100) : 0) + '%', pct: total ? done / total * 100 : 0 },
+    ...depts.map(dep => {
+      const s = wkDeptStats(dep.key);
+      return { k: dep.label || 'Workstreams', v: Math.round(s.pct) + '%', pct: s.pct };
+    }),
+    { k: 'Deliveries signed off', v: `${bossDone}/${boss.length}`, pct: boss.length ? bossDone / boss.length * 100 : 0 }
+  ]);
+
+  /* Operating rhythm — a real table, one tick box per week of this month. */
   const rhythm = d.cadence.length ? `
-    <hr><h1>Operating rhythm</h1>
-    ${d.cadence.map(row => {
-      const keys = wkGateKeys(row, weeks), n = keys.filter(wkOn).length;
-      return `<p><b>${wkText(row.day || '—')}${row.time ? ' ' + wkText(row.time) : ''} · ${wkText(row.gate)}</b>`
-        + `${row.owner ? ` <i>(${wkText(row.owner)})</i>` : ''}<br>`
-        + `${keys.map(k => wkOn(k) ? '☑' : '☐').join(' ')}  ${n}/${weeks}`
-        + `${row.what ? `<br>${wkText(row.what)}` : ''}</p>`;
-    }).join('')}` : '';
+    ${wkDocSectionHead('Operating rhythm', `${d.cadence.length} gate${d.cadence.length === 1 ? '' : 's'} · weeks 1–${weeks}`)}
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:6px">
+      <tr>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">DAY</th>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute};width:150px">GATE</th>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">WHAT HAPPENS</th>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">WEEK 1–${weeks}</th>
+      </tr>
+      ${d.cadence.map(row => {
+        const keys = wkGateKeys(row, weeks), n = keys.filter(wkOn).length;
+        return `<tr>
+          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${wkText(row.day || '—')}${row.time ? `<br><span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(row.time)}</span>` : ''}</td>
+          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top"><b>${wkText(row.gate)}</b>${row.owner ? `<br><span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(row.owner)}</span>` : ''}</td>
+          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${wkText(row.what || '')}</td>
+          <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY};vertical-align:top">${keys.map(k => wkOn(k) ? '☑' : '☐').join(' ')}<br><span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${n}/${weeks}</span></td>
+        </tr>`;
+      }).join('')}
+    </table>` : '';
 
+  /* Delivery register — what leaves the desk, and whether it was signed off. */
+  const register = boss.length ? `
+    ${wkDocSectionHead('Delivery register', 'what leaves my desk')}
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:6px">
+      <tr>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute};width:56px">WS</th>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">DELIVERABLE</th>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">DUE</th>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute};width:110px">BUILT BY</th>
+        <th style="text-align:left;padding:5px 6px;background-color:#F7F9FC;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute};width:70px">SIGNED</th>
+      </tr>
+      ${boss.map(w => `<tr>
+        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(w.id)}</td>
+        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossItem || '')}</td>
+        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossDue || 'Thursday gate')}</td>
+        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkText(w.bossBy || (w.mode === 'self' ? 'Self' : 'Delegated → me'))}</td>
+        <td style="padding:5px 6px;border:1px solid ${WKD.line};font-size:${WKD.BODY}">${wkOn('boss.' + w.id) ? '☑' : '☐'}</td>
+      </tr>`).join('')}
+    </table>` : '';
+
+  /* Month-end close — grouped by area, criticals called out as on screen. */
+  const closeGroups = (() => {
+    const order = [], byCat = new Map();
+    d.close.forEach(c => {
+      const k = c.category || '';
+      if (!byCat.has(k)) { byCat.set(k, []); order.push(k); }
+      byCat.get(k).push(c);
+    });
+    return order.map(k => [k, byCat.get(k)]);
+  })();
   const close = d.close.length ? `
-    <hr><h1>Month-end close</h1>
-    <p><b>${wkBarText(d.close.length ? closeDone / d.close.length * 100 : 0)}</b> — ${closeDone}/${d.close.length} signed off`
-    + `${critLeft ? ` · <b>${critLeft} critical still open — the month cannot be called closed</b>` : (d.close.some(c => c.critical) ? ' · criticals clear' : '')}</p>
-    ${d.close.map(c => `<p>${wkOn('close.' + c.id) ? '☑' : '☐'} ${wkText(c.title)}`
-      + `${c.critical ? ' <b>[critical]</b>' : ''}`
-      + `${c.category || c.owner || c.due ? ` <i>(${wkText([c.category, c.owner, c.due].filter(Boolean).join(' · '))})</i>` : ''}</p>`).join('')}` : '';
+    ${wkDocSectionHead('Month-end close', `${closeDone}/${d.close.length} signed off${critLeft ? ` · ${critLeft} critical left` : (d.close.some(c => c.critical) ? ' · criticals clear' : '')}`)}
+    ${critLeft ? `<p style="margin:7px 0 0;padding:6px 9px;background-color:#FDECEB;border-left:3px solid ${WKD.red};font-size:${WKD.BODY};color:#8A241E">
+      The month cannot be called closed — <b>${critLeft}</b> critical item${critLeft === 1 ? '' : 's'} still open.</p>`
+      : (d.close.some(c => c.critical) ? `<p style="margin:7px 0 0;padding:6px 9px;background-color:#EAF6F0;border-left:3px solid ${WKD.green};font-size:${WKD.BODY};color:${WKD.green}">Every critical item is signed off.</p>` : '')}
+    ${closeGroups.map(([cat, items]) => `
+      ${cat ? `<p style="margin:9px 0 2px;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.panel};font-weight:bold">${wkText(cat.toUpperCase())}
+        <span style="color:${WKD.mute};font-weight:normal">${items.filter(c => wkOn('close.' + c.id)).length}/${items.length}</span></p>` : ''}
+      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
+        ${items.map(c => {
+          const on = wkOn('close.' + c.id);
+          const meta = [c.owner, c.due, c.notes].filter(Boolean).join(' · ');
+          return `<tr>
+            <td style="width:16px;padding:4px 0 4px 2px;vertical-align:top;font-size:${WKD.BODY};border-bottom:1px solid ${WKD.lineSoft}">${on ? '☑' : '☐'}</td>
+            <td style="padding:4px 0 4px 6px;border-bottom:1px solid ${WKD.lineSoft}">
+              <p style="margin:0;font-size:${WKD.BODY}">${on
+                ? `<span style="color:${WKD.mute};text-decoration:line-through">${wkText(c.title)}</span>`
+                : wkText(c.title)}${c.critical ? ' ' + wkDocChip('critical', 'High') : ''}</p>
+              ${meta ? `<p style="margin:2px 0 0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(meta)}</p>` : ''}
+            </td></tr>`;
+        }).join('')}
+      </table>`).join('')}` : '';
 
   return `
-    <p>${escapeHtml(_wkMonth || '')}</p>
-    <p><b>${wkBarText(total ? done / total * 100 : 0)}</b> — ${done}/${total} items closed across ${depts.length} department${depts.length === 1 ? '' : 's'}</p>
-    <hr>${summary}
-    ${depts.map(dep => `<hr><h1>${escapeHtml(dep.label || 'Workstreams')}</h1>${wkDeptBodyHtml(dep)}`).join('')}
-    ${rhythm}${close}`;
+    ${kpis}
+    ${depts.map(dep => wkDeptBodyHtml(dep)).join('')}
+    ${rhythm}${register}${close}`;
 }
-function wkMotherDocName() { return `${(WorkDB.data.title || 'Work Sheet')} — all departments`; }
+/* The sheet's title carries the *…* and `…` markers wkText turns into italics
+   and code on screen. A Drive file name is plain text, so those markers were
+   showing up raw in the folder listing — "Master Monthly *Control Sheet*". */
+function wkPlain(s) { return String(s == null ? '' : s).replace(/[*`]/g, '').replace(/\s+/g, ' ').trim(); }
+function wkMotherDocName() { return `${wkPlain(WorkDB.data.title) || 'Work Sheet'} — all departments`; }
 
 const WorkDrive = {
   _timer: null,
@@ -7254,7 +7487,7 @@ const WorkDrive = {
       const mSig = this._sig(mName + ' :: ' + mBody);
       if (force || !d.drive.motherDocId || d.drive.motherHash !== mSig) {
         announce();
-        d.drive.motherDocId = await Drive.putDoc(root, mName, wkDocShell(mName, mBody), d.drive.motherDocId);
+        d.drive.motherDocId = await Drive.putDoc(root, mName, wkDocShell(mName, mBody, true), d.drive.motherDocId);
         d.drive.motherHash = mSig;
         wrote++;
       } else skipped++;
