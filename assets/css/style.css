@@ -1309,6 +1309,11 @@ textarea.img-list { font-family: var(--font-mono); font-size: 12.5px; }
 .fin-priv { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700;
   padding: 6px 12px; border-radius: 999px; color: var(--amber); background: var(--amber-soft); border: 1px solid #f3ddb8; }
 .fin-priv.is-sync { color: var(--green); background: var(--green-soft); border-color: #bfe6cf; }
+/* Drive mirror chip — the mirror's own state, said out loud on the sheet.
+   It is a button, so a failed or disconnected mirror is one click from fixed. */
+.wk-drive-chip { cursor: pointer; font-family: inherit; }
+.wk-drive-chip:hover { filter: brightness(0.97); }
+.wk-drive-chip.is-err { color: var(--red); background: var(--red-soft, #fdeaea); border-color: #f2c2c2; }
 .fin-monthnav { display: flex; align-items: center; gap: 6px; margin: 0 auto; }
 .fin-month { text-align: center; min-width: 150px; }
 .fin-month b { display: block; font-family: var(--font-display); font-size: 16px; color: #16203a; line-height: 1.1; }

@@ -6367,6 +6367,7 @@ function drawWork() {
     <div class="fin-topbar wk-topbar">
       <div class="fin-priv-wrap">${priv}
         <span class="text-faint" style="font-size:12px"><i class="bi bi-eye-slash me-1"></i>Never shown on your public portfolio</span>
+        <button type="button" class="fin-priv wk-drive-chip" id="wkDriveChip" title="Drive mirror status — click to open"></button>
       </div>
       <div class="fin-actions">
         <input class="wk-month-input" id="wkMonth" value="${escapeHtml(_wkMonth || '')}" placeholder="Month" aria-label="Month">
@@ -6844,6 +6845,13 @@ function wireWork() {
   const dv = document.getElementById('wkDriveBtn');
   if (dv) dv.onclick = () => openWorkDriveModal();
 
+  /* The chip is the mirror's own state, and clicking it is the one-click way
+     back when it says "not connected" — that dead end is what cost a whole
+     afternoon of ticks that never reached Drive. */
+  const chip = document.getElementById('wkDriveChip');
+  if (chip) chip.onclick = () => openWorkDriveModal();
+  try { WorkDrive.paint(); } catch {}
+
   const rs = document.getElementById('wkReset');
   if (rs) rs.onclick = () => {
     if (!Security.guard('reset the work sheet')) return;
@@ -6903,42 +6911,54 @@ function wkDeptStats(deptKey) {
   return { list, done, total, pct: total ? done / total * 100 : 0 };
 }
 
+/* One workstream, in full: its tags, its notes, then every phase and sub-task.
+   Its OWN file in Drive lives on this, and the department roll-up and the
+   combined doc stitch the same block together — one description of a
+   workstream, so the three can never drift apart. */
+function wkWsBodyHtml(ws, heading) {
+  const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
+  const pr = wkPriority(ws.priority);
+  const tags = [
+    pr ? pr.key : '', ws.boss ? 'Delivery' : '', wkRange(ws.start, ws.end),
+    ws.myRole ? 'Me: ' + ws.myRole : '', ws.devRole ? 'Dev: ' + ws.devRole : '',
+    ws.withWhom ? 'With: ' + ws.withWhom : ''
+  ].filter(Boolean).join(' · ');
+  const phases = wkPhases(ws).map(([phase, items]) => `
+    <h3>${phase ? wkText(phase) : 'Ungrouped'}</h3>
+    ${items.map(st => {
+      const sk = wkSubKeys(ws, st), sd = sk.filter(wkOn).length;
+      const all = sd === sk.length;
+      const box = st.ticks ? `${all ? '☑' : '☐'} <b>${sd}/${st.ticks}</b>` : (all ? '☑' : '☐');
+      const meta = [
+        wkRange(st.from, st.to), st.withWhom,
+        st.assignTo ? '→ ' + st.assignTo : '',
+        st.reportOn ? 'report ' + fmtDate(st.reportOn) : ''
+      ].filter(Boolean).join(' · ');
+      return `<p>${box} ${st.day ? `<b>${wkText(st.day)}</b> ` : ''}${wkText(st.title)}`
+        + `${meta ? ` <i>(${wkText(meta)})</i>` : ''}`
+        + `${st.notes ? `<br><i>${wkText(st.notes)}</i>` : ''}</p>`;
+    }).join('')}`).join('');
+  return `
+    ${heading === false ? '' : `<h2>${wkText(ws.id)} · ${wkText(ws.title)}</h2>`}
+    ${tags ? `<p><b>${wkText(tags)}</b></p>` : ''}
+    ${ws.description ? `<p>${wkText(ws.description)}</p>` : ''}
+    ${ws.note ? `<p><i>${wkText(ws.note)}</i></p>` : ''}
+    ${ws.boss && ws.bossItem ? `<p><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ' · ' + wkText(ws.bossDue) : ''}</p>` : ''}
+    <p><b>${wkBarText(keys.length ? done / keys.length * 100 : 0)}</b> — ${done}/${keys.length} items closed</p>
+    ${phases}`;
+}
+
+/* The file name a workstream gets in Drive — "WS-01 · Master Payroll".
+   Slashes would make Drive read it as a path, so they are folded out. */
+function wkWsDocName(ws) {
+  return `${ws.id} · ${String(ws.title || 'Untitled').replace(/[\\/]+/g, '-')}`.slice(0, 120);
+}
+
 /* The body of one department: every main task, its phases and sub-tasks.
    Shared by that department's own doc and by the combined one. */
 function wkDeptBodyHtml(dep) {
   const s = wkDeptStats(dep.key);
-  const tasks = s.list.map(ws => {
-    const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
-    const pr = wkPriority(ws.priority);
-    const tags = [
-      pr ? pr.key : '', ws.boss ? 'Delivery' : '', wkRange(ws.start, ws.end),
-      ws.myRole ? 'Me: ' + ws.myRole : '', ws.devRole ? 'Dev: ' + ws.devRole : '',
-      ws.withWhom ? 'With: ' + ws.withWhom : ''
-    ].filter(Boolean).join(' · ');
-    const phases = wkPhases(ws).map(([phase, items]) => `
-      <h3>${phase ? wkText(phase) : 'Ungrouped'}</h3>
-      ${items.map(st => {
-        const sk = wkSubKeys(ws, st), sd = sk.filter(wkOn).length;
-        const all = sd === sk.length;
-        const box = st.ticks ? `${all ? '☑' : '☐'} <b>${sd}/${st.ticks}</b>` : (all ? '☑' : '☐');
-        const meta = [
-          wkRange(st.from, st.to), st.withWhom,
-          st.assignTo ? '→ ' + st.assignTo : '',
-          st.reportOn ? 'report ' + fmtDate(st.reportOn) : ''
-        ].filter(Boolean).join(' · ');
-        return `<p>${box} ${st.day ? `<b>${wkText(st.day)}</b> ` : ''}${wkText(st.title)}`
-          + `${meta ? ` <i>(${wkText(meta)})</i>` : ''}`
-          + `${st.notes ? `<br><i>${wkText(st.notes)}</i>` : ''}</p>`;
-      }).join('')}`).join('');
-    return `
-      <h2>${wkText(ws.id)} · ${wkText(ws.title)}</h2>
-      ${tags ? `<p><b>${wkText(tags)}</b></p>` : ''}
-      ${ws.description ? `<p>${wkText(ws.description)}</p>` : ''}
-      ${ws.note ? `<p><i>${wkText(ws.note)}</i></p>` : ''}
-      ${ws.boss && ws.bossItem ? `<p><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ' · ' + wkText(ws.bossDue) : ''}</p>` : ''}
-      <p><b>${wkBarText(keys.length ? done / keys.length * 100 : 0)}</b> — ${done}/${keys.length} items closed</p>
-      ${phases}`;
-  }).join('<hr>');
+  const tasks = s.list.map(ws => wkWsBodyHtml(ws)).join('<hr>');
   return `
     <p>${escapeHtml(_wkMonth || '')} · ${s.list.length} main task${s.list.length === 1 ? '' : 's'}</p>
     <p><b>${wkBarText(s.pct)}</b> — ${s.done}/${s.total} items closed</p>
@@ -7031,6 +7051,31 @@ const WorkDrive = {
     return c.onSet ? !!c.on : !!c.rootId;
   },
 
+  /* What the chip in the topbar says. The whole reason this exists: the mirror
+     could be off, unconnected, mid-write or failing, and the page looked
+     IDENTICAL in all four states — so a mirror that had quietly stopped was
+     indistinguishable from one that was working. */
+  _state: 'idle',
+  _err: '',
+  state() {
+    if (!this.autoOn()) return { cls: '', ico: 'cloud-slash', txt: 'Drive mirror off' };
+    if (this._state === 'saving') return { cls: 'is-sync', ico: 'arrow-repeat', txt: 'Writing to Drive…' };
+    if (this._state === 'error') return { cls: 'is-err', ico: 'exclamation-triangle-fill', txt: 'Drive mirror failed — ' + (this._err || 'click to retry') };
+    if (typeof Drive !== 'undefined' && !Drive.isConnected() && !Drive.deviceEnabled()) {
+      return { cls: 'is-err', ico: 'plug', txt: 'Drive not connected here — click to connect' };
+    }
+    const last = this.cfg().lastSync;
+    return { cls: 'is-sync', ico: 'cloud-check-fill', txt: last ? 'Drive live · last ' + new Date(last).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'Drive live' };
+  },
+  paint() {
+    const el = document.getElementById('wkDriveChip');
+    if (!el) return;
+    const s = this.state();
+    el.className = 'fin-priv wk-drive-chip ' + s.cls;
+    el.innerHTML = `<i class="bi bi-${s.ico}"></i> ${escapeHtml(s.txt)}`;
+  },
+  _set(state, err) { this._state = state; this._err = err || ''; this.paint(); },
+
   /* Content fingerprint, so a doc that has not moved is not rewritten.
      The letterhead is folded in, not just the body: wkDocShell prints the
      brand line from `org`, so a doc whose body is unchanged still has to be
@@ -7038,7 +7083,7 @@ const WorkDrive = {
      stamp is left out — that moves every second and would defeat the check. */
   _sig(s) {
     const brand = wkBrand((WorkDB.data && WorkDB.data.org) || '');
-    const str = brand + ' ' + String(s);
+    const str = brand + ' :: ' + String(s);
     return (typeof Drive !== 'undefined' && Drive._hash) ? Drive._hash(str) : String(str.length);
   },
 
@@ -7094,7 +7139,7 @@ const WorkDrive = {
     const cfg = this.cfg();
     this._busy = true;
     let wrote = 0, skipped = 0, announced = false, changed = false;
-    const announce = () => { if (!announced) { announced = true; setSync('drive-saving'); } };
+    const announce = () => { if (!announced) { announced = true; setSync('drive-saving'); this._set('saving'); } };
     try {
       if (!Drive.isConnected()) {
         /* Popup-free refresh first — the access token only lives an hour, and
@@ -7143,22 +7188,39 @@ const WorkDrive = {
         }
         if (!slot.folderId) { slot.folderId = await Drive.folder(root, label); slot.label = label; changed = true; }
 
-        /* Only rewrite what actually moved. A tick touches ONE department, but
-           this used to rewrite every department doc AND the combined one — five
-           Docs conversions to record one box, which is exactly why the docs
-           read as lagging behind the sheet. */
-        const body = wkDeptBodyHtml(dep);
-        const sig = this._sig(label + ' ' + body);
-        if (!force && slot.docId && slot.hash === sig) { skipped++; continue; }
-        announce();
-        slot.docId = await Drive.putDoc(slot.folderId, `${label} — to-do`, wkDocShell(label, body), slot.docId);
-        slot.hash = sig;
-        wrote++;
+        /* The sheet's own shape, as folders and files: one folder per
+           department, one file per workstream inside it. A tick then rewrites
+           the ONE small file that owns it instead of the whole department, and
+           the tree in Drive reads the same as the tree in the app. */
+        if (!slot.ws || typeof slot.ws !== 'object') slot.ws = {};
+        const list = d.workstreams.filter(w => (w.dept || '') === (dep.key || ''));
+        for (const ws of list) {
+          const rec = slot.ws[ws.id] || (slot.ws[ws.id] = {});
+          const name = wkWsDocName(ws);
+          const body = wkWsBodyHtml(ws, false);
+          const sig = this._sig(name + ' :: ' + body);
+          if (!force && rec.docId && rec.hash === sig) { skipped++; continue; }
+          announce();
+          rec.docId = await Drive.putDoc(slot.folderId, name, wkDocShell(name, body), rec.docId);
+          rec.hash = sig;
+          wrote++;
+        }
+
+        /* The department roll-up sits beside its workstream files — checked the
+           same way, so it is only rewritten when its own numbers move. */
+        const dBody = wkDeptBodyHtml(dep);
+        const dSig = this._sig(label + ' :: ' + dBody);
+        if (force || !slot.docId || slot.hash !== dSig) {
+          announce();
+          slot.docId = await Drive.putDoc(slot.folderId, `${label} — all workstreams`, wkDocShell(label, dBody), slot.docId);
+          slot.hash = dSig;
+          wrote++;
+        } else skipped++;
       }
 
       const mName = wkMotherDocName();
       const mBody = wkMotherDocBody();
-      const mSig = this._sig(mName + ' ' + mBody);
+      const mSig = this._sig(mName + ' :: ' + mBody);
       if (force || !d.drive.motherDocId || d.drive.motherHash !== mSig) {
         announce();
         d.drive.motherDocId = await Drive.putDoc(root, mName, wkDocShell(mName, mBody), d.drive.motherDocId);
@@ -7179,6 +7241,7 @@ const WorkDrive = {
       }
 
       console.info(`[Work Sheet] Drive mirror: ${wrote} written, ${skipped} already current.`);
+      this._set('idle');
       if (announced || !silent) setSync('drive-done');
       if (!silent) toast(wrote
         ? `Mirrored to Drive — ${wrote} doc${wrote === 1 ? '' : 's'} rewritten.`
@@ -7188,6 +7251,7 @@ const WorkDrive = {
       // Drop the memos: the next attempt re-resolves the folder and re-reads
       // its sharing rather than retrying against something that may be gone.
       this._root = null; this._shareAt = 0;
+      this._set('error', e && e.message);
       setSync('drive-error');
       console.warn('[Work Sheet] Drive mirror failed:', e);
       if (!silent) toast('Drive mirror failed: ' + e.message, 'err');
