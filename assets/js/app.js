@@ -7139,14 +7139,20 @@ const WorkDrive = {
   async catchUp() {
     if (!this.autoOn() || typeof Drive === 'undefined') return;
     if (!Drive.isConnected() && !(await Drive.trySilentConnect())) {
-      /* The mirror is ON but cannot get a token — the Google grant lapsed, or
-         this browser lost the connected flag. It used to fail exactly here and
-         say nothing at all, so the docs quietly stopped following the sheet
-         with no way to tell from the page. One click puts it back. */
-      console.warn('[Work Sheet] Drive mirror paused — not connected on this device.');
-      toast('Drive mirror paused — click Drive to reconnect. Your sheet is still saved.', 'err');
+      /* The mirror is ON but cannot get a token — the Google grant lapsed, the
+         browser blocked the window Google opens to renew it, or this device
+         lost its connected flag. The chip MUST say so: it was reporting
+         "Drive live" off the last successful sync while this very check was
+         failing, which is worse than saying nothing. */
+      this._set('noauth');
+      console.warn('[Work Sheet] Drive mirror paused — could not get a token. If the address bar shows "Pop-up blocked", allow pop-ups for this site.');
+      if (!this._warned) {
+        this._warned = true;   // once per load — a redraw re-runs this
+        toast('Drive mirror paused — click Drive to reconnect. Your sheet is still saved.', 'err');
+      }
       return;
     }
+    this._warned = false;
     this.sync({ silent: true });
   },
 
@@ -7337,6 +7343,7 @@ function openWorkDriveModal() {
       </div>
       <div class="field col-span">
         <div class="hint">${connected ? 'Drive is connected on this device.' : 'Not connected on this device yet — mirroring opens one Google window.'}${last ? ` Last mirrored ${escapeHtml(last)}.` : ''}</div>
+        ${connected ? '' : `<div class="hint"><b>If your address bar says “Pop-up blocked”</b>, allow pop-ups for this site first — Google renews the connection in a window, and a blocked one is why a mirror that worked earlier stops asking to be reconnected properly.</div>`}
       </div>
     </form>`, `
     ${cfg.motherDocId ? `<a class="btn btn-ghost" href="${escapeHtml(Drive.docLink(cfg.motherDocId))}" target="_blank" rel="noopener"><i class="bi bi-file-earmark-text me-1"></i>Open combined doc</a>` : ''}
