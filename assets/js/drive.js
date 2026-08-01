@@ -355,30 +355,40 @@ const Drive = {
     const token = await this._validToken();
     const DOC = 'application/vnd.google-apps.document';
     const id = docId || await this.childByName(parentId, name, DOC);
-    if (id) {
-      const r = await fetch(`${this.UPLOAD}/files/${id}?uploadType=media`, {
-        method: 'PATCH',
-        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'text/html; charset=UTF-8' },
-        body: html
-      });
-      // Deleted in Drive since we last cached the id — forget it and recreate.
-      if (r.status === 404) return this.putDoc(parentId, name, html, null);
-      if (!r.ok) throw new Error('Drive doc update failed: ' + r.status);
-      return id;
-    }
     const boundary = 'opptrackdocboundary';
-    const meta = { name, mimeType: DOC, parents: [parentId] };
+    /* Metadata AND content in one multipart request, on create and update
+       alike. Sending the name every time is what keeps a doc's title correct
+       after the department it belongs to is renamed — a content-only update
+       would leave it sitting under the old name for ever. */
+    const meta = id ? { name } : { name, mimeType: DOC, parents: [parentId] };
     const body =
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` + JSON.stringify(meta) +
       `\r\n--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n` + html +
       `\r\n--${boundary}--`;
-    const r = await fetch(`${this.UPLOAD}/files?uploadType=multipart&fields=id`, {
-      method: 'POST',
+    const url = id
+      ? `${this.UPLOAD}/files/${id}?uploadType=multipart&fields=id`
+      : `${this.UPLOAD}/files?uploadType=multipart&fields=id`;
+    const r = await fetch(url, {
+      method: id ? 'PATCH' : 'POST',
       headers: { Authorization: 'Bearer ' + token, 'Content-Type': `multipart/related; boundary=${boundary}` },
       body
     });
-    if (!r.ok) throw new Error('Drive doc create failed: ' + r.status);
+    // Trashed or deleted in Drive since we cached the id — forget it, remake it.
+    if (id && r.status === 404) return this.putDoc(parentId, name, html, null);
+    if (!r.ok) throw new Error(`Drive doc ${id ? 'update' : 'create'} failed: ` + r.status);
     return (await r.json()).id;
+  },
+
+  /* Rename a file or folder in place. */
+  async renameFile(id, name) {
+    const token = await this._validToken();
+    const r = await fetch(`${this.API}/files/${id}?fields=id`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (!r.ok) throw new Error('Drive rename failed: ' + r.status);
+    return id;
   },
 
   docLink(id) { return id ? `https://docs.google.com/document/d/${id}/edit` : ''; },

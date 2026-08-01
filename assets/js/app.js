@@ -6114,12 +6114,29 @@ const WorkDB = {
     this._persistLocal();
     clearTimeout(this._saveTimer);
     this._saveTimer = setTimeout(() => this._persistCloud(), 400);
+    this._persistDrive();
   },
   saveNow() {
     if (!Security.guard('save the work sheet')) return;
     this._persistLocal();
     clearTimeout(this._saveTimer);
     this._persistCloud();
+    this._persistDrive();
+  },
+  /* Every change to the sheet passes through save()/saveNow() — adding a main
+     task, renaming a phase, deleting a sub-task, ticking a box, importing,
+     clearing a month. Hooking the Drive mirror HERE rather than at each call
+     site is what makes the docs follow all of it instead of just the ticks.
+
+     The guard matters: the mirror finishes by calling saveNow() itself, to
+     store the doc ids it just created. Without this it would re-trigger
+     itself on every run and never stop. `_busy` is still true at that point,
+     because the mirror clears it only after its own save has returned. */
+  _persistDrive() {
+    try {
+      if (typeof WorkDrive === 'undefined' || WorkDrive._busy) return;
+      WorkDrive.schedule();
+    } catch (e) { /* the mirror is a mirror — never let it break a save */ }
   }
 };
 
@@ -6683,8 +6700,7 @@ function wireWork() {
     const checks = wkChecks();
     if (cb.checked) checks[cb.dataset.k] = 1; else delete checks[cb.dataset.k];
     wkPaint();
-    WorkDB.save();
-    WorkDrive.schedule();   // debounced; silently does nothing unless set up
+    WorkDB.save();          // carries the Drive mirror with it (_persistDrive)
     const stamp = document.getElementById('wkStamp');
     if (stamp) stamp.textContent = 'Saved ' + new Date().toLocaleString('en-GB');
   };
@@ -6914,14 +6930,19 @@ const WorkDrive = {
 
   cfg() { return (WorkDB.data && WorkDB.data.drive) || {}; },
 
-  /* Debounced from the tick handler. Never opens a popup and never runs on a
-     device where Drive was not connected — the sheet is already saved by
-     then, so a skipped mirror costs nothing but a stale doc. */
+  /* Called by WorkDB._persistDrive on EVERY change — a task added, a sub-task
+     deleted, a box ticked. Short debounce so a burst of edits (or a
+     drag-through of ten checkboxes) becomes one rewrite rather than ten, while
+     a single change still lands about a second later.
+
+     Never opens a popup and never runs on a device where Drive was not
+     connected: the sheet itself is already saved by then, so the worst case is
+     a doc that catches up on the next change from a connected device. */
   schedule() {
     if (!this.cfg().on) return;
     if (typeof Drive === 'undefined' || !Drive.isConnected()) return;
     clearTimeout(this._timer);
-    this._timer = setTimeout(() => this.sync({ silent: true }), 2500);
+    this._timer = setTimeout(() => this.sync({ silent: true }), 1200);
   },
 
   async sync({ silent = false } = {}) {
@@ -6958,9 +6979,17 @@ const WorkDrive = {
       const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams' }];
       for (const dep of depts) {
         const k = dep.key || '';
+        const label = dep.label || 'Workstreams';
         const slot = d.drive.depts[k] || (d.drive.depts[k] = {});
-        slot.folderId = await Drive.folder(root, dep.label || 'Workstreams');
-        slot.docId = await Drive.putDoc(slot.folderId, `${dep.label || 'Workstreams'} — to-do`, wkDeptDocHtml(dep), slot.docId);
+        /* Reuse the folder already made for this department, renaming it if the
+           department was renamed. Looking it up by name instead would strand the
+           old folder and stand an empty new one beside it on every rename. */
+        if (slot.folderId) {
+          try { await Drive.renameFile(slot.folderId, label); }
+          catch (e) { slot.folderId = null; }   // gone from Drive → make a fresh one
+        }
+        if (!slot.folderId) slot.folderId = await Drive.folder(root, label);
+        slot.docId = await Drive.putDoc(slot.folderId, `${label} — to-do`, wkDeptDocHtml(dep), slot.docId);
       }
       d.drive.motherDocId = await Drive.putDoc(
         root, `${d.title || 'Work Sheet'} — all departments`, wkMotherDocHtml(), d.drive.motherDocId);
