@@ -2136,7 +2136,16 @@ details.wk-ws[data-priority] { border-left-width: 4px; }
 .wk-sub-tick.placeholder { width: 15px; }
 .wk-sub-body { flex: 1; min-width: 0; }
 .wk-sub-title { font-size: 13.5px; font-weight: 600; color: var(--wk-ink); }
-.wk-sub-title .wk-day { font-weight: 400; }
+/* The day marker is the same object as `.wk-txt .wk-day` further down — the
+   checklist→sub-task fold moved it into the title but left its styling behind
+   pointing at the old `.wk-txt` container, so only `font-weight` followed it.
+   Without the marker's own font and margin it ran straight into the title
+   ("D2" + "PayrollService…" reading as "D2PayrollService", and a "D1" before a
+   title starting with a digit reading as "D19"). Same look, new home. */
+.wk-sub-title .wk-day {
+  font-family: var(--wk-mono); font-size: 10.5px; font-weight: 400;
+  color: var(--wk-gold); letter-spacing: .06em; margin-right: 7px;
+}
 .wk-sub.is-done .wk-sub-title { color: var(--wk-mute); text-decoration: line-through; text-decoration-color: var(--wk-line); }
 .wk-sub.is-done .wk-sub-title .wk-day { text-decoration: none; }
 /* buffer / only-if-needed rows read quieter */
