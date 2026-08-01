@@ -6189,7 +6189,11 @@ function wkDefaultMonth() {
 }
 
 let _wkMonth = null;          // the month label currently on screen
-let _wkOpenWs = null;         // ids of the expanded cards — carried across redraws (null = first draw)
+/* Ids of the expanded cards, carried across redraws. null means a fresh load,
+   and a fresh load opens NOTHING: the sheet is long, and landing with a card
+   already unrolled buries the department strip and the month's numbers under
+   one workstream's sub-tasks. You open what you came for. */
+let _wkOpenWs = null;
 const _wkPinOpen = new Set(); // cards to force open on the next redraw (just added to / edited)
 
 /* Keep a workstream card expanded through the next redraw. Called after adding
@@ -6414,7 +6418,7 @@ function drawWork() {
         <span class="wk-cnt">${list.length} workstream${list.length === 1 ? '' : 's'}${dep.tag ? ' · ' + wkText(dep.tag) : ''}</span>
       </div>
       ${list.length
-        ? list.map((ws, i) => wkWorkstreamHtml(ws, _wkOpenWs ? _wkOpenWs.has(ws.id) : (i === 0 && dep === depts[0]))).join('')
+        ? list.map(ws => wkWorkstreamHtml(ws, !!(_wkOpenWs && _wkOpenWs.has(ws.id)))).join('')
         : `<button type="button" class="wk-dept-empty" data-wkact="task-add" data-dept="${escapeHtml(dep.key || '')}">
              <i class="bi bi-plus-circle-dotted"></i>
              <span><b>Nothing here yet</b>Add the first main task for ${wkText(dep.label)}</span>
@@ -7666,7 +7670,7 @@ function workImport(file) {
       WorkDB.data = WorkDB._hydrate(obj);
       delete WorkDB.data._comment;
       if (!_wkMonth) _wkMonth = WorkDB.data.month || wkDefaultMonth();
-      _wkOpenWs = null;   // a different sheet — fall back to "first card open"
+      _wkOpenWs = null;   // a different sheet — every card starts collapsed
       WorkDB.saveNow();
       drawWork();
       toast(`Sheet loaded — ${WorkDB.data.workstreams.length} workstreams.`, 'ok');
