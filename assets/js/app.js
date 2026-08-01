@@ -6957,15 +6957,68 @@ function wkDocChip(text, kind) {
     + `background-color:${t.bg};border:1px solid ${t.b};padding:1px 5px">${wkText(text)}</span>`;
 }
 
-/* A section rule with a label and a count — the department strip. */
+/* A bookmark target. Docs turns a named anchor into a real bookmark and keeps
+   `href="#id"` pointing at it, which is what makes the contents page on the
+   front actually jump to a workstream instead of just naming it. */
+function wkDocAnchorId(ws) { return 'ws-' + String(ws.id || '').replace(/[^A-Za-z0-9_-]/g, ''); }
+function wkDocAnchor(id) { return `<a name="${escapeHtml(id)}" id="${escapeHtml(id)}"></a>`; }
+
+/* A page break Docs honours on import. */
+function wkDocBreak() { return `<p style="page-break-before:always;margin:0;font-size:1pt">&nbsp;</p>`; }
+
+/* THE CONTENTS PAGE — the whole month on one page: every main task, how big
+   it is, how much is closed, and how far along. Each row is a link into that
+   task's own section further down the document. */
+function wkDocIndex(depts) {
+  const cell = `padding:6px 7px;border-bottom:1px solid ${WKD.lineSoft};font-size:${WKD.BODY};vertical-align:middle`;
+  const rows = depts.map(dep => {
+    const s = wkDeptStats(dep.key);
+    const head = `<tr>
+      <td colspan="5" style="padding:11px 7px 4px;border-bottom:2px solid ${WKD.panel}">
+        <span style="font-family:${WKD.mono};font-size:${WKD.SMALL};color:${WKD.panel};font-weight:bold">${wkText((dep.label || 'Workstreams').toUpperCase())}</span>
+        <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}"> &nbsp;${s.done}/${s.total} closed</span>
+      </td></tr>`;
+    const body = s.list.length ? s.list.map(ws => {
+      const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
+      const pct = keys.length ? done / keys.length * 100 : 0;
+      const anchor = wkDocAnchorId(ws);
+      return `<tr>
+        <td style="${cell};width:52px"><span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(ws.id)}</span></td>
+        <td style="${cell}">
+          <a href="#${escapeHtml(anchor)}" style="color:${WKD.ink};font-weight:bold">${wkText(ws.title)}</a>
+          ${ws.priority ? ' ' + wkDocChip(ws.priority, ws.priority) : ''}${ws.boss ? ' ' + wkDocChip('Delivery', 'seal') : ''}
+        </td>
+        <td style="${cell};width:56px;text-align:right"><span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${keys.length}</span></td>
+        <td style="${cell};width:56px;text-align:right"><span style="font-family:${WKD.mono};font-size:${WKD.BODY};color:${done ? WKD.ink : WKD.mute}">${done}</span></td>
+        <td style="${cell};width:150px">
+          ${wkDocBar(pct, 110)}
+          <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${Math.round(pct)}%</span>
+        </td></tr>`;
+    }).join('') : `<tr><td colspan="5" style="${cell};color:${WKD.mute};font-style:italic">Nothing here yet.</td></tr>`;
+    return head + body;
+  }).join('');
+
+  return `
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:14px">
+      <tr>
+        <th style="text-align:left;padding:5px 7px;border-bottom:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">WS</th>
+        <th style="text-align:left;padding:5px 7px;border-bottom:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">MAIN TASK</th>
+        <th style="text-align:right;padding:5px 7px;border-bottom:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">ITEMS</th>
+        <th style="text-align:right;padding:5px 7px;border-bottom:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">CLOSED</th>
+        <th style="text-align:left;padding:5px 7px;border-bottom:1px solid ${WKD.line};font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">PROGRESS</th>
+      </tr>
+      ${rows}
+    </table>
+    <p style="margin:10px 0 0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">
+      Click any main task to jump to its sub-task list.</p>`;
+}
+
+/* A section rule with a label and a count. An h1, not a styled paragraph, so
+   it reaches the Docs navigation pane along with the departments. */
 function wkDocSectionHead(label, meta) {
-  return `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
-    <tr>
-      <td style="border-bottom:2px solid ${WKD.panel};padding:10px 0 4px">
-        <span style="font-family:${WKD.mono};font-size:${WKD.SMALL};color:${WKD.panel};font-weight:bold">${wkText(String(label || '').toUpperCase())}</span></td>
-      <td style="border-bottom:2px solid ${WKD.panel};padding:10px 0 4px;text-align:right">
-        <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(meta || '')}</span></td>
-    </tr></table>`;
+  return `<h1 style="margin:14px 0 2px;font-family:${WKD.mono};font-size:${WKD.SMALL};color:${WKD.panel};border-bottom:2px solid ${WKD.panel};padding-bottom:4px">
+    ${wkText(String(label || '').toUpperCase())}
+    <span style="font-size:${WKD.MICRO};color:${WKD.mute};font-weight:normal"> &nbsp;${wkText(meta || '')}</span></h1>`;
 }
 
 /* The navy masthead — eyebrow, serif title with its gold half, identity. */
@@ -7060,55 +7113,48 @@ function wkWsBodyHtml(ws, heading) {
     ws.owner ? wkDocChip(ws.owner) : ''
   ].filter(Boolean).join(' ');
 
-  /* Phase groups, each with its own header and its rows in one table — the
-     same grouping the card shows, so a phase reads as a block on paper too. */
+  /* Phase groups. The phase name is a REAL h3 — Docs builds its navigation
+     pane from heading tags, so styling paragraphs to look like headings (which
+     is what this did at first) produced a handsome document you could not move
+     around in. Headings carry the styling instead. */
   const phases = wkPhases(ws).map(([phase, items]) => {
     const pdone = items.reduce((a, st) => a + wkSubKeys(ws, st).filter(wkOn).length, 0);
     const ptot = items.reduce((a, st) => a + wkSubKeys(ws, st).length, 0);
     return `
-      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
-        <tr>
-          <td style="padding:10px 0 3px;border-bottom:1px solid ${WKD.line}">
-            <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.panel};font-weight:bold">${wkText((phase || 'Ungrouped').toUpperCase())}</span></td>
-          <td style="padding:10px 0 3px;border-bottom:1px solid ${WKD.line};text-align:right">
-            <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">${pdone}/${ptot}</span></td>
-        </tr>
-      </table>
+      <h3 style="margin:12px 0 3px;font-family:${WKD.mono};font-size:${WKD.SMALL};color:${WKD.panel};border-bottom:1px solid ${WKD.line};padding-bottom:3px">
+        ${wkText((phase || 'Ungrouped').toUpperCase())}
+        <span style="font-size:${WKD.MICRO};color:${WKD.mute};font-weight:normal"> &nbsp;${pdone}/${ptot}</span></h3>
       <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
         ${items.map(st => wkDocSubRow(ws, st)).join('')}
       </table>`;
   }).join('');
 
-  /* The card: a left rule in the priority colour, then the head, then the
-     body — one bordered block, the way it sits on the page. */
+  /* The section head: an h2 so it reaches the navigation pane, ruled in the
+     priority colour so the card's left bar survives as something a heading
+     can actually carry. */
+  const head = heading === false ? '' : `
+    ${wkDocAnchor(wkDocAnchorId(ws))}
+    <h2 style="margin:16px 0 0;padding:0 0 5px;font-family:${WKD.serif};font-size:${WKD.HEAD};color:${WKD.ink};border-bottom:2px solid ${wkDocRule(ws)}">
+      <span style="font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(ws.id)}</span>&nbsp; ${wkText(ws.title)}</h2>`;
+
   return `
-    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:10px;border:1px solid ${WKD.line}">
+    ${head}
+    <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;margin-top:6px">
       <tr>
-        <td style="width:4px;background-color:${wkDocRule(ws)};font-size:1pt">&nbsp;</td>
-        <td style="padding:10px 12px">
-          <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%">
-            <tr>
-              <td style="vertical-align:top;padding-right:10px">
-                <p style="margin:0 0 2px;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.gold}">${wkText(ws.id)}</p>
-                ${heading === false
-                  ? ''
-                  : `<p style="margin:0;font-family:${WKD.serif};font-size:${WKD.HEAD};color:${WKD.ink}">${wkText(ws.title)}</p>`}
-                ${chips ? `<p style="margin:5px 0 0">${chips}</p>` : ''}
-              </td>
-              <td style="width:110px;text-align:right;vertical-align:top">
-                <p style="margin:0;font-family:${WKD.serif};font-size:${WKD.HEAD};color:${WKD.ink}">${done}/${keys.length}</p>
-                <p style="margin:0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">items closed</p>
-              </td>
-            </tr>
-          </table>
-          <p style="margin:7px 0 0">${wkDocBar(pct, 460)}</p>
-          ${ws.description ? `<p style="margin:8px 0 0;font-size:${WKD.BODY};color:${WKD.ink}">${wkText(ws.description)}</p>` : ''}
-          ${ws.note ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.lineSoft};font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">${wkText(ws.note)}</p>` : ''}
-          ${ws.boss && ws.bossItem ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.gold};font-size:${WKD.MICRO};color:${WKD.panel}"><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ` · <i>${wkText(ws.bossDue)}</i>` : ''}</p>` : ''}
-          ${phases || `<p style="margin:8px 0 0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">No sub-tasks yet.</p>`}
+        <td style="vertical-align:top;padding-right:12px">
+          ${chips ? `<p style="margin:0 0 6px">${chips}</p>` : ''}
+          ${wkDocBar(pct, 330)}
+        </td>
+        <td style="width:96px;text-align:right;vertical-align:top">
+          <p style="margin:0;font-family:${WKD.serif};font-size:${WKD.HEAD};color:${WKD.ink}">${done}/${keys.length}</p>
+          <p style="margin:0;font-family:${WKD.mono};font-size:${WKD.MICRO};color:${WKD.mute}">items closed</p>
         </td>
       </tr>
-    </table>`;
+    </table>
+    ${ws.description ? `<p style="margin:8px 0 0;font-size:${WKD.BODY};color:${WKD.ink}">${wkText(ws.description)}</p>` : ''}
+    ${ws.note ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.lineSoft};font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">${wkText(ws.note)}</p>` : ''}
+    ${ws.boss && ws.bossItem ? `<p style="margin:5px 0 0;padding-left:8px;border-left:2px solid ${WKD.gold};font-size:${WKD.MICRO};color:${WKD.panel}"><b>Delivery:</b> ${wkText(ws.bossItem)}${ws.bossDue ? ` · <i>${wkText(ws.bossDue)}</i>` : ''}</p>` : ''}
+    ${phases || `<p style="margin:8px 0 0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">No sub-tasks yet.</p>`}`;
 }
 
 /* The file name a workstream gets in Drive — "WS-01 · Master Payroll".
@@ -7122,8 +7168,9 @@ function wkWsDocName(ws) {
 function wkDeptBodyHtml(dep) {
   const s = wkDeptStats(dep.key);
   return `
-    ${wkDocSectionHead(dep.label || 'Workstreams',
-      `${escapeHtml(_wkMonth || '')} · ${s.list.length} workstream${s.list.length === 1 ? '' : 's'} · ${s.done}/${s.total} closed`)}
+    <h1 style="margin:0 0 2px;font-family:${WKD.mono};font-size:${WKD.SMALL};color:${WKD.panel};border-bottom:2px solid ${WKD.panel};padding-bottom:4px">
+      ${wkText((dep.label || 'Workstreams').toUpperCase())}
+      <span style="font-size:${WKD.MICRO};color:${WKD.mute};font-weight:normal"> &nbsp;${escapeHtml(_wkMonth || '')} · ${s.list.length} workstream${s.list.length === 1 ? '' : 's'} · ${s.done}/${s.total} closed</span></h1>
     <p style="margin:7px 0 0">${wkDocBar(s.pct, 620)}</p>
     ${s.list.map(ws => wkWsBodyHtml(ws)).join('')
       || `<p style="margin:10px 0 0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">No main tasks in this department yet.</p>`}`;
@@ -7254,9 +7301,15 @@ function wkMotherDocBody() {
         }).join('')}
       </table>`).join('')}` : '';
 
+  /* PAGE ONE is the month at a glance and nothing else: the control strip,
+     then every main task with its size, what is closed and how far along —
+     each one a link down into its own section. The detail starts on page two,
+     so opening the file answers "where am I" before it asks you to read. */
   return `
     ${kpis}
-    ${depts.map(dep => wkDeptBodyHtml(dep)).join('')}
+    ${wkDocIndex(depts)}
+    ${depts.map(dep => wkDocBreak() + wkDeptBodyHtml(dep)).join('')}
+    ${(rhythm || register || close) ? wkDocBreak() : ''}
     ${rhythm}${register}${close}`;
 }
 /* The sheet's title carries the *…* and `…` markers wkText turns into italics
