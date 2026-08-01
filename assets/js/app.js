@@ -7036,6 +7036,20 @@ const WorkDrive = {
      failure, so a folder deleted or shared mid-session is still picked up. */
   _root: null,
   _shareAt: 0,
+  _busyAt: 0,
+
+  /* A run is only allowed to hold the mirror for so long. Everything inside
+     sync() is a network call, and one that never returns used to park `_busy`
+     on for the life of the page — after which every single tick was dropped as
+     "a run is already going" and the sheet silently stopped reaching Drive.
+     Nothing here should take ninety seconds; if it has, that run is gone. */
+  _stuck() {
+    if (!this._busy) return false;
+    if (Date.now() - this._busyAt < 90000) return false;
+    console.warn('[Work Sheet] previous Drive run never finished — starting a fresh one.');
+    this._busy = false;
+    return true;
+  },
 
   cfg() { return (WorkDB.data && WorkDB.data.drive) || {}; },
 
@@ -7061,6 +7075,7 @@ const WorkDrive = {
     if (!this.autoOn()) return { cls: '', ico: 'cloud-slash', txt: 'Drive mirror off' };
     if (this._state === 'saving') return { cls: 'is-sync', ico: 'arrow-repeat', txt: 'Writing to Drive…' };
     if (this._state === 'error') return { cls: 'is-err', ico: 'exclamation-triangle-fill', txt: 'Drive mirror failed — ' + (this._err || 'click to retry') };
+    if (this._state === 'noauth') return { cls: 'is-err', ico: 'plug', txt: 'Drive needs reconnecting — click' };
     if (typeof Drive !== 'undefined' && !Drive.isConnected() && !Drive.deviceEnabled()) {
       return { cls: 'is-err', ico: 'plug', txt: 'Drive not connected here — click to connect' };
     }
@@ -7106,7 +7121,7 @@ const WorkDrive = {
     /* Mid-run: a mirror pass takes seconds (each doc is an HTML→Docs
        conversion), and every tick made during it used to be dropped on the
        floor. Remember it and re-run once the current pass lands. */
-    if (this._busy) { this._dirty = true; return; }
+    if (this._busy && !this._stuck()) { this._dirty = true; return; }
     clearTimeout(this._timer);
     this._timer = setTimeout(() => this.sync({ silent: true }), 1200);
   },
@@ -7133,11 +7148,12 @@ const WorkDrive = {
      "Mirror now" sets it, so a doc someone typed into in Drive can always be
      put back to the truth. */
   async sync({ silent = false, force = false } = {}) {
-    if (this._busy) { this._dirty = true; return false; }
+    if (this._busy && !this._stuck()) { this._dirty = true; return false; }
     if (!Security.guard('mirror the work sheet to Drive')) return false;
     const d = WorkDB.data;
     const cfg = this.cfg();
     this._busy = true;
+    this._busyAt = Date.now();
     let wrote = 0, skipped = 0, announced = false, changed = false;
     const announce = () => { if (!announced) { announced = true; setSync('drive-saving'); this._set('saving'); } };
     try {
@@ -7146,7 +7162,10 @@ const WorkDrive = {
            an afternoon of ticking should not quietly stop reaching Drive. */
         const back = await Drive.trySilentConnect();
         if (!back) {
-          if (silent) return false;    // never a popup off the back of a tick
+          /* A tick must never raise a Google window, so this run stops here —
+             but it says so on the chip. Silence at exactly this point is what
+             let a dead mirror look identical to a working one. */
+          if (silent) { this._set('noauth'); return false; }
           await Drive.connect();
         }
       }

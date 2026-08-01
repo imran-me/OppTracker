@@ -82,38 +82,54 @@ const Drive = {
       this._tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: this.CLIENT_ID,
         scope: this.SCOPE,
-        callback: () => {} // replaced per-request
+        callback: () => {},      // replaced per-request
+        error_callback: () => {} // ditto — see _requestToken
       });
     }
   },
 
   _tokenIsFresh() { return !!this._token && Date.now() < this._tokenExp - 60000; },
 
-  /* Request an access token. interactive=true shows the Google
-     popup (call from a click); false tries silently (no popup). */
+  /* Request an access token. interactive=true shows the Google popup (call
+     from a click); false tries silently (no popup).
+
+     THIS PROMISE MUST ALWAYS SETTLE. Google Identity simply does not call back
+     on some silent requests — a blocked popup, a browser that refuses the
+     third-party cookies the silent flow needs — and the original version then
+     stayed pending for ever. Anything awaiting it hung, which is how the Work
+     Sheet mirror ended up wedged with its "busy" flag stuck on: the first tick
+     after a reload started a sync that never finished, and every tick after it
+     was dropped as "a run is already going". A timeout and an error_callback
+     turn that silence into an ordinary failure the caller can recover from. */
   _requestToken(interactive) {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      let timer = null;
+      const finish = (fn, v) => { if (settled) return; settled = true; clearTimeout(timer); fn(v); };
+      // Interactive waits on a human; silent should be near-instant or not at all.
+      timer = setTimeout(() => finish(reject, new Error(interactive
+        ? 'Google sign-in timed out'
+        : 'Drive silent reconnect got no answer')), interactive ? 120000 : 8000);
       this._ensureTokenClient().then(() => {
         this._tokenClient.callback = (resp) => {
           if (resp && resp.access_token) {
             this._token = resp.access_token;
             this._tokenExp = Date.now() + ((resp.expires_in || 3600) * 1000);
             /* Mark the device HERE, on any token that actually arrives, rather
-               than only in connect(). Google had granted this app access, the
-               mirror was writing docs — and yet the flag was missing, so
-               trySilentConnect() refused to even ask for a refresh and the
-               Work Sheet mirror sat behind a gate it could never open. A live
-               token is the honest proof that this device is connected. */
+               than only in connect(): a live token is the honest proof that
+               this device is connected. */
             this._markEnabled();
-            resolve(this._token);
+            finish(resolve, this._token);
           } else {
-            reject(new Error(resp && resp.error ? resp.error : 'No access token'));
+            finish(reject, new Error(resp && resp.error ? resp.error : 'No access token'));
           }
         };
+        this._tokenClient.error_callback = (err) =>
+          finish(reject, new Error((err && (err.type || err.message)) || 'Google token request failed'));
         try {
           this._tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
-        } catch (e) { reject(e); }
-      }).catch(reject);
+        } catch (e) { finish(reject, e); }
+      }).catch(e => finish(reject, e));
     });
   },
 
