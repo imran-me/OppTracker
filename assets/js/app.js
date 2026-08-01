@@ -7086,8 +7086,14 @@ const WKD = {
   /* One family throughout. A document that mixes a serif, a mono and a sans
      reads as three documents; the reference sets everything in Calibri and
      lets size, weight and colour do the work instead. */
-  font: 'Calibri, Carlito, sans-serif',
-  BODY: '9pt', HEAD: '12pt', MICRO: '7.5pt', SMALL: '8pt', TITLE: '18pt', BIG: '14pt'
+  /* Arial, not Calibri. Calibri is a Word font — Google Docs does not carry it
+     by default, so an imported document set in it gets silently substituted
+     and the careful sizes below land on something else. Arial is present in
+     Docs, in Word and on every printer, and holds its shape at small sizes. */
+  font: 'Arial, Helvetica, sans-serif',
+  /* All 20% up on the first pass, which was set for a dense page and read as
+     small the moment it was printed. */
+  BODY: '11pt', HEAD: '14pt', MICRO: '9pt', SMALL: '9.5pt', TITLE: '22pt', BIG: '17pt'
 };
 
 /* ---- House rules for the tables -----------------------------------
@@ -7407,8 +7413,16 @@ function wkDocShell(title, body, mast) {
     ${brand ? `<p style="margin:0 0 2px;font-size:${WKD.MICRO};color:${WKD.gold};letter-spacing:.12em">${escapeHtml(brand.toUpperCase())}</p>` : ''}
     <p style="margin:0;font-size:${WKD.TITLE};color:${WKD.panel};font-weight:bold">${escapeHtml(title)}</p>
     <p style="margin:3px 0 0;padding-bottom:8px;border-bottom:2px solid ${WKD.panel};font-size:${WKD.MICRO};color:${WKD.mute}">${escapeHtml(_wkMonth || '')}</p>`;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head>
-  <body style="font-family:${WKD.font};font-size:${WKD.BODY};color:${WKD.ink};line-height:1.35">
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+  <style>
+    /* Page set-up travels with the import: half-inch margins all round, so the
+       table columns get the width they need instead of the inch the default
+       leaves them. Docs reads this on the way in. */
+    @page { size: A4; margin: 0.5in; }
+    body { margin: 0; }
+    td, th { vertical-align: top; }
+  </style></head>
+  <body style="font-family:${WKD.font};font-size:${WKD.BODY};color:${WKD.ink};line-height:1.4">
     ${head}
     ${body}
     <p style="margin:18px 0 0;padding-top:6px;border-top:1px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.faint}">
