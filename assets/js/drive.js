@@ -87,7 +87,7 @@ const Drive = {
     }
   },
 
-  _tokenIsFresh() { return this._token && Date.now() < this._tokenExp - 60000; },
+  _tokenIsFresh() { return !!this._token && Date.now() < this._tokenExp - 60000; },
 
   /* Request an access token. interactive=true shows the Google
      popup (call from a click); false tries silently (no popup). */
@@ -98,6 +98,13 @@ const Drive = {
           if (resp && resp.access_token) {
             this._token = resp.access_token;
             this._tokenExp = Date.now() + ((resp.expires_in || 3600) * 1000);
+            /* Mark the device HERE, on any token that actually arrives, rather
+               than only in connect(). Google had granted this app access, the
+               mirror was writing docs — and yet the flag was missing, so
+               trySilentConnect() refused to even ask for a refresh and the
+               Work Sheet mirror sat behind a gate it could never open. A live
+               token is the honest proof that this device is connected. */
+            this._markEnabled();
             resolve(this._token);
           } else {
             reject(new Error(resp && resp.error ? resp.error : 'No access token'));

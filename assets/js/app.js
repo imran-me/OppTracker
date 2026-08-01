@@ -7068,7 +7068,15 @@ const WorkDrive = {
      before it is written. */
   async catchUp() {
     if (!this.autoOn() || typeof Drive === 'undefined') return;
-    if (!Drive.isConnected() && !(await Drive.trySilentConnect())) return;
+    if (!Drive.isConnected() && !(await Drive.trySilentConnect())) {
+      /* The mirror is ON but cannot get a token — the Google grant lapsed, or
+         this browser lost the connected flag. It used to fail exactly here and
+         say nothing at all, so the docs quietly stopped following the sheet
+         with no way to tell from the page. One click puts it back. */
+      console.warn('[Work Sheet] Drive mirror paused — not connected on this device.');
+      toast('Drive mirror paused — click Drive to reconnect. Your sheet is still saved.', 'err');
+      return;
+    }
     this.sync({ silent: true });
   },
 
