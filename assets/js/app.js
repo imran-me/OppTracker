@@ -6777,6 +6777,11 @@ function wireWork() {
     const cb = e.target;
     if (!cb.matches('input[type="checkbox"][data-k]')) return;
     if (!Security.guard('update the work sheet')) { cb.checked = !cb.checked; return; }
+    /* Renew the Drive token here, inside the tick itself — a browser only lets
+       Google's silent refresh run during a real click. The mirror fires off a
+       timer 1.2s later, which is not one, so its own refresh was liable to be
+       blocked and the token died every hour. Costs nothing when it is fresh. */
+    try { Drive.renewOnGesture(); } catch {}
     const checks = wkChecks();
     if (cb.checked) checks[cb.dataset.k] = 1; else delete checks[cb.dataset.k];
     wkPaint();
@@ -6788,6 +6793,7 @@ function wireWork() {
   /* One delegated click handler for every add / edit / delete control. Buttons
      live inside <summary>, so the default toggle is suppressed for them. */
   host.onclick = (e) => {
+    try { Drive.renewOnGesture(); } catch {}   // see the tick handler above
     const btn = e.target.closest('[data-wkact]');
     if (!btn) return;
     e.preventDefault();

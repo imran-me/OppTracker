@@ -141,12 +141,43 @@ const Drive = {
   /* Silent (re)connect — refreshes the short-lived token WITHOUT any popup.
      Gated on the per-device flag: on a device that never connected Drive we
      do NOT even ask Google, so no sign-in window can appear. On a connected
-     device with a live Google session it refreshes quietly. */
+     device with a live Google session it refreshes quietly.
+
+     Concurrent callers share ONE request. _requestToken installs its callback
+     on the single token client, so two overlapping requests would have the
+     second quietly steal the first's answer and leave it to time out. */
+  _silentRequest() {
+    if (!this._pending) {
+      this._pending = this._requestToken(false);
+      this._pending.catch(() => {}).then(() => { this._pending = null; });
+    }
+    return this._pending;
+  },
   async trySilentConnect() {
     if (this._tokenIsFresh()) return true;
     if (!this.deviceEnabled()) return false;          // never auto-prompt on a fresh device
-    try { await this._requestToken(false); return true; }
+    try { await this._silentRequest(); return true; }
     catch (e) { return false; }
+  },
+
+  /* ---- Renew inside the owner's own click ----
+     THE fix for a mirror that kept needing attention. Google's silent refresh
+     opens a hidden window, and browsers only permit that during a user
+     gesture. The mirror runs off a debounce timer — never a gesture — so its
+     refresh was liable to be blocked, and the token then died every hour.
+
+     Ticking a box IS a gesture. Renewing there, a few minutes before the token
+     lapses, means the mirror always finds a live token waiting and the owner
+     never sees a thing. Fire-and-forget on purpose: the tick must not wait for
+     Google, and a failure is picked up by the mirror's own status. */
+  RENEW_BEFORE_MS: 10 * 60 * 1000,
+  renewOnGesture() {
+    if (!this.deviceEnabled()) return;                       // never connected here
+    if (this._token && Date.now() < this._tokenExp - this.RENEW_BEFORE_MS) return;  // plenty left
+    /* Straight to the request, NOT through trySilentConnect: that one returns
+       early while the token is merely still usable, which is exactly the
+       window this renewal exists to get ahead of. */
+    this._silentRequest().catch(() => {});
   },
 
   /* Interactive connect — MUST be called from a user click. This is the ONE
