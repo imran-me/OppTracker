@@ -7593,7 +7593,14 @@ const WorkDrive = {
   _sig(s) {
     const brand = wkBrand((WorkDB.data && WorkDB.data.org) || '');
     const str = brand + ' :: ' + String(s);
-    return (typeof Drive !== 'undefined' && Drive._hash) ? Drive._hash(str) : String(str.length);
+    if (typeof Drive !== 'undefined' && Drive._hash) return Drive._hash(str);
+    /* Same djb2 as Drive._hash, inline. The fallback used to be the string's
+       LENGTH, which is not a fingerprint at all: ticking a box turns ☐ into ☑
+       and green into gold without moving the length by a character, so every
+       such change would have looked like "nothing to write". */
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return String(h >>> 0);
   },
 
   /* Called by WorkDB._persistDrive on EVERY change — a task added, a sub-task
