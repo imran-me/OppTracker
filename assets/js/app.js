@@ -6128,13 +6128,15 @@ const WorkDB = {
      clearing a month. Hooking the Drive mirror HERE rather than at each call
      site is what makes the docs follow all of it instead of just the ticks.
 
-     The guard matters: the mirror finishes by calling saveNow() itself, to
-     store the doc ids it just created. Without this it would re-trigger
-     itself on every run and never stop. `_busy` is still true at that point,
-     because the mirror clears it only after its own save has returned. */
+     The loop guard lives in WorkDrive.schedule() rather than here: the mirror
+     finishes by calling saveNow() itself to store the doc ids it just created,
+     and that must not count as a change. It used to be a `_busy` check on this
+     side, which ALSO threw away every real edit made while a run was in
+     flight — a tick during a mirror never reached the doc. schedule() now
+     remembers it instead and re-runs. */
   _persistDrive() {
     try {
-      if (typeof WorkDrive === 'undefined' || WorkDrive._busy) return;
+      if (typeof WorkDrive === 'undefined') return;
       WorkDrive.schedule();
     } catch (e) { /* the mirror is a mirror — never let it break a save */ }
   }
@@ -6187,6 +6189,12 @@ function wkDefaultMonth() {
 }
 
 let _wkMonth = null;          // the month label currently on screen
+let _wkOpenWs = null;         // ids of the expanded cards — carried across redraws (null = first draw)
+const _wkPinOpen = new Set(); // cards to force open on the next redraw (just added to / edited)
+
+/* Keep a workstream card expanded through the next redraw. Called after adding
+   or editing inside a card, so a save leaves you where you were working. */
+function wkKeepOpen(wsId) { if (wsId) _wkPinOpen.add(wsId); }
 
 /* Every tickable key for a workstream: rich sub-tasks/phases first, then the
    imported checklist (a `ticks` item expands to N keys).
@@ -6313,8 +6321,16 @@ function initWork() {
       toast('Checklist items are now sub-tasks — each one is editable.', 'ok');
     }
     drawWork();
+    /* The Drive docs can be behind on arrival — the last ticks may have been
+       made on a device with no Drive connection at all. Nothing is written
+       unless something genuinely differs. */
+    try { WorkDrive.catchUp(); } catch {}
     // Live sync from another device — never redraw over an open dialog.
-    WorkDB.subscribe(() => { if (!document.querySelector('.modal.show')) drawWork(); });
+    WorkDB.subscribe(() => {
+      if (!document.querySelector('.modal.show')) drawWork();
+      // A tick made on the phone should reach the docs from here, too.
+      try { WorkDrive.schedule(); } catch {}
+    });
   });
 }
 
@@ -6324,6 +6340,21 @@ function drawWork() {
   const host = document.getElementById('workHost');
   if (!host) return;
   const d = WorkDB.data;
+
+  /* Hold the reader's place. This is a full innerHTML swap, so without the two
+     lines below every save threw you back to "first card open, scrolled to the
+     top" — even when you were three cards down adding a sub-task. */
+  const wasDrawn = !!host.querySelector('details.wk-ws');
+  if (wasDrawn) {
+    _wkOpenWs = new Set([...host.querySelectorAll('details.wk-ws')]
+      .filter(x => x.open).map(x => x.dataset.wsid));
+  }
+  if (_wkPinOpen.size) {
+    _wkOpenWs = _wkOpenWs || new Set();
+    _wkPinOpen.forEach(id => _wkOpenWs.add(id));
+    _wkPinOpen.clear();
+  }
+  const keepY = wasDrawn ? window.scrollY : null;
   const priv = WorkDB._cloudBlocked
     ? `<span class="fin-priv" title="Private to this device — add the opptrack_private rule to sync across devices"><i class="bi bi-hdd"></i> Private · this device</span>`
     : `<span class="fin-priv is-sync" title="Private &amp; synced to your account only"><i class="bi bi-shield-lock-fill"></i> Private · synced</span>`;
@@ -6383,7 +6414,7 @@ function drawWork() {
         <span class="wk-cnt">${list.length} workstream${list.length === 1 ? '' : 's'}${dep.tag ? ' · ' + wkText(dep.tag) : ''}</span>
       </div>
       ${list.length
-        ? list.map((ws, i) => wkWorkstreamHtml(ws, i === 0 && dep === depts[0])).join('')
+        ? list.map((ws, i) => wkWorkstreamHtml(ws, _wkOpenWs ? _wkOpenWs.has(ws.id) : (i === 0 && dep === depts[0]))).join('')
         : `<button type="button" class="wk-dept-empty" data-wkact="task-add" data-dept="${escapeHtml(dep.key || '')}">
              <i class="bi bi-plus-circle-dotted"></i>
              <span><b>Nothing here yet</b>Add the first main task for ${wkText(dep.label)}</span>
@@ -6481,7 +6512,7 @@ function drawWork() {
       <h2>Month-end close</h2>
       <button type="button" class="wk-add" data-wkact="close-add" title="Add a close item"><i class="bi bi-plus-lg"></i></button>
       <div class="wk-rule"></div>
-      <span class="wk-cnt">${closeDone}/${d.close.length} done${critLeft ? ` · ${critLeft} critical left` : (closeCrit.length ? ' · criticals clear' : '')}</span>
+      <span class="wk-cnt" data-wkclosecnt>${closeDone}/${d.close.length} done${critLeft ? ` · ${critLeft} critical left` : (closeCrit.length ? ' · criticals clear' : '')}</span>
     </div>
     ${d.close.length ? `<div class="wk-panel">
       ${critLeft ? `<div class="wk-close-warn"><i class="bi bi-exclamation-triangle-fill"></i>
@@ -6490,10 +6521,10 @@ function drawWork() {
         Every critical item is signed off.</div>` : '')}
       <div class="wk-closebox">
         ${closeGroups.map(([cat, items]) => `
-          ${cat ? `<div class="wk-close-cat">${wkText(cat)}<span>${items.filter(c => wkOn('close.' + c.id)).length}/${items.length}</span></div>` : ''}
+          ${cat ? `<div class="wk-close-cat">${wkText(cat)}<span data-wkclosecat="${escapeHtml(cat)}">${items.filter(c => wkOn('close.' + c.id)).length}/${items.length}</span></div>` : ''}
           ${items.map(c => {
             const on = wkOn('close.' + c.id);
-            return `<div class="wk-close-row ${on ? 'is-done' : ''} ${c.critical ? 'is-crit' : ''}">
+            return `<div class="wk-close-row ${on ? 'is-done' : ''} ${c.critical ? 'is-crit' : ''}" data-wkclose="${escapeHtml(c.id)}">
               <label class="wk-sub-tick"><input type="checkbox" data-k="close.${escapeHtml(c.id)}" ${on ? 'checked' : ''} aria-label="Done"></label>
               <div class="wk-close-body">
                 <div class="wk-close-title">${wkText(c.title)}${c.critical ? '<span class="wk-crit">critical</span>' : ''}</div>
@@ -6557,6 +6588,12 @@ function drawWork() {
 
   wireWork();
   wkPaint();
+  // Put the page back where it was (twice — once now, once after the browser
+  // has laid the new markup out, or a taller/shorter sheet loses the offset).
+  if (keepY != null) {
+    window.scrollTo(0, keepY);
+    requestAnimationFrame(() => window.scrollTo(0, keepY));
+  }
 }
 
 /* One sub-task row: tick + day marker + title, then its own timeline, the people
@@ -6579,10 +6616,10 @@ function wkSubtaskHtml(ws, st) {
         `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="${escapeHtml(st.title)} ${i + 1}">`).join('')}</span>`
     : `<label class="wk-sub-tick"><input type="checkbox" data-k="${escapeHtml(keys[0])}" ${allDone ? 'checked' : ''} aria-label="Done"></label>`;
   return `
-  <div class="wk-sub ${allDone ? 'is-done' : ''} ${st.buf ? 'buf' : ''}">
+  <div class="wk-sub ${allDone ? 'is-done' : ''} ${st.buf ? 'buf' : ''}" data-wksub="${escapeHtml(ws.id)}|${escapeHtml(st.id)}">
     ${st.ticks ? '<span class="wk-sub-tick placeholder"></span>' : tick}
     <div class="wk-sub-body">
-      <div class="wk-sub-title">${st.day ? `<span class="wk-day">${wkText(st.day)}</span>` : ''}${wkText(st.title)}${st.ticks ? `<span class="wk-sub-count">${doneN}/${st.ticks}</span>` : ''}</div>
+      <div class="wk-sub-title">${st.day ? `<span class="wk-day">${wkText(st.day)}</span>` : ''}${wkText(st.title)}${st.ticks ? `<span class="wk-sub-count" data-wksubn>${doneN}/${st.ticks}</span>` : ''}</div>
       ${st.ticks ? tick : ''}
       ${bits ? `<div class="wk-sb-meta">${bits}</div>` : ''}
       ${st.notes ? `<div class="wk-sb-note">${wkText(st.notes)}</div>` : ''}
@@ -6602,7 +6639,7 @@ function wkWorkstreamHtml(ws, open) {
   const period = wkRange(ws.start, ws.end);
   const subs = ws.subtasks || [];
   return `
-  <details class="wk-ws" data-mode="${escapeHtml(ws.mode || 'self')}" ${pr ? `data-priority="${pr.key}"` : ''} ${open ? 'open' : ''}>
+  <details class="wk-ws" data-wsid="${escapeHtml(ws.id)}" data-mode="${escapeHtml(ws.mode || 'self')}" ${pr ? `data-priority="${pr.key}"` : ''} ${open ? 'open' : ''}>
     <summary>
       <div class="wk-ws-row">
         <div class="wk-ws-id">${wkText(ws.id)}</div>
@@ -6636,7 +6673,7 @@ function wkWorkstreamHtml(ws, open) {
            checklist was folded in here, its group names becoming phases. -->
       <div class="wk-subhead">
         <span>Sub-tasks</span><span class="wk-rule"></span>
-        <span class="wk-cnt">${keys.length} item${keys.length === 1 ? '' : 's'} · ${done} closed</span>
+        <span class="wk-cnt" data-wkcnt="${escapeHtml(ws.id)}">${keys.length} item${keys.length === 1 ? '' : 's'} · ${done} closed</span>
         <button type="button" class="wk-add-sub" data-wkact="sub-add" data-ws="${escapeHtml(ws.id)}" title="Add a sub-task"><i class="bi bi-plus-lg"></i>Add sub-task</button>
       </div>
       ${subs.length ? wkPhases(ws).map(([phase, items]) => `
@@ -6658,8 +6695,14 @@ function wkPaint() {
   const d = WorkDB.data;
   if (!d) return;
   const all = [0, 0], byDept = {};
+  const subState = new Map(), wsState = new Map();   // row + header state, keyed for the DOM sweep below
   d.workstreams.forEach(ws => {
     const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
+    (ws.subtasks || []).forEach(st => {
+      const sk = wkSubKeys(ws, st);
+      subState.set(`${ws.id}|${st.id}`, [sk.filter(wkOn).length, sk.length]);
+    });
+    wsState.set(ws.id, [done, keys.length]);
     const n = document.querySelector(`[data-wkn="${CSS.escape(ws.id)}"]`);
     if (n) n.textContent = `${done}/${keys.length}`;
     const b = document.querySelector(`[data-wkbar="${CSS.escape(ws.id)}"]`);
@@ -6669,7 +6712,39 @@ function wkPaint() {
     (byDept[k] = byDept[k] || [0, 0])[0] += done;
     byDept[k][1] += keys.length;
   });
+
+  /* Row state — the strike-through, the n/N on a multi-tick sub-task and the
+     "x items · y closed" header. Without this a tick only moved the bars and
+     the row kept whatever state it was drawn with (a struck title over an
+     empty box, until the next full redraw). */
+  document.querySelectorAll('[data-wksub]').forEach(el => {
+    const s = subState.get(el.dataset.wksub); if (!s) return;
+    el.classList.toggle('is-done', s[1] > 0 && s[0] === s[1]);
+    const c = el.querySelector('[data-wksubn]');
+    if (c) c.textContent = `${s[0]}/${s[1]}`;
+  });
+  document.querySelectorAll('[data-wkcnt]').forEach(el => {
+    const s = wsState.get(el.dataset.wkcnt); if (!s) return;
+    el.textContent = `${s[1]} item${s[1] === 1 ? '' : 's'} · ${s[0]} closed`;
+  });
+
   d.close.forEach(c => { all[1]++; if (wkOn('close.' + c.id)) all[0]++; });
+
+  // Same for the month-end close: row state, per-category count, header count.
+  document.querySelectorAll('[data-wkclose]').forEach(el =>
+    el.classList.toggle('is-done', wkOn('close.' + el.dataset.wkclose)));
+  document.querySelectorAll('[data-wkclosecat]').forEach(el => {
+    const items = d.close.filter(c => (c.category || '') === el.dataset.wkclosecat);
+    el.textContent = `${items.filter(c => wkOn('close.' + c.id)).length}/${items.length}`;
+  });
+  const cc = document.querySelector('[data-wkclosecnt]');
+  if (cc) {
+    const cDone = d.close.filter(c => wkOn('close.' + c.id)).length;
+    const crit = d.close.filter(c => c.critical);
+    const cLeft = crit.filter(c => !wkOn('close.' + c.id)).length;
+    cc.textContent = `${cDone}/${d.close.length} done`
+      + (cLeft ? ` · ${cLeft} critical left` : (crit.length ? ' · criticals clear' : ''));
+  }
 
   const pc = (a) => (a && a[1] ? Math.round(a[0] / a[1] * 100) : 0);
   const set = (key, text, width) => {
@@ -6880,11 +6955,13 @@ function wkDocShell(title, body) {
   </body></html>`;
 }
 
-function wkDeptDocHtml(dep) { return wkDocShell(dep.label || 'Workstreams', wkDeptBodyHtml(dep)); }
-
 /* The mother doc: the roll-up, then every department in full, then the
-   rhythm and the close list — the whole sheet in one file. */
-function wkMotherDocHtml() {
+   rhythm and the close list — the whole sheet in one file.
+   Returns the BODY only. The shell is added at the point of writing, because
+   it carries a "generated at" timestamp — folding that in here would make the
+   content look different on every single run and defeat the change check that
+   decides whether this doc needs rewriting at all. */
+function wkMotherDocBody() {
   const d = WorkDB.data;
   const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams' }];
   let done = 0, total = 0;
@@ -6916,56 +6993,120 @@ function wkMotherDocHtml() {
       + `${c.critical ? ' <b>[critical]</b>' : ''}`
       + `${c.category || c.owner || c.due ? ` <i>(${wkText([c.category, c.owner, c.due].filter(Boolean).join(' · '))})</i>` : ''}</p>`).join('')}` : '';
 
-  return wkDocShell(`${d.title || 'Work Sheet'} — all departments`, `
+  return `
     <p>${escapeHtml(_wkMonth || '')}</p>
     <p><b>${wkBarText(total ? done / total * 100 : 0)}</b> — ${done}/${total} items closed across ${depts.length} department${depts.length === 1 ? '' : 's'}</p>
     <hr>${summary}
     ${depts.map(dep => `<hr><h1>${escapeHtml(dep.label || 'Workstreams')}</h1>${wkDeptBodyHtml(dep)}`).join('')}
-    ${rhythm}${close}`);
+    ${rhythm}${close}`;
 }
+function wkMotherDocName() { return `${(WorkDB.data.title || 'Work Sheet')} — all departments`; }
 
 const WorkDrive = {
   _timer: null,
   _busy: false,
+  _dirty: false,      // the sheet changed while a run was in flight
+  _selfSave: false,   // the mirror storing its own doc ids — not a content change
+  /* Session memos. Resolving the folder and re-reading its sharing cost three
+     round-trips before a single tick could be written; both are cleared on any
+     failure, so a folder deleted or shared mid-session is still picked up. */
+  _root: null,
+  _shareAt: 0,
 
   cfg() { return (WorkDB.data && WorkDB.data.drive) || {}; },
+
+  /* Should ticks follow through to Drive?
+     `on` alone was not enough. The switch used to default to OFF, so the very
+     first "Mirror now" — before the owner had ever seen that switch — stored
+     on:false and left the docs frozen at that one snapshot. `onSet` marks an
+     answer the owner actually gave: without one, a mirror that has already been
+     set up (rootId) is taken to be wanted, and a device that never mirrored is
+     still left completely alone. */
+  autoOn() {
+    const c = this.cfg();
+    return c.onSet ? !!c.on : !!c.rootId;
+  },
+
+  /* Content fingerprint, so a doc that has not moved is not rewritten.
+     The letterhead is folded in, not just the body: wkDocShell prints the
+     brand line from `org`, so a doc whose body is unchanged still has to be
+     rewritten when the group name changes. Only the shell's "generated at"
+     stamp is left out — that moves every second and would defeat the check. */
+  _sig(s) {
+    const brand = wkBrand((WorkDB.data && WorkDB.data.org) || '');
+    const str = brand + ' ' + String(s);
+    return (typeof Drive !== 'undefined' && Drive._hash) ? Drive._hash(str) : String(str.length);
+  },
 
   /* Called by WorkDB._persistDrive on EVERY change — a task added, a sub-task
      deleted, a box ticked. Short debounce so a burst of edits (or a
      drag-through of ten checkboxes) becomes one rewrite rather than ten, while
      a single change still lands about a second later.
 
-     Never opens a popup and never runs on a device where Drive was not
-     connected: the sheet itself is already saved by then, so the worst case is
-     a doc that catches up on the next change from a connected device. */
+     Never opens a popup: the sheet itself is already saved by the time we get
+     here, so nothing is at stake if this does nothing. */
   schedule() {
-    if (!this.cfg().on) return;
-    if (typeof Drive === 'undefined' || !Drive.isConnected()) return;
+    if (!this.autoOn()) return;
+    if (this._selfSave) return;                 // our own bookkeeping write
+    if (typeof Drive === 'undefined') return;
+    /* A device that never connected Drive has nothing to do. On one that HAS,
+       a stale token is fine — sync() refreshes it silently. Bailing on
+       isConnected() alone is what used to stop the mirror dead about an hour
+       into a session, with no message, until the page was reloaded. */
+    if (!Drive.isConnected() && !Drive.deviceEnabled()) return;
+    /* Mid-run: a mirror pass takes seconds (each doc is an HTML→Docs
+       conversion), and every tick made during it used to be dropped on the
+       floor. Remember it and re-run once the current pass lands. */
+    if (this._busy) { this._dirty = true; return; }
     clearTimeout(this._timer);
     this._timer = setTimeout(() => this.sync({ silent: true }), 1200);
   },
 
-  async sync({ silent = false } = {}) {
-    if (this._busy) return false;
+  /* On page load: the docs are behind whenever the last ticks were made
+     somewhere Drive was not connected (a phone, another browser). Costs one
+     folder lookup when nothing changed, because every doc is change-checked
+     before it is written. */
+  async catchUp() {
+    if (!this.autoOn() || typeof Drive === 'undefined') return;
+    if (!Drive.isConnected() && !(await Drive.trySilentConnect())) return;
+    this.sync({ silent: true });
+  },
+
+  /* force = rewrite every doc even if it looks unchanged. The manual
+     "Mirror now" sets it, so a doc someone typed into in Drive can always be
+     put back to the truth. */
+  async sync({ silent = false, force = false } = {}) {
+    if (this._busy) { this._dirty = true; return false; }
     if (!Security.guard('mirror the work sheet to Drive')) return false;
     const d = WorkDB.data;
     const cfg = this.cfg();
     this._busy = true;
+    let wrote = 0, skipped = 0, announced = false, changed = false;
+    const announce = () => { if (!announced) { announced = true; setSync('drive-saving'); } };
     try {
       if (!Drive.isConnected()) {
-        if (silent) return false;      // never a popup off the back of a tick
-        await Drive.connect();
+        /* Popup-free refresh first — the access token only lives an hour, and
+           an afternoon of ticking should not quietly stop reaching Drive. */
+        const back = await Drive.trySilentConnect();
+        if (!back) {
+          if (silent) return false;    // never a popup off the back of a tick
+          await Drive.connect();
+        }
       }
       /* My Drive / OppTracker Backups / Work Sheet — the app's own folder,
          created on first use. Nothing to configure, and `drive.file` reaches
          it precisely because the app made it. */
-      const root = await Drive.workRoot();
-      d.drive.rootId = root;
+      const root = this._root || (this._root = await Drive.workRoot());
+      if (d.drive.rootId !== root) { d.drive.rootId = root; changed = true; }
       /* That folder is app-created and private, so this is a safety net rather
          than a gate: it catches the case where it gets shared later. A metadata
          read that simply fails is NOT treated as "shared" — blocking the mirror
-         over an unrelated API hiccup would be worse than the risk it covers. */
-      if (!cfg.allowShared) {
+         over an unrelated API hiccup would be worse than the risk it covers.
+         Re-read at most every ten minutes: a folder does not become public
+         between two ticks, and asking each time put a whole round-trip in front
+         of every box. "Mirror now" always re-checks. */
+      const shareStale = force || (Date.now() - this._shareAt > 600000);
+      if (!cfg.allowShared && shareStale) {
         let share = null;
         try { share = await Drive.folderSharing(root); }
         catch (e) { console.warn('[Work Sheet] could not read folder sharing:', e.message); }
@@ -6974,8 +7115,8 @@ const WorkDrive = {
           else console.warn('[Work Sheet] Drive mirror held: folder is shared.');
           return false;
         }
+        this._shareAt = Date.now();
       }
-      setSync('drive-saving');
       const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams' }];
       for (const dep of depts) {
         const k = dep.key || '';
@@ -6984,26 +7125,67 @@ const WorkDrive = {
         /* Reuse the folder already made for this department, renaming it if the
            department was renamed. Looking it up by name instead would strand the
            old folder and stand an empty new one beside it on every rename. */
-        if (slot.folderId) {
-          try { await Drive.renameFile(slot.folderId, label); }
+        if (slot.folderId && (force || slot.label !== label)) {
+          try { await Drive.renameFile(slot.folderId, label); slot.label = label; changed = true; }
           catch (e) { slot.folderId = null; }   // gone from Drive → make a fresh one
         }
-        if (!slot.folderId) slot.folderId = await Drive.folder(root, label);
-        slot.docId = await Drive.putDoc(slot.folderId, `${label} — to-do`, wkDeptDocHtml(dep), slot.docId);
+        if (!slot.folderId) { slot.folderId = await Drive.folder(root, label); slot.label = label; changed = true; }
+
+        /* Only rewrite what actually moved. A tick touches ONE department, but
+           this used to rewrite every department doc AND the combined one — five
+           Docs conversions to record one box, which is exactly why the docs
+           read as lagging behind the sheet. */
+        const body = wkDeptBodyHtml(dep);
+        const sig = this._sig(label + ' ' + body);
+        if (!force && slot.docId && slot.hash === sig) { skipped++; continue; }
+        announce();
+        slot.docId = await Drive.putDoc(slot.folderId, `${label} — to-do`, wkDocShell(label, body), slot.docId);
+        slot.hash = sig;
+        wrote++;
       }
-      d.drive.motherDocId = await Drive.putDoc(
-        root, `${d.title || 'Work Sheet'} — all departments`, wkMotherDocHtml(), d.drive.motherDocId);
-      d.drive.lastSync = Date.now();
-      WorkDB.saveNow();
-      setSync('drive-done');
-      if (!silent) toast('Mirrored to Drive.', 'ok');
+
+      const mName = wkMotherDocName();
+      const mBody = wkMotherDocBody();
+      const mSig = this._sig(mName + ' ' + mBody);
+      if (force || !d.drive.motherDocId || d.drive.motherHash !== mSig) {
+        announce();
+        d.drive.motherDocId = await Drive.putDoc(root, mName, wkDocShell(mName, mBody), d.drive.motherDocId);
+        d.drive.motherHash = mSig;
+        wrote++;
+      } else skipped++;
+
+      /* Store the doc ids and fingerprints we just earned — but ONLY when this
+         run actually did something. The flag stops our own write from looking
+         like a change to the sheet and sending the mirror round again; the
+         `wrote || changed` test stops the other half of the same loop, where
+         two connected devices bounce an empty save off each other for ever
+         through the live Firestore subscription. */
+      if (wrote || changed) {
+        if (wrote) d.drive.lastSync = Date.now();
+        this._selfSave = true;
+        try { WorkDB.saveNow(); } finally { this._selfSave = false; }
+      }
+
+      console.info(`[Work Sheet] Drive mirror: ${wrote} written, ${skipped} already current.`);
+      if (announced || !silent) setSync('drive-done');
+      if (!silent) toast(wrote
+        ? `Mirrored to Drive — ${wrote} doc${wrote === 1 ? '' : 's'} rewritten.`
+        : 'Drive is already up to date.', 'ok');
       return true;
     } catch (e) {
+      // Drop the memos: the next attempt re-resolves the folder and re-reads
+      // its sharing rather than retrying against something that may be gone.
+      this._root = null; this._shareAt = 0;
       setSync('drive-error');
       console.warn('[Work Sheet] Drive mirror failed:', e);
       if (!silent) toast('Drive mirror failed: ' + e.message, 'err');
       return false;
-    } finally { this._busy = false; }
+    } finally {
+      this._busy = false;
+      // Ticks that landed during the run — mirror them now rather than leaving
+      // the docs behind until the owner happens to edit something else.
+      if (this._dirty) { this._dirty = false; this.schedule(); }
+    }
   }
 };
 
@@ -7021,7 +7203,7 @@ function wkDriveShareWarning(share) {
     WorkDB.data.drive.allowShared = true;
     WorkDB.saveNow();
     modal.hide();
-    WorkDrive.sync({ silent: false });
+    WorkDrive.sync({ silent: false, force: true });
   };
 }
 
@@ -7037,9 +7219,14 @@ function openWorkDriveModal() {
     <p class="text-faint" style="font-size:12.5px">The same folder your JSON backup uses. The app created it, so this needs no extra Google permission and nothing else in your Drive is ever reachable. Ticking a box here rewrites the docs it affects — they are generated, so anything typed into them is replaced on the next sync.</p>
     <form id="wkDriveForm" class="form-grid">
       <div class="field col-span"><label class="switch-row">
-        <input type="checkbox" name="on" ${cfg.on ? 'checked' : ''}>
+        <!-- ON unless it was deliberately turned off. It used to default to
+             off, which meant "Mirror now" on a first, unconfigured visit
+             SAVED it as off — so the docs were written once and then never
+             followed the sheet again. -->
+        <input type="checkbox" name="on" ${WorkDrive.autoOn() ? 'checked' : ''}>
         <span>Keep the docs up to date as I tick</span>
-      </label></div>
+      </label>
+      <div class="hint">Each change is written about a second after you make it. A Google Doc already open in another tab will not refresh itself — reload that tab to see the update.</div></div>
       <div class="field col-span">
         <label class="switch-row">
           <input type="checkbox" name="allowShared" ${cfg.allowShared ? 'checked' : ''}>
@@ -7059,10 +7246,11 @@ function openWorkDriveModal() {
   modalEl.querySelector('#wkDriveGo').onclick = async () => {
     const f = modalEl.querySelector('#wkDriveForm');
     d.drive.on = !!f.on.checked;
+    d.drive.onSet = true;                 // an answer the owner actually gave
     d.drive.allowShared = !!f.allowShared.checked;
     WorkDB.saveNow();
     modal.hide();
-    await WorkDrive.sync({ silent: false });
+    await WorkDrive.sync({ silent: false, force: true });
   };
 }
 
@@ -7215,10 +7403,13 @@ function openWorkTaskModal(wsId, deptKey) {
     };
     if (isEdit) {
       Object.assign(ws, patch);
+      wkKeepOpen(ws.id);
     } else {
-      WorkDB.data.workstreams.push(Object.assign({
+      const fresh = Object.assign({
         id: wkNextId(), mode: patch.devRole ? 'deleg' : 'self', subtasks: [], groups: []
-      }, patch));
+      }, patch);
+      WorkDB.data.workstreams.push(fresh);
+      wkKeepOpen(fresh.id);   // a brand-new card opens so you can fill it in
     }
     WorkDB.saveNow(); modal.hide(); drawWork();
     toast(isEdit ? 'Task updated.' : 'Main task added.', 'ok');
@@ -7299,6 +7490,7 @@ function openWorkSubModal(wsId, subId, phasePrefill) {
       if (ticks) fresh.ticks = ticks;
       (ws.subtasks = ws.subtasks || []).push(fresh);
     }
+    wkKeepOpen(wsId);
     WorkDB.saveNow(); modal.hide(); drawWork();
     toast(st ? 'Sub-task updated.' : 'Sub-task added.', 'ok');
   };
@@ -7440,6 +7632,7 @@ function workDeleteSub(wsId, subId) {
   if (!confirm(`Delete the sub-task "${st.title}"?`)) return;
   wkForgetKeys(wkSubKeys(ws, st));   // covers every box of a repeat-count row
   ws.subtasks = (ws.subtasks || []).filter(s => s.id !== subId);
+  wkKeepOpen(wsId);
   WorkDB.saveNow();
   drawWork();
   toast('Sub-task deleted.', 'ok');
@@ -7465,6 +7658,7 @@ function workImport(file) {
       WorkDB.data = WorkDB._hydrate(obj);
       delete WorkDB.data._comment;
       if (!_wkMonth) _wkMonth = WorkDB.data.month || wkDefaultMonth();
+      _wkOpenWs = null;   // a different sheet — fall back to "first card open"
       WorkDB.saveNow();
       drawWork();
       toast(`Sheet loaded — ${WorkDB.data.workstreams.length} workstreams.`, 'ok');
