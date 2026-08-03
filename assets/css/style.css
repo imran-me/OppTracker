@@ -2099,15 +2099,25 @@ details.wk-ws[data-priority] { border-left-width: 4px; }
 .wk-pick-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); }
 .wk-pick-head span { margin-right: auto; }
-.wk-pick { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.wk-pick { max-height: 340px; overflow-y: auto; overflow-x: hidden; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+/* The picker lives inside .form-grid, where `.field input` sets width:100% for
+   text fields. Unopposed, that stretched every checkbox across its whole row
+   and squeezed the task name into a one-letter column. */
+.wk-pick input[type="checkbox"] {
+  width: 17px; height: 17px; min-width: 17px; padding: 0; margin: 0;
+  flex: 0 0 auto; accent-color: var(--primary); cursor: pointer; border-radius: 4px;
+}
 .wk-pick-dept { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
   color: var(--wk-panel); margin: 10px 0 4px; }
 .wk-pick-ws { margin-bottom: 6px; }
-.wk-pick-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
-.wk-pick-row b { font-family: var(--font-mono); font-size: 10.5px; color: var(--wk-gold); flex: none; }
-.wk-pick-row span { flex: 1; min-width: 0; }
-.wk-pick-row em { font-style: normal; font-size: 11px; color: var(--text-faint); flex: none; }
-.wk-pick-row.sub { font-size: 12.5px; color: var(--text-soft); padding-left: 4px; }
+.wk-pick .wk-pick-row {
+  display: flex; align-items: flex-start; gap: 9px; font-size: 13px;
+  padding: 4px 0; cursor: pointer; font-weight: 500; line-height: 1.35;
+}
+.wk-pick-row b { font-family: var(--font-mono); font-size: 10.5px; color: var(--wk-gold); flex: none; padding-top: 2px; }
+.wk-pick-row > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.wk-pick-row em { font-style: normal; font-size: 11px; color: var(--text-faint); flex: none; white-space: nowrap; padding-top: 2px; }
+.wk-pick-row.sub { font-size: 12.5px; color: var(--text-soft); padding-left: 2px; font-weight: 400; }
 .wk-pick-subs { margin: 2px 0 6px 24px; border-left: 1px solid var(--line); padding-left: 10px; }
 
 /* ---- Shoot scheduling plan ----------------------------------------
