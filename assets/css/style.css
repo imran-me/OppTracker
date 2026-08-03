@@ -2071,6 +2071,45 @@ details.wk-ws[data-priority="Low"]    { border-left-color: #1C6B50; }
 /* the rule reads as a solid bar, so widen it a touch when a priority is set */
 details.wk-ws[data-priority] { border-left-width: 4px; }
 
+/* ---- Sub-task: grip, priority spot, detail card --------------------- */
+.wk-sub-grip {
+  flex: none; width: 14px; margin: 1px 0 0 -4px; color: #C8D0DC; cursor: grab;
+  font-size: 13px; line-height: 1; opacity: 0; transition: opacity .15s;
+}
+.wk-sub:hover .wk-sub-grip { opacity: 1; }
+.wk-sub.is-dragging { opacity: .45; }
+.wk-sub.drop-before { box-shadow: inset 0 2px 0 var(--wk-gold); }
+.wk-sub.drop-after  { box-shadow: inset 0 -2px 0 var(--wk-gold); }
+.wk-sub-body[data-wkact] { cursor: pointer; }
+/* Priority as a dot before the title — a pill on every row would swamp a list
+   of forty; the colour is the whole message. */
+.wk-sp { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+.wk-sp.t-red { background: #C0392B; } .wk-sp.t-amber { background: #D9A11B; } .wk-sp.t-green { background: #1C6B50; }
+.wk-sb-bit.note { background: #F2F5F9; color: var(--wk-panel); }
+
+.wk-card-t { font-family: var(--wk-serif); font-size: 19px; color: var(--wk-ink); margin-bottom: 12px; }
+.wk-card-tbl { width: 100%; border-collapse: collapse; }
+.wk-card-tbl th, .wk-card-tbl td { padding: 6px 0; border-bottom: 1px solid var(--line-2); text-align: left; vertical-align: top; font-size: 13px; }
+.wk-card-tbl th { width: 130px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-faint); font-weight: 400; }
+.wk-card-sec { margin-top: 16px; }
+.wk-card-sec h4 { font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--wk-panel); margin: 0 0 5px; }
+.wk-card-sec p { font-size: 13.5px; line-height: 1.55; margin: 0; white-space: pre-wrap; }
+
+/* ---- Print picker --------------------------------------------------- */
+.wk-pick-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); }
+.wk-pick-head span { margin-right: auto; }
+.wk-pick { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.wk-pick-dept { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--wk-panel); margin: 10px 0 4px; }
+.wk-pick-ws { margin-bottom: 6px; }
+.wk-pick-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
+.wk-pick-row b { font-family: var(--font-mono); font-size: 10.5px; color: var(--wk-gold); flex: none; }
+.wk-pick-row span { flex: 1; min-width: 0; }
+.wk-pick-row em { font-style: normal; font-size: 11px; color: var(--text-faint); flex: none; }
+.wk-pick-row.sub { font-size: 12.5px; color: var(--text-soft); padding-left: 4px; }
+.wk-pick-subs { margin: 2px 0 6px 24px; border-left: 1px solid var(--line); padding-left: 10px; }
+
 /* ---- Shoot scheduling plan ----------------------------------------
    A booked day, not a task: the call block sits in its own column on the
    left so the section can be scanned by date, and the two lists that decide
@@ -2661,5 +2700,51 @@ label.wk-item.buf .wk-day { color: var(--wk-mute); }
   details.wk-ws { break-inside: avoid; border-color: #999; }
   details.wk-ws > summary { cursor: default; }
   label.wk-item:hover { background: none; }
+
+  /* ---- The built print sheet ----
+     When wk-printing is on, the app is hidden entirely and ONLY the document
+     built into #wkPrintHost goes to the printer. That is what lets a print be
+     a chosen selection — a subset of tasks, some of their sub-tasks — rather
+     than whatever the page happens to be showing. */
+  body.wk-printing > *:not(#wkPrintHost) { display: none !important; }
+  body.wk-printing #wkPrintHost { display: block !important; }
 }
+@page { size: A4; margin: 12mm; }
+
+/* Hidden until a print is actually running. */
+#wkPrintHost { display: none; }
+.wkp { font-family: var(--wk-serif); color: #111; font-size: 11pt; line-height: 1.4; }
+.wkp-ident {
+  /* "In shadow": present on every page, quiet enough never to compete with
+     the sheet itself. */
+  font-family: var(--font-mono); font-size: 7.5pt; letter-spacing: .1em;
+  text-transform: uppercase; color: #b0b6c0; padding-bottom: 6px;
+  border-bottom: 1px solid #e2e5ea; margin-bottom: 12px;
+}
+.wkp-ident.foot { border-bottom: none; border-top: 1px solid #e2e5ea; margin: 18px 0 0; padding: 6px 0 0; }
+.wkp-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  border-bottom: 2px solid #12294A; padding-bottom: 8px; margin-bottom: 14px; }
+.wkp-brand { font-family: var(--font-mono); font-size: 7.5pt; letter-spacing: .18em; text-transform: uppercase; color: #9C7C38; }
+.wkp-head h1 { font-size: 19pt; margin: 4px 0 0; color: #12294A; font-weight: 700; }
+.wkp-month { font-family: var(--font-mono); font-size: 8.5pt; color: #6E7781; }
+.wkp-task { break-inside: auto; margin-bottom: 20px; }
+.wkp-task.brk { break-before: page; }
+.wkp-task h2 { font-size: 13.5pt; color: #12294A; margin: 0 0 3px; break-after: avoid; }
+.wkp-task h2 span { font-family: var(--font-mono); font-size: 8.5pt; color: #9C7C38; margin-right: 9px; }
+.wkp-meta { font-size: 8.5pt; color: #6E7781; }
+.wkp-count { font-family: var(--font-mono); font-size: 8.5pt; color: #12294A; margin-top: 3px; }
+.wkp-p { font-size: 10.5pt; margin: 7px 0 0; }
+.wkp-note { font-size: 9pt; color: #6E7781; font-style: italic; margin: 3px 0 0; }
+.wkp-desc { font-size: 9.5pt; color: #333; margin: 4px 0 0; padding-left: 9px; border-left: 2px solid #e2e5ea; white-space: pre-wrap; }
+.wkp-phase { font-family: var(--font-mono); font-size: 8pt; letter-spacing: .12em; text-transform: uppercase;
+  color: #12294A; margin: 13px 0 4px; break-after: avoid; }
+.wkp-tbl { width: 100%; border-collapse: collapse; }
+.wkp-tbl th { text-align: left; font-family: var(--font-mono); font-size: 7.5pt; letter-spacing: .1em;
+  text-transform: uppercase; color: #9AA2AB; font-weight: 400; border-bottom: 1px solid #cfd5de; padding: 0 8px 4px 0; }
+.wkp-tbl td { font-size: 10pt; padding: 5px 8px 5px 0; border-bottom: 1px solid #eceff3; vertical-align: top; break-inside: avoid; }
+.wkp-n { font-family: var(--font-mono); font-size: 8pt; color: #6E7781; }
+.wkp-card { border: 1px solid #cfd5de; padding: 16px 18px; }
+.wkp-card .wk-card-t { font-size: 16pt; }
+.wkp-card .wk-card-tbl th { font-size: 7.5pt; }
+.wkp-card .wk-card-tbl td { font-size: 10pt; }
 @media (prefers-reduced-motion: reduce) { .wk-bar > i { transition: none; } }

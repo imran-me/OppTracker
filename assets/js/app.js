@@ -6057,6 +6057,17 @@ const WorkDB = {
       if (!Array.isArray(r.prep)) r.prep = [];
     });
 
+    /* Sub-tasks: the plain `from`/`to` DATES become `start`/`end` stamps that
+       can carry a time of day. Migrated at midnight and rendered without a
+       time when it is still midnight, so an old date-only row reads exactly as
+       it did and only the rows given a real time show one. Lossless: the old
+       fields are left in place. */
+    d.workstreams.forEach(ws => (ws.subtasks || []).forEach(st => {
+      if (!st) return;
+      if (!st.start && st.from) st.start = st.from + 'T00:00';
+      if (!st.end && st.to) st.end = st.to + 'T00:00';
+    }));
+
     d._wkV = 4;
     return d;
   },
@@ -6207,6 +6218,32 @@ const _wkPinOpen = new Set(); // cards to force open on the next redraw (just ad
    or editing inside a card, so a save leaves you where you were working. */
 function wkKeepOpen(wsId) { if (wsId) _wkPinOpen.add(wsId); }
 
+let _wkDragging = false;      // a sub-task drag is in flight
+
+/* Move a sub-task next to another one. `srcKey`/`dstKey` are "wsId|subId".
+   Dropping onto a row in a different phase adopts that phase, and a move
+   between two workstreams carries the ticks across with the record — the tick
+   keys are built from the sub-task's own id, so they travel with it. */
+function wkMoveSub(srcKey, dstKey, after) {
+  const [sWs, sId] = String(srcKey).split('|');
+  const [dWs, dId] = String(dstKey).split('|');
+  const src = wkFind(sWs), dst = wkFind(dWs);
+  if (!src || !dst) return;
+  const from = src.subtasks || [], to = dst.subtasks || (dst.subtasks = []);
+  const i = from.findIndex(x => x.id === sId);
+  if (i < 0) return;
+  const target = to.find(x => x.id === dId);
+  if (!target) return;
+  const [moved] = from.splice(i, 1);
+  moved.phase = target.phase || '';
+  let j = to.findIndex(x => x.id === dId);
+  if (j < 0) j = to.length - 1;
+  to.splice(j + (after ? 1 : 0), 0, moved);
+  wkKeepOpen(sWs); wkKeepOpen(dWs);
+  WorkDB.saveNow();
+  drawWork();
+}
+
 /* Every tickable key for a workstream: rich sub-tasks/phases first, then the
    imported checklist (a `ticks` item expands to N keys).
    Keys are built from the sub-task's own id, so ticks survive reordering,
@@ -6354,6 +6391,32 @@ function wkFindSub(wsId, subId) {
   const ws = wkFind(wsId);
   return ws && (ws.subtasks || []).find(s => s.id === subId);
 }
+/* ---- Sub-task start / end stamps ----
+   Stored as `YYYY-MM-DDTHH:MM`, the shape <input type="datetime-local"> both
+   reads and writes, so no parsing sits between the field and the record.
+   A stamp at midnight prints as a plain date: a row that only ever had a date
+   should not suddenly claim to start at 00:00. */
+function wkStampText(v, withDate = true) {
+  const s = String(v || '');
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2}))?$/);
+  if (!m) return '';
+  const date = withDate ? fmtDate(m[1]) : '';
+  const time = (m[2] === undefined || (m[2] === '00' && m[3] === '00')) ? '' : `${m[2]}:${m[3]}`;
+  return [date, time].filter(Boolean).join(' ');
+}
+/* "3 Aug 10:00 → 3 Aug 14:00", collapsing to "3 Aug 10:00 → 14:00" when both
+   ends fall on the same day — the date twice on one line is just noise. */
+function wkWhen(st) {
+  const a = wkStampText(st.start), b = wkStampText(st.end);
+  if (a && b) {
+    const sameDay = String(st.start).slice(0, 10) === String(st.end).slice(0, 10);
+    return a === b ? a : `${a} → ${sameDay ? wkStampText(st.end, false) || b : b}`;
+  }
+  if (a) return a;
+  if (b) return '→ ' + b;
+  return wkRange(st.from, st.to);   // a record older than the migration
+}
+
 /* A short "12 Aug → 20 Aug" style range (either end may be missing). */
 function wkRange(from, to) {
   const a = from ? fmtDate(from) : '', b = to ? fmtDate(to) : '';
@@ -6747,27 +6810,38 @@ function wkSubtaskHtml(ws, st) {
   const keys = wkSubKeys(ws, st);
   const doneN = keys.filter(wkOn).length;
   const allDone = doneN === keys.length;
-  const period = wkRange(st.from, st.to);
+  const period = wkWhen(st);
+  const pr = wkPriority(st.priority);
   const bits = [
-    period ? `<span class="wk-sb-bit"><i class="bi bi-calendar3"></i>${wkText(period)}</span>` : '',
+    period ? `<span class="wk-sb-bit"><i class="bi bi-clock"></i>${wkText(period)}</span>` : '',
     st.withWhom ? `<span class="wk-sb-bit"><i class="bi bi-people-fill"></i>${wkText(st.withWhom)}</span>` : '',
     st.assignTo ? `<span class="wk-sb-bit assign"><i class="bi bi-person-check-fill"></i>${wkText(st.assignTo)}</span>` : '',
-    st.reportOn ? `<span class="wk-sb-bit report"><i class="bi bi-send-fill"></i>Report ${wkText(fmtDate(st.reportOn))}</span>` : ''
+    st.reportOn ? `<span class="wk-sb-bit report"><i class="bi bi-send-fill"></i>Report ${wkText(fmtDate(st.reportOn))}</span>` : '',
+    /* The description is deliberately NOT printed on the row — the list stays
+       scannable and the detail lives one click away, in the card. */
+    st.description ? `<span class="wk-sb-bit note"><i class="bi bi-card-text"></i>Details</span>` : ''
   ].filter(Boolean).join('');
   const tick = st.ticks
     ? `<span class="wk-sub-multi">${keys.map((k, i) =>
         `<input class="wk-tick" type="checkbox" data-k="${escapeHtml(k)}" ${wkOn(k) ? 'checked' : ''} aria-label="${escapeHtml(st.title)} ${i + 1}">`).join('')}</span>`
     : `<label class="wk-sub-tick"><input type="checkbox" data-k="${escapeHtml(keys[0])}" ${allDone ? 'checked' : ''} aria-label="Done"></label>`;
+  /* draggable on the ROW, not on a handle alone: the handle is the affordance
+     but the whole row is the target, which is what makes "grab it and put it
+     at the top" feel like moving a card rather than hitting a 12px grip. */
   return `
-  <div class="wk-sub ${allDone ? 'is-done' : ''} ${st.buf ? 'buf' : ''}" data-wksub="${escapeHtml(ws.id)}|${escapeHtml(st.id)}">
+  <div class="wk-sub ${allDone ? 'is-done' : ''} ${st.buf ? 'buf' : ''}" draggable="true"
+       data-wksub="${escapeHtml(ws.id)}|${escapeHtml(st.id)}"
+       data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}">
+    <span class="wk-sub-grip" title="Drag to reorder"><i class="bi bi-grip-vertical"></i></span>
     ${st.ticks ? '<span class="wk-sub-tick placeholder"></span>' : tick}
-    <div class="wk-sub-body">
-      <div class="wk-sub-title">${st.day ? `<span class="wk-day">${wkText(st.day)}</span>` : ''}${wkText(st.title)}${st.ticks ? `<span class="wk-sub-count" data-wksubn>${doneN}/${st.ticks}</span>` : ''}</div>
+    <div class="wk-sub-body" data-wkact="sub-card" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Open this sub-task">
+      <div class="wk-sub-title">${pr ? `<span class="wk-sp t-${pr.tone}" title="${escapeHtml(pr.key)} priority"></span>` : ''}${wkText(st.title)}${st.ticks ? `<span class="wk-sub-count" data-wksubn>${doneN}/${st.ticks}</span>` : ''}</div>
       ${st.ticks ? tick : ''}
       ${bits ? `<div class="wk-sb-meta">${bits}</div>` : ''}
       ${st.notes ? `<div class="wk-sb-note">${wkText(st.notes)}</div>` : ''}
     </div>
     <div class="wk-sub-tools">
+      <button type="button" data-wkact="sub-print" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Print this sub-task"><i class="bi bi-printer"></i></button>
       <button type="button" data-wkact="sub-edit" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Edit sub-task"><i class="bi bi-pencil"></i></button>
       <button type="button" class="del" data-wkact="sub-del" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" title="Delete sub-task"><i class="bi bi-trash3"></i></button>
     </div>
@@ -6954,6 +7028,7 @@ function wireWork() {
      live inside <summary>, so the default toggle is suppressed for them. */
   host.onclick = (e) => {
     try { Drive.renewOnGesture(); } catch {}   // see the tick handler above
+    if (_wkDragging) return;                   // the tail of a drag, not a click
     const btn = e.target.closest('[data-wkact]');
     if (!btn) return;
     e.preventDefault();
@@ -6965,6 +7040,8 @@ function wireWork() {
     else if (wkact === 'sub-add') openWorkSubModal(ws, null, phase || '');
     else if (wkact === 'sub-edit') openWorkSubModal(ws, sub);
     else if (wkact === 'sub-del') workDeleteSub(ws, sub);
+    else if (wkact === 'sub-card') openWorkSubCard(ws, sub);
+    else if (wkact === 'sub-print') wkPrintSubtask(ws, sub);
     else if (wkact === 'dept-add') openWorkDeptModal(null);
     else if (wkact === 'dept-edit') openWorkDeptModal(dept);
     else if (wkact === 'cad-add') openWorkGateModal(null);
@@ -6977,6 +7054,49 @@ function wireWork() {
     else if (wkact === 'close-edit') openWorkCloseModal(btn.dataset.id);
     else if (wkact === 'close-del') workDeleteRow('close', btn.dataset.id);
   };
+
+  /* ---- Drag a sub-task to reorder it ----
+     Order is the array's order, so this is a splice. Dropping onto a row in
+     ANOTHER phase moves the sub-task into that phase as well — the phase is
+     just a field, and a drag that refused to cross a heading would be a
+     rule the page does not otherwise have.
+
+     The whole row is draggable; `sub-card` opens on click, so a drag must not
+     also count as a click. `_wkDragged` is cleared on dragend, and the click
+     handler ignores anything that arrives while a drag is in flight. */
+  let dragId = null;
+  host.addEventListener('dragstart', (e) => {
+    const row = e.target.closest && e.target.closest('.wk-sub');
+    if (!row) return;
+    dragId = row.dataset.wksub;
+    _wkDragging = true;
+    row.classList.add('is-dragging');
+    try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; } catch {}
+  });
+  host.addEventListener('dragend', () => {
+    host.querySelectorAll('.wk-sub').forEach(x => x.classList.remove('is-dragging', 'drop-before', 'drop-after'));
+    dragId = null;
+    setTimeout(() => { _wkDragging = false; }, 0);   // let the trailing click be swallowed
+  });
+  host.addEventListener('dragover', (e) => {
+    if (!dragId) return;
+    const row = e.target.closest && e.target.closest('.wk-sub');
+    if (!row || row.dataset.wksub === dragId) return;
+    e.preventDefault();
+    const r = row.getBoundingClientRect();
+    const after = (e.clientY - r.top) > r.height / 2;
+    host.querySelectorAll('.wk-sub').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+    row.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  host.addEventListener('drop', (e) => {
+    if (!dragId) return;
+    const row = e.target.closest && e.target.closest('.wk-sub');
+    if (!row || row.dataset.wksub === dragId) return;
+    e.preventDefault();
+    const r = row.getBoundingClientRect();
+    const after = (e.clientY - r.top) > r.height / 2;
+    wkMoveSub(dragId, row.dataset.wksub, after);
+  });
 
   const month = document.getElementById('wkMonth');
   if (month) month.onchange = () => {
@@ -7006,10 +7126,7 @@ function wireWork() {
   };
 
   const pr = document.getElementById('wkPrint');
-  if (pr) pr.onclick = () => {
-    document.querySelectorAll('.wk-ws').forEach(x => x.open = true);
-    window.print();
-  };
+  if (pr) pr.onclick = () => openWorkPrintModal();
 
   const dv = document.getElementById('wkDriveBtn');
   if (dv) dv.onclick = () => openWorkDriveModal();
@@ -7314,17 +7431,18 @@ function wkDocSubRow(ws, st) {
   /* Day marker and title on one line, then only what the line actually
      carries: a period, who it is with, when it is reported. */
   const under = [
-    wkRange(st.from, st.to), st.withWhom,
+    wkWhen(st), st.withWhom,
     st.reportOn ? 'report ' + fmtDate(st.reportOn) : ''
   ].filter(Boolean).join(' · ');
   return `<tr>
     <td style="${cell};width:16px;font-size:${WKD.BODY}">${all ? '☑' : '☐'}</td>
     <td style="${cell}">
-      <p style="margin:0;font-size:${WKD.BODY};color:${WKD.ink}">${st.day
-        ? `<span style="color:${WKD.gold}">${wkText(st.day)}</span> · ` : ''}${title}${st.ticks
+      <p style="margin:0;font-size:${WKD.BODY};color:${WKD.ink}">${st.priority
+        ? `<span style="color:${st.priority === 'High' ? WKD.red : st.priority === 'Medium' ? WKD.amber : WKD.green}">${wkText(st.priority)}</span> · ` : ''}${title}${st.ticks
         ? ` &nbsp;<span style="font-size:${WKD.MICRO};color:${WKD.mute}">${sd}/${st.ticks}</span>` : ''}</p>
       ${under ? `<p style="margin:1px 0 0;font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(under)}</p>` : ''}
       ${st.notes ? `<p style="margin:1px 0 0;font-size:${WKD.MICRO};color:${WKD.mute};font-style:italic">${wkText(st.notes)}</p>` : ''}
+      ${st.description ? `<p style="margin:3px 0 0;padding-left:8px;border-left:2px solid ${WKD.line};font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(st.description).replace(/\n/g, '<br>')}</p>` : ''}
     </td>
     <td style="${cell};width:90px;font-size:${WKD.MICRO};color:${WKD.mute}">${wkText(st.assignTo || '')}</td>
   </tr>`;
@@ -8008,6 +8126,231 @@ function workDeleteShoot(id) {
   toast('Shoot removed.', 'ok');
 }
 
+/* ==========================================================
+   SUB-TASK CARD, AND PRINTING
+   ----------------------------------------------------------
+   The list stays scannable by keeping the description off it; this is
+   where the full record lives. Everything printed goes through
+   wkPrintSheet, which drops one built document into a print-only host
+   so the page itself is never disturbed.
+   ========================================================== */
+
+/* Who the sheet belongs to — printed faintly at the head and foot of every
+   page, so a page that leaves the desk still says whose it is. */
+function wkIdentityLine() {
+  const d = WorkDB.data || {};
+  const p = (typeof DB !== 'undefined' && DB.data && DB.data.profile) || {};
+  const job = (p.experience || []).find(e => e.current) || (p.experience || [])[0] || {};
+  const email = d.ownerEmail || p.email
+    || (typeof Security !== 'undefined' && Security.email && Security.email()) || '';
+  return [d.ownerName || p.name || '', d.ownerRole || job.role || '',
+    d.ownerOrg || job.company || '', email].filter(Boolean).join('  ·  ');
+}
+
+/* One place that prints. Builds a document into the print host, prints it,
+   then clears it — nothing is left behind in the page. */
+function wkPrintSheet(title, bodyHtml) {
+  let host = document.getElementById('wkPrintHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'wkPrintHost';
+    document.body.appendChild(host);
+  }
+  const ident = escapeHtml(wkIdentityLine());
+  host.innerHTML = `
+    <div class="wkp">
+      <div class="wkp-ident">${ident}</div>
+      <div class="wkp-head">
+        <div>
+          <div class="wkp-brand">${wkText(wkBrand(WorkDB.data.org))}</div>
+          <h1>${wkText(title)}</h1>
+        </div>
+        <div class="wkp-month">${escapeHtml(_wkMonth || '')}</div>
+      </div>
+      ${bodyHtml}
+      <div class="wkp-ident foot">${ident}</div>
+    </div>`;
+  document.body.classList.add('wk-printing');
+  const done = () => {
+    document.body.classList.remove('wk-printing');
+    host.innerHTML = '';
+    window.removeEventListener('afterprint', done);
+  };
+  window.addEventListener('afterprint', done);
+  window.print();
+  // Safari/Firefox do not always fire afterprint — never strand the page.
+  setTimeout(() => { if (document.body.classList.contains('wk-printing')) done(); }, 60000);
+}
+
+/* The full record of one sub-task, as a block. Used by the card on screen and
+   by the sub-task profile print, so the two can never say different things. */
+function wkSubDetailHtml(ws, st) {
+  const keys = wkSubKeys(ws, st), doneN = keys.filter(wkOn).length;
+  const pr = wkPriority(st.priority);
+  const rows = [
+    ['Main task', `${ws.id} · ${ws.title || ''}`],
+    ['Phase', st.phase || '—'],
+    ['Priority', pr ? pr.key : '—'],
+    ['Starts', wkStampText(st.start) || '—'],
+    ['Ends', wkStampText(st.end) || '—'],
+    ['With', st.withWhom || '—'],
+    ['Assigned to', st.assignTo || '—'],
+    ['Reported up', st.reportOn ? fmtDate(st.reportOn) : '—'],
+    ['Progress', st.ticks ? `${doneN} of ${st.ticks} done` : (doneN ? 'Closed' : 'Open')]
+  ];
+  return `
+    <div class="wk-card-t">${wkText(st.title)}</div>
+    <table class="wk-card-tbl">${rows.map(([k, v]) =>
+      `<tr><th>${escapeHtml(k)}</th><td>${wkText(String(v))}</td></tr>`).join('')}</table>
+    ${st.notes ? `<div class="wk-card-sec"><h4>Notes</h4><p>${wkText(st.notes)}</p></div>` : ''}
+    ${st.description
+      ? `<div class="wk-card-sec"><h4>Description</h4><p>${wkText(st.description).replace(/\n/g, '<br>')}</p></div>`
+      : `<div class="wk-card-sec"><p class="text-faint">No description yet.</p></div>`}`;
+}
+
+function openWorkSubCard(wsId, subId) {
+  const ws = wkFind(wsId), st = wkFindSub(wsId, subId);
+  if (!ws || !st) return;
+  const { modalEl, modal } = wkModal(`Sub-task · ${ws.id}`, 'card-text',
+    `<div class="wk-card">${wkSubDetailHtml(ws, st)}</div>`,
+    `<button type="button" class="btn btn-ghost me-auto" id="wkCardPrint"><i class="bi bi-printer me-1"></i>Print this</button>
+     <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Close</button>
+     <button type="button" class="btn btn-primary" id="wkCardEdit"><i class="bi bi-pencil me-1"></i>Edit</button>`);
+  modalEl.querySelector('#wkCardEdit').onclick = () => { modal.hide(); openWorkSubModal(wsId, subId); };
+  modalEl.querySelector('#wkCardPrint').onclick = () => { modal.hide(); setTimeout(() => wkPrintSubtask(wsId, subId), 250); };
+}
+
+/* One sub-task, on its own page — the profile. */
+function wkPrintSubtask(wsId, subId) {
+  const ws = wkFind(wsId), st = wkFindSub(wsId, subId);
+  if (!ws || !st) return;
+  wkPrintSheet('Sub-task profile', `<div class="wkp-card">${wkSubDetailHtml(ws, st)}</div>`);
+}
+
+/* ---- The print picker ----
+   Which main tasks, whether their sub-tasks come too, and which of those. The
+   sub-task list is nested under its task and only enabled when that task is
+   in — a checked sub-task under an unchecked task is a contradiction the
+   dialog should not let you express. */
+function openWorkPrintModal() {
+  const d = WorkDB.data;
+  const depts = d.depts.length ? d.depts : [{ key: '', label: 'Workstreams' }];
+  const body = depts.map(dep => {
+    const list = d.workstreams.filter(w => (w.dept || '') === (dep.key || ''));
+    if (!list.length) return '';
+    return `
+      <div class="wk-pick-dept">${wkText(dep.label || 'Workstreams')}</div>
+      ${list.map(ws => {
+        const subs = ws.subtasks || [];
+        return `
+        <div class="wk-pick-ws">
+          <label class="wk-pick-row">
+            <input type="checkbox" class="wk-pick-task" data-ws="${escapeHtml(ws.id)}" checked>
+            <b>${wkText(ws.id)}</b><span>${wkText(ws.title)}</span>
+            <em>${subs.length} sub-task${subs.length === 1 ? '' : 's'}</em>
+          </label>
+          ${subs.length ? `<div class="wk-pick-subs">
+            ${subs.map(st => `<label class="wk-pick-row sub">
+              <input type="checkbox" class="wk-pick-sub" data-ws="${escapeHtml(ws.id)}" data-sub="${escapeHtml(st.id)}" checked>
+              <span>${wkText(st.title)}</span></label>`).join('')}
+          </div>` : ''}
+        </div>`;
+      }).join('')}`;
+  }).join('');
+
+  const { modalEl, modal } = wkModal('Print the sheet', 'printer',
+    `<form id="wkPrintForm" class="form-grid">
+      <div class="field col-span"><label class="switch-row">
+        <input type="checkbox" name="withSubs" id="wkPrintWithSubs" checked>
+        <span>Include sub-tasks</span></label></div>
+      <div class="field col-span"><label class="switch-row">
+        <input type="checkbox" name="withDesc" checked>
+        <span>Include each sub-task's description</span></label></div>
+      <div class="field col-span"><label class="switch-row">
+        <input type="checkbox" name="onePer">
+        <span>Start every main task on a new page</span></label></div>
+      <div class="field col-span">
+        <div class="wk-pick-head">
+          <span>Main tasks to print</span>
+          <button type="button" class="btn btn-ghost btn-sm" id="wkPickAll">All</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="wkPickNone">None</button>
+        </div>
+        <div class="wk-pick">${body || '<p class="text-faint">Nothing to print yet.</p>'}</div>
+      </div>
+    </form>`,
+    `<button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
+     <button type="button" class="btn btn-primary" id="wkPrintGo"><i class="bi bi-printer me-1"></i>Print</button>`);
+
+  const setAll = (on) => modalEl.querySelectorAll('.wk-pick-task, .wk-pick-sub').forEach(c => { c.checked = on; });
+  modalEl.querySelector('#wkPickAll').onclick = () => setAll(true);
+  modalEl.querySelector('#wkPickNone').onclick = () => setAll(false);
+  // A task turned off takes its sub-tasks with it, and back on brings them.
+  modalEl.querySelectorAll('.wk-pick-task').forEach(t => t.onchange = () => {
+    modalEl.querySelectorAll(`.wk-pick-sub[data-ws="${CSS.escape(t.dataset.ws)}"]`)
+      .forEach(c => { c.checked = t.checked; });
+  });
+
+  modalEl.querySelector('#wkPrintGo').onclick = () => {
+    const f = modalEl.querySelector('#wkPrintForm');
+    const withSubs = f.withSubs.checked, withDesc = f.withDesc.checked, onePer = f.onePer.checked;
+    const picked = [...modalEl.querySelectorAll('.wk-pick-task:checked')].map(c => c.dataset.ws);
+    if (!picked.length) { toast('Pick at least one main task.', 'err'); return; }
+    const subsOf = (wsId) => new Set([...modalEl.querySelectorAll(
+      `.wk-pick-sub[data-ws="${CSS.escape(wsId)}"]:checked`)].map(c => c.dataset.sub));
+    modal.hide();
+    setTimeout(() => wkPrintTasks(picked, { withSubs, withDesc, onePer, subsOf }), 250);
+  };
+}
+
+function wkPrintTasks(ids, opt) {
+  const body = ids.map((id, i) => {
+    const ws = wkFind(id);
+    if (!ws) return '';
+    const keys = wkItemKeys(ws), done = keys.filter(wkOn).length;
+    const pick = opt.subsOf(id);
+    const subs = (ws.subtasks || []).filter(st => pick.has(st.id));
+    const meta = [
+      ws.priority, ws.boss ? 'Delivery' : '', wkRange(ws.start, ws.end),
+      ws.myRole ? 'Me: ' + ws.myRole : '', ws.devRole ? 'Dev: ' + ws.devRole : '',
+      ws.withWhom ? 'With: ' + ws.withWhom : ''
+    ].filter(Boolean).join('  ·  ');
+    const groups = opt.withSubs ? (() => {
+      const order = [], by = new Map();
+      subs.forEach(st => {
+        const p = st.phase || '';
+        if (!by.has(p)) { by.set(p, []); order.push(p); }
+        by.get(p).push(st);
+      });
+      return order.map(p => `
+        <h3 class="wkp-phase">${wkText(p || 'Ungrouped')}</h3>
+        <table class="wkp-tbl">
+          <tr><th style="width:22px"></th><th>Sub-task</th><th style="width:150px">When</th><th style="width:100px">Assigned</th></tr>
+          ${by.get(p).map(st => {
+            const sk = wkSubKeys(ws, st), sd = sk.filter(wkOn).length;
+            const all = sd === sk.length;
+            return `<tr>
+              <td>${all ? '☑' : '☐'}</td>
+              <td><b>${wkText(st.title)}</b>${st.ticks ? ` <span class="wkp-n">${sd}/${st.ticks}</span>` : ''}
+                ${st.notes ? `<div class="wkp-note">${wkText(st.notes)}</div>` : ''}
+                ${opt.withDesc && st.description ? `<div class="wkp-desc">${wkText(st.description).replace(/\n/g, '<br>')}</div>` : ''}</td>
+              <td>${wkText(wkWhen(st))}</td>
+              <td>${wkText(st.assignTo || '')}</td></tr>`;
+          }).join('')}
+        </table>`).join('');
+    })() : '';
+    return `
+      <section class="wkp-task ${opt.onePer && i ? 'brk' : ''}">
+        <h2><span>${wkText(ws.id)}</span>${wkText(ws.title)}</h2>
+        ${meta ? `<div class="wkp-meta">${wkText(meta)}</div>` : ''}
+        <div class="wkp-count">${done} / ${keys.length} items closed</div>
+        ${ws.description ? `<p class="wkp-p">${wkText(ws.description)}</p>` : ''}
+        ${ws.note ? `<p class="wkp-note">${wkText(ws.note)}</p>` : ''}
+        ${groups}
+      </section>`;
+  }).join('');
+  wkPrintSheet(WorkDB.data.title ? wkPlain(WorkDB.data.title) : 'Work Sheet', body);
+}
+
 function openWorkDriveModal() {
   if (!Security.guard('set up the Drive mirror')) return;
   const d = WorkDB.data;
@@ -8240,12 +8583,14 @@ function openWorkSubModal(wsId, subId, phasePrefill) {
         <input name="phase" list="wkPhaseList" value="${escapeHtml(rec.phase || '')}" placeholder="e.g. Week 1 · groundwork">
         <datalist id="wkPhaseList">${phases.map(p => `<option value="${escapeHtml(p)}"></option>`).join('')}</datalist>
         <small class="text-faint" style="font-size:11px">Groups it under a heading. Type a new name to start a new phase.</small></div>
-      <div class="field"><label>Day marker</label>
-        <input name="day" value="${escapeHtml(rec.day || '')}" placeholder="e.g. D3">
-        <small class="text-faint" style="font-size:11px">Short tag shown before the title.</small></div>
+      <div class="field"><label>Priority</label><select name="priority">
+        <option value="">— none —</option>
+        ${WK_PRIORITIES.map(p => `<option ${rec.priority === p.key ? 'selected' : ''}>${p.key}</option>`).join('')}
+      </select></div>
 
-      <div class="field"><label>From</label><input type="date" name="from" value="${escapeHtml(rec.from || '')}"></div>
-      <div class="field"><label>To</label><input type="date" name="to" value="${escapeHtml(rec.to || '')}"></div>
+      <div class="field"><label>Starts</label><input type="datetime-local" name="start" value="${escapeHtml(rec.start || '')}"></div>
+      <div class="field"><label>Ends</label><input type="datetime-local" name="end" value="${escapeHtml(rec.end || '')}">
+        <small class="text-faint" style="font-size:11px">Leave the time at 00:00 for a date-only row.</small></div>
       <div class="field"><label>With whom</label><input name="withWhom" value="${escapeHtml(rec.withWhom || '')}" placeholder="Who you work on it with"></div>
       <div class="field"><label>Assign to</label><input name="assignTo" value="${escapeHtml(rec.assignTo || '')}" placeholder="Who it is handed to"></div>
       <div class="field"><label>Report up on</label><input type="date" name="reportOn" value="${escapeHtml(rec.reportOn || '')}">
@@ -8257,7 +8602,10 @@ function openWorkSubModal(wsId, subId, phasePrefill) {
         <input type="checkbox" name="buf" ${rec.buf ? 'checked' : ''}>
         <span>Buffer / only-if-needed — shown dimmed</span></label></div>
       <div class="field col-span"><label>Notes</label>
-        <textarea name="notes" rows="2" placeholder="Detail, blockers, acceptance">${escapeHtml(rec.notes || '')}</textarea></div>
+        <textarea name="notes" rows="2" placeholder="One line shown on the row itself">${escapeHtml(rec.notes || '')}</textarea></div>
+      <div class="field col-span"><label>Description</label>
+        <textarea name="description" rows="5" placeholder="The full brief — what done looks like, how it is checked, anything the person picking it up needs">${escapeHtml(rec.description || '')}</textarea>
+        <small class="text-faint" style="font-size:11px">Kept off the list to keep it scannable — it opens when the sub-task is clicked.</small></div>
     </form>`,
     `${st ? '<button type="button" class="btn btn-danger-soft me-auto" id="wkSubDel"><i class="bi bi-trash me-1"></i>Delete</button>' : ''}
      <button type="button" class="btn btn-ghost" data-bs-dismiss="modal">Cancel</button>
@@ -8271,14 +8619,19 @@ function openWorkSubModal(wsId, subId, phasePrefill) {
     const f = document.getElementById('wkSubForm');
     const title = wkVal(f, 'title');
     if (!title) { toast('Name the sub-task first.', 'err'); f.elements.namedItem('title').focus(); return; }
-    const from = wkVal(f, 'from'), to = wkVal(f, 'to');
-    if (from && to && to < from) { toast('"To" is before "From".', 'err'); return; }
+    const start = wkVal(f, 'start'), end = wkVal(f, 'end');
+    if (start && end && end < start) { toast('It ends before it starts.', 'err'); return; }
     const n = parseInt(wkVal(f, 'ticks'), 10);
     const ticks = (!isNaN(n) && n > 1) ? Math.min(n, 60) : 0;
     const patch = {
-      title, phase: wkVal(f, 'phase'), day: wkVal(f, 'day'), from, to,
+      title, phase: wkVal(f, 'phase'), priority: wkVal(f, 'priority'), start, end,
       withWhom: wkVal(f, 'withWhom'), assignTo: wkVal(f, 'assignTo'),
-      reportOn: wkVal(f, 'reportOn'), notes: wkVal(f, 'notes'), buf: wkVal(f, 'buf')
+      reportOn: wkVal(f, 'reportOn'), notes: wkVal(f, 'notes'),
+      description: wkVal(f, 'description'), buf: wkVal(f, 'buf'),
+      /* Keep the legacy date pair in step so anything still reading it — an
+         export taken last month, a doc rendered from an older record — agrees
+         with the stamps rather than contradicting them. */
+      from: start.slice(0, 10), to: end.slice(0, 10)
     };
     if (st) {
       // Shrinking the repeat count would orphan the ticks of the dropped boxes.
