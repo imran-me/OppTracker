@@ -7029,6 +7029,12 @@ function wireWork() {
   host.onclick = (e) => {
     try { Drive.renewOnGesture(); } catch {}   // see the tick handler above
     if (_wkDragging) return;                   // the tail of a drag, not a click
+    /* A tick is never the row's click. The repeat-count boxes sit INSIDE
+       `.wk-sub-body`, which is the "open the card" target — so without this the
+       preventDefault below cancelled the box's own toggle (a checkbox is
+       activated by the default action) and opened the card instead. The box
+       flicked on and straight back off, and no change event ever fired. */
+    if (e.target.closest('input, label')) return;
     const btn = e.target.closest('[data-wkact]');
     if (!btn) return;
     e.preventDefault();
