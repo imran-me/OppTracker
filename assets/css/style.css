@@ -2858,3 +2858,81 @@ img, video, iframe { max-width: 100%; }
   /* Two-up action grids and stat tiles are one-up at this width. */
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* -----------------------------------------------------------
+   MOBILE, THE REST OF THE APP
+   -----------------------------------------------------------
+   Page by page rather than shell-only: the editor toolbar, the
+   dashboard widgets, the calendar, the detail pages, the card
+   galleries and the top bar. Still additive, still CSS.
+   ----------------------------------------------------------- */
+@media (max-width: 760px) {
+  /* ---- Rich-text editor ----
+     A single unwrapped flex row of a dozen buttons: on a phone the last
+     of them sat outside the field they belong to. */
+  .rt-toolbar { flex-wrap: wrap; row-gap: 2px; }
+  .rt-toolbar .rt-b { width: 32px; height: 30px; }
+  .rt-toolbar .rt-sep { display: none; }   /* dividers between wrapped rows read as noise */
+
+  /* ---- The quick-add row on dashboard widgets ----
+     select + input + button shared one line and the input lost, leaving a
+     box too narrow to read what was being typed into it. */
+  .act-add { flex-wrap: wrap; }
+  .act-add select { flex: 1 1 40%; }
+  .act-add input { flex: 1 1 100%; order: 3; font-size: 16px; }
+  .act-add .btn { flex: 1 1 auto; }
+
+  /* ---- Top bar ----
+     Owner badge plus five icon buttons. Let them shrink and wrap rather
+     than push the title off the screen. */
+  .topbar-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .topbar-actions .btn { padding-left: 10px; padding-right: 10px; }
+
+  /* ---- Detail pages ---- */
+  .detail-head { gap: 12px; }
+  .detail-head h2 { font-size: 19px; }
+  .detail-head .dh-ico { width: 46px; height: 46px; font-size: 21px; }
+
+  /* ---- Dashboard rows ----
+     Each is a flex line ending in a number or a control. Their bodies
+     already shrink; this stops a long title shouldering the number out
+     of the row entirely. */
+  .sig-row, .rd-row, .rem-row, .feed-item, .alert-row, .next-step, .stat-row, .trk-head { flex-wrap: wrap; }
+  .sig-body, .rd-body, .rem-body, .act-body, .stat-row-body { flex: 1 1 60%; }
+
+  /* Long unbroken strings — a URL, a file name — must not widen the page. */
+  .gc-body b, .ach-title, .ach-desc, .kv dd, .tl-item b,
+  .detail-head h2, .feed-item b, .empty p { overflow-wrap: anywhere; }
+}
+
+@media (max-width: 640px) {
+  /* ---- Calendar ----
+     Seven columns cannot be reduced, so the cells get the room instead:
+     less gap, smaller numerals, and the aspect ratio relaxed so a row of
+     event dots does not force the grid wider than the card. */
+  .cal-grid { gap: 3px; }
+  .cal-cell { aspect-ratio: auto; min-height: 38px; font-size: 12px; }
+  .cal-head { flex-wrap: wrap; gap: 8px; }
+  .cal-nav { margin-left: auto; }
+
+  /* Galleries go one-up: two columns at this width leaves a card too
+     narrow for its own title. */
+  .gal-grid { grid-template-columns: 1fr; gap: 12px; }
+  .gal-card .gc-media, .ach-card .gc-media { height: 172px; }
+
+  /* Tap targets on the small icon buttons that sit inside cards. */
+  .ach-card .ach-tools .btn, .edu-row-tools .btn { min-width: 34px; min-height: 34px; }
+}
+
+@media (max-width: 480px) {
+  .topbar-actions .btn-icon { width: 34px; height: 34px; }
+  .detail-head h2 { font-size: 17px; }
+  .empty { padding: 34px 14px; }
+  .empty .e-ico { width: 50px; height: 50px; font-size: 22px; }
+  .modal-header { padding: 14px 16px; }
+  .modal-title { font-size: 15.5px; }
+  /* The landing hero's clamp() bottoms out too large on a 320px screen. */
+  .landing { padding: 24px 14px; }
+  .landing h1 { font-size: 26px; }
+  .landing .lg-panel { padding: 16px; }
+}
